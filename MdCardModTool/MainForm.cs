@@ -280,11 +280,19 @@ public sealed class MainForm : Form
     {
         var x = Selected(); if (x is null || _gameRoot is null) { MessageBox.Show(this, "先选择一张图片。", Text); return; }
         if (image is null) { using var d = new OpenFileDialog { Filter = "图片|*.png;*.jpg;*.jpeg;*.webp;*.bmp" }; if (d.ShowDialog(this) != DialogResult.OK) return; image = d.FileName; }
-        if (MessageBox.Show(this, "将直接修改游戏 Bundle。原始文件会备份到游戏目录的 _MD卡图备份 中。继续？", "确认替换", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
+        byte[] cropped;
+        try
+        {
+            using var crop = new ImageCropForm(image, x.Width, x.Height, $"替换 {x.Name}");
+            if (crop.ShowDialog(this) != DialogResult.OK || crop.OutputPng is null) return;
+            cropped = crop.OutputPng;
+        }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "无法打开裁剪器", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
+        if (MessageBox.Show(this, $"裁剪结果将以 {x.Width}×{x.Height} 写入游戏 Bundle。原始文件会备份到游戏目录的 _MD卡图备份 中。继续？", "确认替换", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
         try
         {
             UseWaitCursor = true; x.OverrideBundlePath = null;
-            await Task.Run(() => _engine.Replace(x, image, Path.Combine(_gameRoot, "_MD卡图备份", x.SourceKind)));
+            await Task.Run(() => _engine.Replace(x, cropped, Path.Combine(_gameRoot, "_MD卡图备份", x.SourceKind)));
             await RefreshModFlagsAsync();
             await Task.Run(() => IndexService.Save(_gameRoot, _textures));
             RefreshCategories(); RenderList(); SelectTexture(x);
@@ -368,18 +376,18 @@ public sealed class MainForm : Form
 
     TexRef[] OverFrameFrames() => _textures.Where(x => x.SourceKind == "卡框资源" && x.Name.StartsWith("card_frame", StringComparison.OrdinalIgnoreCase) && x.Width == FrameComposer.Width && x.Height == FrameComposer.Height).ToArray();
 
-    async Task<bool> OpenFrameEditorAsync(TexRef? texture = null, string? initialArtPath = null)
+    async Task<bool> OpenFrameEditorAsync(TexRef? texture = null, byte[]? initialArt = null)
     {
         var x = texture ?? Selected();
         if (x is null || _gameRoot is null) { MessageBox.Show(this, "先选择一张超框卡。", Text); return false; }
         if (x.SourceKind != "本地卡图" || !ushort.TryParse(x.CardKey, out var cardId)) { MessageBox.Show(this, "卡框选择／编辑只能用于名称为卡号的“本地卡图”。", Text); return false; }
-        if (initialArtPath is null && (x.Width != FrameComposer.Width || x.Height != FrameComposer.Height))
+        if (initialArt is null && (x.Width != FrameComposer.Width || x.Height != FrameComposer.Height) && !File.Exists(OverFrameArtStore.ArtPath(_gameRoot, cardId)))
         {
             MessageBox.Show(this, $"卡号 {cardId} 目前不是 704×1024 超框图。\n\n请先使用“超框替换”选择透明高图。", "尚未启用超框", MessageBoxButtons.OK, MessageBoxIcon.Information); return false;
         }
         var frames = OverFrameFrames();
         if (frames.Length == 0) { MessageBox.Show(this, "索引中没有 704×1024 card_frame。请点击“重建索引”后重试。", Text); return false; }
-        using var editor = new OverFrameFrameEditorForm(_gameRoot, x, frames, initialArtPath);
+        using var editor = new OverFrameFrameEditorForm(_gameRoot, x, frames, initialArt);
         if (editor.ShowDialog(this) != DialogResult.OK) return false;
         await RefreshModFlagsAsync();
         await Task.Run(() => IndexService.Save(_gameRoot, _textures));
@@ -393,13 +401,13 @@ public sealed class MainForm : Form
         var x = Selected();
         if (x is null || _gameRoot is null) { MessageBox.Show(this, "先选择一张本地卡图。", Text); return; }
         if (x.SourceKind != "本地卡图" || !ushort.TryParse(x.CardKey, out var cardId)) { MessageBox.Show(this, "超框替换只能用于名称为卡号的“本地卡图”。", Text); return; }
-        using var dialog = new OpenFileDialog { Filter = "图片|*.png;*.jpg;*.jpeg;*.webp;*.bmp", Title = "选择 704×1024 的超框卡图" };
+        using var dialog = new OpenFileDialog { Filter = "图片|*.png;*.jpg;*.jpeg;*.webp;*.bmp", Title = "选择超框卡图（下一步可固定比例裁剪）" };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         try
         {
-            var size = await Task.Run(() => _engine.ImageDimensions(dialog.FileName));
-            if (size.Width != 704 || size.Height != 1024) { MessageBox.Show(this, $"超框图必须严格为 704×1024；当前为 {size.Width}×{size.Height}。", "尺寸不符合", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            await OpenFrameEditorAsync(x, dialog.FileName);
+            using var crop = new ImageCropForm(dialog.FileName, FrameComposer.Width, FrameComposer.Height, $"超框卡图 {cardId}");
+            if (crop.ShowDialog(this) != DialogResult.OK || crop.OutputPng is null) return;
+            await OpenFrameEditorAsync(x, crop.OutputPng);
         }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "超框替换失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         finally { UseWaitCursor = false; }

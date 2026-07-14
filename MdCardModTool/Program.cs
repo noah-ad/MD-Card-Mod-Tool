@@ -108,6 +108,18 @@ internal static class Program
             Console.WriteLine($"build={buildId}; textures={index.Textures.Count}; cache={IndexService.CachePath(local, IndexService.StreamingRoot(args[1]))}");
             return;
         }
+        if (args.Length == 5 && args[0] == "--crop-image")
+        {
+            var targetWidth = int.Parse(args[3]); var targetHeight = int.Parse(args[4]);
+            using var preview = ImageCropService.LoadPreview(args[1]);
+            var targetAspect = targetWidth / (double)targetHeight;
+            var cropWidth = preview.Width; var cropHeight = (int)Math.Round(cropWidth / targetAspect);
+            if (cropHeight > preview.Height) { cropHeight = preview.Height; cropWidth = (int)Math.Round(cropHeight * targetAspect); }
+            var crop = new RectangleF((preview.Width - cropWidth) / 2f, (preview.Height - cropHeight) / 2f, cropWidth, cropHeight);
+            File.WriteAllBytes(args[2], ImageCropService.CropAndResize(args[1], crop, targetWidth, targetHeight));
+            Console.WriteLine($"{targetWidth}x{targetHeight}; {new FileInfo(args[2]).Length} bytes; {args[2]}");
+            return;
+        }
         ApplicationConfiguration.Initialize();
         Application.Run(new MainForm());
     }
