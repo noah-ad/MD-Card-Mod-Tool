@@ -55,6 +55,7 @@ public sealed class OverFrameFrameEditorForm : Form
 
     public OverFrameFrameEditorForm(string gameRoot, TexRef art, IEnumerable<TexRef> frames, string? initialArtPath = null)
     {
+        UiTheme.ApplyDarkTitleBar(this);
         if (!ushort.TryParse(art.CardKey, out _cardId)) throw new ArgumentException("所选资源没有有效卡号。", nameof(art));
         _gameRoot = gameRoot; _art = art; _initialArtPath = initialArtPath;
         Text = $"卡框选择与编辑 · {_cardId}"; StartPosition = FormStartPosition.CenterParent; Size = new Size(980, 860); MinimumSize = new Size(760, 650);

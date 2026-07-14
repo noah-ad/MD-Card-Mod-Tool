@@ -12,6 +12,7 @@ public sealed class OverFrameForm : Form
 
     public OverFrameForm(string gameRoot, string? selectedCardId)
     {
+        UiTheme.ApplyDarkTitleBar(this);
         _gameRoot = gameRoot;
         Text = "超框模式 · of_card_asset"; StartPosition = FormStartPosition.CenterParent; Size = new Size(850, 620); MinimumSize = new Size(700, 500);
         BackColor = Color.FromArgb(15, 22, 35); ForeColor = Color.White; Font = new Font("Microsoft YaHei UI", 9F);

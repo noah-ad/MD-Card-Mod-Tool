@@ -39,6 +39,8 @@ internal static class Program
             return;
         }
         ApplicationConfiguration.Initialize();
-        Application.Run(new MainForm());
+        var promoOutput = args.Length >= 2 && args[0] == "--capture-promo" ? args[1] : null;
+        var promoScene = args.Length >= 3 && args[0] == "--capture-promo" ? args[2] : null;
+        Application.Run(new MainForm(promoOutput, promoScene));
     }
 }
