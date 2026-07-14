@@ -15,6 +15,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="Assets\classdata.tpk" Link="classdata.tpk" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Assets\prebuilt-index-v1.json.br" Link="prebuilt-index-v1.json.br" CopyToOutputDirectory="PreserveNewest" />
     <None Include="使用说明.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\LICENSE" Link="LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\THIRD_PARTY_NOTICES.md" Link="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
