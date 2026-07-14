@@ -9,12 +9,14 @@
     <AssemblyName>MD卡图查看替换器</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="AssetsTools.NET"><HintPath>..\..\吉星立绘Mod制作器\data\AssetsTools.NET.dll</HintPath><Private>true</Private></Reference>
-    <Reference Include="AssetsTools.NET.Texture"><HintPath>..\..\吉星立绘Mod制作器\data\AssetsTools.NET.Texture.dll</HintPath><Private>true</Private></Reference>
-    <Reference Include="SixLabors.ImageSharp"><HintPath>..\..\吉星立绘Mod制作器\data\SixLabors.ImageSharp.dll</HintPath><Private>true</Private></Reference>
+    <Reference Include="AssetsTools.NET"><HintPath>Assets\lib\AssetsTools.NET.dll</HintPath><Private>true</Private></Reference>
+    <Reference Include="AssetsTools.NET.Texture"><HintPath>Assets\lib\AssetsTools.NET.Texture.dll</HintPath><Private>true</Private></Reference>
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\..\吉星立绘Mod制作器\data\classdata.tpk" Link="classdata.tpk" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Assets\classdata.tpk" Link="classdata.tpk" CopyToOutputDirectory="PreserveNewest" />
     <None Include="使用说明.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\LICENSE" Link="LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\THIRD_PARTY_NOTICES.md" Link="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

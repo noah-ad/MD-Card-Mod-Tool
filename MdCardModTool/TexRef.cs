@@ -14,6 +14,8 @@ public sealed class TexRef
     public bool IsAlternateArt { get; set; }
     /// <summary>不在百鸽正常卡 CID 名单、且不属于异画号段的 Token 或其他杂图。</summary>
     public bool IsTokenOrMisc { get; set; }
+    /// <summary>当前 Bundle 与本工具保存的原版备份不同；启动时由轻量 Mod 台账重新计算。</summary>
+    public bool IsModded { get; set; }
     public string SourceKind { get; init; } = "";
     public string CardKey { get; init; } = "";
     public string? OverrideBundlePath { get; set; }

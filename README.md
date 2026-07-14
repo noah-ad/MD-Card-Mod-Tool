@@ -6,6 +6,8 @@
 
 在右侧 **Releases** 下载最新的分享 ZIP，解压后双击 `启动 MD卡图查看替换器.bat`。
 
+[下载最新公开版本](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/latest)
+
 工具会自动定位游戏目录内的 `LocalData\\<用户哈希>\\0000` 与 `StreamingAssets\\AssetBundle`。首次建立本地索引后，之后启动直接读取缓存；异画、Token 与杂图的分类同样保存在本地。
 
 ## 主要功能
@@ -13,20 +15,29 @@
 - 本地卡图、游戏内图片与 704×1024 卡框的分类浏览、搜索、导入替换和 PNG 导出
 - 拖入图片替换、拖出条目导出
 - 自动备份，并可还原所选 Bundle
+- 独立“我的 Mod”栏：自动汇总所有仍在生效的卡图改动，集中查看与还原
+- 一键导出全部 Mod 为 `.mdmod.zip`，在另一台电脑导入时自动适配不同的 `LocalData\<用户哈希>` 路径并建立原版备份
 - 超框卡图替换、单卡卡框选择/编辑和卡框预览
 - 异画卡筛选：仅百鸽未收录且编号处于 `20567–22747` 的资源归为异画；其他未收录资源归为 Token／杂图
 
+## 界面预览
+
+![MD 卡图查看替换器新版界面](docs/main-ui.png)
+
+新版采用深海蓝、青色交互与金色超框提示的统一视觉体系，资源分类、列表、预览与操作区域拥有清晰的信息层级，并支持深色标题栏和高 DPI 缩放。
+
 ## 注意
 
-替换会直接写入游戏文件。首次修改每个 Bundle 前，工具会在游戏目录创建 `_MD卡图备份`。完成替换或还原后，请完全退出并重启 Master Duel。
+替换和 Mod 导入都会直接写入游戏文件。首次修改每个 Bundle 前，工具会在游戏目录创建 `_MD卡图备份`。工具通过比较这份备份与当前文件建立轻量 Mod 台账，不会为了刷新“我的 Mod”重新扫描整个游戏。完成替换、导入或还原后，请完全退出并重启 Master Duel。
 
 ## 源码构建
 
-项目使用 .NET 8 WinForms。当前工程依赖参考工具目录中的 `AssetsTools.NET`、`AssetsTools.NET.Texture`、`SixLabors.ImageSharp` 和 `classdata.tpk`；可按 `MdCardModTool.csproj` 中的引用位置准备这些文件，再执行：
+项目使用 .NET 8 WinForms。ImageSharp 通过 NuGet 自动还原；与现有 Bundle 写入逻辑兼容的 AssetsTools.NET 组件及 Unity 类型数据库已随仓库提供，克隆后可直接执行：
 
 ```powershell
 dotnet publish .\MdCardModTool\MdCardModTool.csproj -c Release -r win-x64 --self-contained true
 ```
 
+本项目以 [MIT License](LICENSE) 开源。Master Duel、游戏资源与相关商标归其权利人所有，本仓库不包含游戏本体文件。
 
 云盘下载渠道：https://pan.quark.cn/s/a6bfde027547

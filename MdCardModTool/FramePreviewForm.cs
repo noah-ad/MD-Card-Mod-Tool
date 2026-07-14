@@ -20,6 +20,7 @@ public sealed class FramePreviewForm : Form
 
     public FramePreviewForm(ModEngine engine, TexRef art, IEnumerable<TexRef> frames)
     {
+        UiTheme.ApplyDarkTitleBar(this);
         _engine = engine; _art = art;
         Text = "卡框预览模式"; StartPosition = FormStartPosition.CenterParent; Size = new Size(920, 820); MinimumSize = new Size(660, 600);
         BackColor = Color.FromArgb(15, 22, 35); ForeColor = Color.White; Font = new Font("Microsoft YaHei UI", 9F);
