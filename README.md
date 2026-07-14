@@ -27,3 +27,6 @@
 ```powershell
 dotnet publish .\MdCardModTool\MdCardModTool.csproj -c Release -r win-x64 --self-contained true
 ```
+
+
+云盘下载渠道：https://pan.quark.cn/s/a6bfde027547
