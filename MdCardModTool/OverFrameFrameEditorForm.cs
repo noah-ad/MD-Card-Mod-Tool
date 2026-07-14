@@ -6,7 +6,7 @@ public sealed class OverFrameFrameEditorForm : Form
     readonly string _gameRoot;
     readonly TexRef _art;
     readonly ushort _cardId;
-    readonly string? _initialArtPath;
+    readonly byte[]? _initialArt;
     readonly ModEngine _engine = new();
     readonly OverFrameService _overFrames = new();
     readonly ComboBox _frames = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
@@ -53,11 +53,11 @@ public sealed class OverFrameFrameEditorForm : Form
 
     public string AppliedFrameName { get; private set; } = "";
 
-    public OverFrameFrameEditorForm(string gameRoot, TexRef art, IEnumerable<TexRef> frames, string? initialArtPath = null)
+    public OverFrameFrameEditorForm(string gameRoot, TexRef art, IEnumerable<TexRef> frames, byte[]? initialArt = null)
     {
         UiTheme.ApplyDarkTitleBar(this);
         if (!ushort.TryParse(art.CardKey, out _cardId)) throw new ArgumentException("所选资源没有有效卡号。", nameof(art));
-        _gameRoot = gameRoot; _art = art; _initialArtPath = initialArtPath;
+        _gameRoot = gameRoot; _art = art; _initialArt = initialArt;
         Text = $"卡框选择与编辑 · {_cardId}"; StartPosition = FormStartPosition.CenterParent; Size = new Size(980, 860); MinimumSize = new Size(760, 650);
         BackColor = Color.FromArgb(15, 22, 35); ForeColor = Color.White; Font = new Font("Microsoft YaHei UI", 9F);
 
@@ -101,7 +101,7 @@ public sealed class OverFrameFrameEditorForm : Form
         try
         {
             var capturedCurrent = false;
-            if (_initialArtPath is not null) await Task.Run(() => OverFrameArtStore.SaveArt(_gameRoot, _cardId, _initialArtPath));
+            if (_initialArt is not null) await Task.Run(() => OverFrameArtStore.SaveArt(_gameRoot, _cardId, _initialArt));
             var artPath = OverFrameArtStore.ArtPath(_gameRoot, _cardId);
             if (!File.Exists(artPath))
             {
@@ -179,11 +179,13 @@ public sealed class OverFrameFrameEditorForm : Form
 
     async Task ChangeArtAsync()
     {
-        using var dialog = new OpenFileDialog { Filter = "图片|*.png;*.jpg;*.jpeg;*.webp;*.bmp", Title = "选择 704×1024 透明高图（不要预先带卡框）" };
+        using var dialog = new OpenFileDialog { Filter = "图片|*.png;*.jpg;*.jpeg;*.webp;*.bmp", Title = "选择透明高图（不要预先带卡框）" };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         try
         {
-            await Task.Run(() => OverFrameArtStore.SaveArt(_gameRoot, _cardId, dialog.FileName));
+            using var crop = new ImageCropForm(dialog.FileName, FrameComposer.Width, FrameComposer.Height, $"更换透明高图 {_cardId}");
+            if (crop.ShowDialog(this) != DialogResult.OK || crop.OutputPng is null) return;
+            await Task.Run(() => OverFrameArtStore.SaveArt(_gameRoot, _cardId, crop.OutputPng));
             _artBytes = await File.ReadAllBytesAsync(OverFrameArtStore.ArtPath(_gameRoot, _cardId));
             await RenderAsync();
         }
