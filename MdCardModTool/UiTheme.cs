@@ -80,10 +80,11 @@ public static class UiTheme
         list.DrawSubItem += (_, e) =>
         {
             var selected = e.Item?.Selected == true;
+            var modded = e.Item?.Tag is TexRef texture && texture.IsModded;
             var alternate = e.ItemIndex % 2 == 1;
             var backgroundColor = selected ? Selection : alternate ? Color.FromArgb(16, 27, 44) : Surface;
             using var background = new SolidBrush(backgroundColor);
-            using var foreground = new SolidBrush(selected ? Color.White : (e.ColumnIndex == 0 ? Text : Muted));
+            using var foreground = new SolidBrush(selected ? Color.White : (modded && e.ColumnIndex == 0 ? Gold : e.ColumnIndex == 0 ? Text : Muted));
             e.Graphics.FillRectangle(background, e.Bounds);
             var text = e.SubItem?.Text ?? "";
             TextRenderer.DrawText(e.Graphics, text, list.Font, new Rectangle(e.Bounds.X + 10, e.Bounds.Y + 6, e.Bounds.Width - 14, e.Bounds.Height - 8), foreground.Color, TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter | TextFormatFlags.Left);

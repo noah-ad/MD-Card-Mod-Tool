@@ -5,8 +5,10 @@ namespace MdCardModTool;
 public sealed class MainForm : Form
 {
     const string DefaultGame = @"E:\steam\steamapps\common\Yu-Gi-Oh!  Master Duel";
+    const string ModGroupKey = "__mods__";
     readonly ModEngine _engine = new();
     readonly OverFrameService _overFrames = new();
+    readonly ModPackageService _mods = new();
     readonly TextBox _gameFolder = new() { ReadOnly = true, Dock = DockStyle.Fill };
     readonly TextBox _search = new() { PlaceholderText = "搜索卡号、贴图名、分类或 Bundle…", Dock = DockStyle.Fill };
     readonly ComboBox _category = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
@@ -16,18 +18,17 @@ public sealed class MainForm : Form
     readonly Label _previewHint = new() { Dock = DockStyle.Fill, Text = "SELECT A RESOURCE\n\n选择一张卡图查看预览", TextAlign = ContentAlignment.MiddleCenter, ForeColor = UiTheme.Muted, BackColor = UiTheme.Surface };
     readonly Label _resultCount = new() { Dock = DockStyle.Right, AutoSize = false, Width = 160, TextAlign = ContentAlignment.MiddleRight, ForeColor = UiTheme.Muted, Padding = new Padding(0, 0, 12, 0) };
     readonly Label _info = new() { Dock = DockStyle.Fill, Padding = new Padding(14, 10, 14, 8), ForeColor = UiTheme.Text, BackColor = UiTheme.SurfaceAlt };
+    readonly Label _modSummary = new() { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, ForeColor = UiTheme.Muted, Padding = new Padding(8, 0, 8, 0) };
     readonly ToolStripStatusLabel _status = new() { Text = "选择游戏目录后扫描；首次扫描会建立缓存。" };
     readonly List<TexRef> _textures = [];
-    readonly string? _promoOutputDirectory;
-    readonly string? _promoScene;
+    readonly Button _modsOnlyButton;
     string? _gameRoot;
     string? _assetRoot;
     string? _streamingRoot;
+    bool _modsOnly;
 
-    public MainForm(string? promoOutputDirectory = null, string? promoScene = null)
+    public MainForm()
     {
-        _promoOutputDirectory = promoOutputDirectory;
-        _promoScene = promoScene;
         UiTheme.ApplyDarkTitleBar(this);
         Text = "MD 卡图查看替换器"; StartPosition = FormStartPosition.CenterScreen; MinimumSize = new Size(1180, 760); Size = new Size(1480, 900);
         BackColor = UiTheme.Window; ForeColor = UiTheme.Text; Font = new Font("Microsoft YaHei UI", 9F); AutoScaleMode = AutoScaleMode.Dpi; KeyPreview = true;
@@ -38,11 +39,14 @@ public sealed class MainForm : Form
         _list.ItemDrag += async (_, e) => await DragOutAsync(e.Item as ListViewItem); _list.DragEnter += OnDragEnter; _list.DragDrop += async (_, e) => await OnDragDropAsync(e);
         _search.TextChanged += (_, _) => RenderList();
         _category.Items.Add("全部"); _category.SelectedIndex = 0; _category.SelectedIndexChanged += (_, _) => RenderList();
-        _groups.AfterSelect += (_, e) => { if (e.Node?.Tag is string key && _category.Items.Contains(key)) _category.SelectedItem = key; };
+        _groups.AfterSelect += (_, e) => SelectGroup(e.Node?.Tag as string);
         var choose = Button("选择目录", async (_, _) => await ChooseGameAsync()); var scan = Button("重建索引", async (_, _) => await ScanAsync());
         var replace = Button("替换所选", async (_, _) => await ReplaceSelectedAsync(), ButtonTone.Primary); var export = Button("导出 PNG", async (_, _) => await ExportSelectedAsync());
         var backup = Button("打开备份", (_, _) => OpenBackup()); var restore = Button("还原所选", async (_, _) => await RestoreSelectedAsync(), ButtonTone.Danger); var inspect = Button("检查 Bundle", async (_, _) => await InspectSelectedAsync());
         var overFrameReplace = Button("超框替换", async (_, _) => await OverFrameReplaceAsync(), ButtonTone.Gold); var frameEditor = Button("卡框选择 / 编辑", async (_, _) => await OpenFrameEditorAsync()); var framePreview = Button("卡框预览", (_, _) => OpenFramePreview()); var overFrameTable = Button("超框表", (_, _) => OpenOverFrameTable());
+        _modsOnlyButton = Button("只看我的 Mod", (_, _) => ToggleModsOnly(), ButtonTone.Gold);
+        var exportMods = Button("一键导出全部 Mod", async (_, _) => await ExportAllModsAsync(), ButtonTone.Primary);
+        var importMods = Button("导入 Mod 包", async (_, _) => await ImportModsAsync());
 
         var brand = new GradientBanner { Dock = DockStyle.Fill, Padding = new Padding(22, 11, 22, 9) };
         brand.Controls.Add(new Label { Text = "MD CARD STUDIO", Dock = DockStyle.Top, Height = 29, Font = new Font("Segoe UI Semibold", 17F), ForeColor = UiTheme.Text, BackColor = Color.Transparent });
@@ -55,6 +59,10 @@ public sealed class MainForm : Form
         var commands = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(13, 7, 18, 7), BackColor = UiTheme.SurfaceAlt, ColumnCount = 7, RowCount = 1 };
         commands.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); commands.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 230)); for (var i = 0; i < 5; i++) commands.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         commands.Controls.Add(_search, 0, 0); commands.Controls.Add(_category, 1, 0); commands.Controls.Add(replace, 2, 0); commands.Controls.Add(export, 3, 0); commands.Controls.Add(restore, 4, 0); commands.Controls.Add(backup, 5, 0);
+
+        var modBar = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(18, 5, 18, 5), BackColor = Color.FromArgb(18, 31, 50), ColumnCount = 5, RowCount = 1 };
+        modBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); modBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); modBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); modBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); modBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        modBar.Controls.Add(Caption("MOD MANAGER"), 0, 0); modBar.Controls.Add(_modsOnlyButton, 1, 0); modBar.Controls.Add(_modSummary, 2, 0); modBar.Controls.Add(exportMods, 3, 0); modBar.Controls.Add(importMods, 4, 0);
 
         var categoryPanel = new BorderPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Surface, Margin = new Padding(0, 0, 8, 0) };
         categoryPanel.Controls.Add(_groups); categoryPanel.Controls.Add(SectionHeading("资源分类", "RESOURCE GROUPS"));
@@ -78,20 +86,15 @@ public sealed class MainForm : Form
 
         _status.Spring = true; _status.TextAlign = ContentAlignment.MiddleLeft; _status.ForeColor = UiTheme.Muted; _status.Font = new Font("Microsoft YaHei UI", 8.5F);
         var status = new StatusStrip { Dock = DockStyle.Fill, BackColor = UiTheme.Surface, ForeColor = UiTheme.Muted, SizingGrip = false, Padding = new Padding(12, 0, 12, 0) }; status.Items.Add(_status);
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Window, RowCount = 5, ColumnCount = 1, Margin = Padding.Empty, Padding = Padding.Empty };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 70)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 55)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 58)); root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
-        root.Controls.Add(brand, 0, 0); root.Controls.Add(pathBar, 0, 1); root.Controls.Add(commands, 0, 2); root.Controls.Add(workspace, 0, 3); root.Controls.Add(status, 0, 4); Controls.Add(root);
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Window, RowCount = 6, ColumnCount = 1, Margin = Padding.Empty, Padding = Padding.Empty };
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 70)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 55)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 58)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 50)); root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+        root.Controls.Add(brand, 0, 0); root.Controls.Add(pathBar, 0, 1); root.Controls.Add(commands, 0, 2); root.Controls.Add(modBar, 0, 3); root.Controls.Add(workspace, 0, 4); root.Controls.Add(status, 0, 5); Controls.Add(root);
         if (Directory.Exists(DefaultGame)) { _gameRoot = DefaultGame; _gameFolder.Text = DefaultGame; SetGameRoot(); }
         Shown += async (_, _) =>
         {
             if (resourceSplit.Width > 650) resourceSplit.SplitterDistance = 235;
             if (workspace.Width > 1150) workspace.SplitterDistance = Math.Min((int)(workspace.Width * 0.68), workspace.Width - 410);
             if (_assetRoot is not null) await ScanAsync();
-            if (_promoOutputDirectory is not null)
-            {
-                await CapturePromoFrameAsync(_promoOutputDirectory, _promoScene ?? "overview");
-                Close();
-            }
         };
     }
 
@@ -160,7 +163,9 @@ public sealed class MainForm : Form
                     _status.Text = "异画卡名单下载失败：" + ex.Message + "；本次仍可正常使用，下次会自动重试。";
                 }
             }
-            await ApplyOverFrameTagsAsync(); RefreshCategories(); RenderList();
+            await ApplyOverFrameTagsAsync();
+            await RefreshModFlagsAsync();
+            RefreshCategories(); RenderList();
         }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "扫描失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         finally { UseWaitCursor = false; }
@@ -169,6 +174,8 @@ public sealed class MainForm : Form
     void RefreshCategories()
     {
         var old = _category.Text; _category.Items.Clear(); _category.Items.Add("全部"); _groups.Nodes.Clear();
+        var modCount = _textures.Count(x => x.IsModded);
+        var modNode = _groups.Nodes.Add($"我的 Mod（{modCount}）"); modNode.Tag = ModGroupKey; modNode.ForeColor = UiTheme.Gold;
         foreach (var source in _textures.GroupBy(x => x.SourceKind).OrderBy(x => x.Key))
         {
             var sourceNode = _groups.Nodes.Add($"{source.Key}（{source.Count()}）");
@@ -180,12 +187,46 @@ public sealed class MainForm : Form
             sourceNode.Expand();
         }
         _category.SelectedItem = _category.Items.Contains(old) ? old : "全部";
+        UpdateModSummary();
     }
     void RenderList()
     {
         var q = _search.Text.Trim(); var filter = _category.Text; _list.BeginUpdate(); _list.Items.Clear();
-        foreach (var x in _textures.Where(x => (filter == "全部" || filter == $"{x.SourceKind}|{x.Category}") && (q.Length == 0 || $"{x.Name} {x.SourceKind} {x.Category} {x.RelativeBundlePath}".Contains(q, StringComparison.OrdinalIgnoreCase)))) _list.Items.Add(new ListViewItem([x.Name, $"{x.SourceKind} / {x.Category}", $"{x.Width}×{x.Height}", x.RelativeBundlePath]) { Tag = x });
-        _list.EndUpdate(); _resultCount.Text = $"{_list.Items.Count:N0} / {_textures.Count:N0} 项";
+        foreach (var x in _textures.Where(x => (!_modsOnly || x.IsModded) && (filter == "全部" || filter == $"{x.SourceKind}|{x.Category}") && (q.Length == 0 || $"{x.Name} {x.CardKey} {x.SourceKind} {x.Category} {x.RelativeBundlePath}".Contains(q, StringComparison.OrdinalIgnoreCase))))
+            _list.Items.Add(new ListViewItem([x.Name, $"{x.SourceKind} / {x.Category}{(x.IsModded ? "  · MOD" : "")}", $"{x.Width}×{x.Height}", x.RelativeBundlePath]) { Tag = x });
+        _list.EndUpdate();
+        var total = _modsOnly ? _textures.Count(x => x.IsModded) : _textures.Count;
+        _resultCount.Text = $"{_list.Items.Count:N0} / {total:N0} 项";
+    }
+
+    void SelectGroup(string? key)
+    {
+        if (key is null) return;
+        if (key == ModGroupKey) { SetModsOnly(true); _category.SelectedItem = "全部"; RenderList(); return; }
+        SetModsOnly(false);
+        if (_category.Items.Contains(key)) _category.SelectedItem = key;
+    }
+
+    void ToggleModsOnly() { SetModsOnly(!_modsOnly); RenderList(); }
+    void SetModsOnly(bool enabled)
+    {
+        _modsOnly = enabled;
+        _modsOnlyButton.Text = enabled ? "显示全部资源" : "只看我的 Mod";
+        UpdateModSummary();
+    }
+
+    void UpdateModSummary()
+    {
+        var textures = _textures.Where(x => x.IsModded).ToArray();
+        var bundles = textures.Select(x => x.BundlePath).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        _modSummary.Text = textures.Length == 0 ? "暂无改动；替换后的卡图会自动出现在这里" : $"已管理 {textures.Length:N0} 个资源 · {bundles:N0} 个已修改 Bundle";
+    }
+
+    async Task RefreshModFlagsAsync()
+    {
+        if (_gameRoot is null) return;
+        await Task.Run(() => _mods.RefreshFlags(_gameRoot, _textures));
+        UpdateModSummary();
     }
     TexRef? Selected() => _list.SelectedItems.Count == 1 ? _list.SelectedItems[0].Tag as TexRef : null;
     async Task ShowSelectionAsync()
@@ -218,7 +259,15 @@ public sealed class MainForm : Form
         var x = Selected(); if (x is null || _gameRoot is null) { MessageBox.Show(this, "先选择一张图片。", Text); return; }
         if (image is null) { using var d = new OpenFileDialog { Filter = "图片|*.png;*.jpg;*.jpeg;*.webp;*.bmp" }; if (d.ShowDialog(this) != DialogResult.OK) return; image = d.FileName; }
         if (MessageBox.Show(this, "将直接修改游戏 Bundle。原始文件会备份到游戏目录的 _MD卡图备份 中。继续？", "确认替换", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
-        try { UseWaitCursor = true; x.OverrideBundlePath = null; await Task.Run(() => _engine.Replace(x, image, Path.Combine(_gameRoot, "_MD卡图备份", x.SourceKind))); await Task.Run(() => IndexService.Save(_gameRoot, _textures)); _status.Text = "替换完成：已直接写入游戏本体，原文件已备份。"; await ShowSelectionAsync(); }
+        try
+        {
+            UseWaitCursor = true; x.OverrideBundlePath = null;
+            await Task.Run(() => _engine.Replace(x, image, Path.Combine(_gameRoot, "_MD卡图备份", x.SourceKind)));
+            await RefreshModFlagsAsync();
+            await Task.Run(() => IndexService.Save(_gameRoot, _textures));
+            RefreshCategories(); RenderList(); SelectTexture(x);
+            _status.Text = "替换完成：已写入游戏本体，并加入“我的 Mod”。"; await ShowSelectionAsync();
+        }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "替换失败", MessageBoxButtons.OK, MessageBoxIcon.Error); } finally { UseWaitCursor = false; }
     }
     async Task RestoreSelectedAsync()
@@ -248,9 +297,11 @@ public sealed class MainForm : Form
                 }
             });
             await ApplyOverFrameTagsAsync();
+            await RefreshModFlagsAsync();
             await Task.Run(() => IndexService.Save(_gameRoot, _textures));
             RefreshCategories();
             var targetCategory = $"{x.SourceKind}|{x.Category}";
+            if (isOverFrame) SetModsOnly(false);
             if (_category.Items.Contains(targetCategory)) _category.SelectedItem = targetCategory;
             RenderList(); SelectTexture(x);
             _status.Text = isOverFrame ? "已还原原始卡图并关闭本卡超框登记，已回到卡图列表。" : "已还原游戏本体中的该 Bundle。";
@@ -308,6 +359,7 @@ public sealed class MainForm : Form
         if (frames.Length == 0) { MessageBox.Show(this, "索引中没有 704×1024 card_frame。请点击“重建索引”后重试。", Text); return false; }
         using var editor = new OverFrameFrameEditorForm(_gameRoot, x, frames, initialArtPath);
         if (editor.ShowDialog(this) != DialogResult.OK) return false;
+        await RefreshModFlagsAsync();
         await Task.Run(() => IndexService.Save(_gameRoot, _textures));
         RefreshCategories(); RenderList();
         _status.Text = $"卡号 {cardId} 已应用单卡卡框：{editor.AppliedFrameName}。请完全退出并重启 Master Duel。";
@@ -330,6 +382,73 @@ public sealed class MainForm : Form
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "超框替换失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         finally { UseWaitCursor = false; }
     }
+
+    async Task ExportAllModsAsync()
+    {
+        if (_gameRoot is null) { MessageBox.Show(this, "先选择 Master Duel 游戏目录。", Text); return; }
+        using var dialog = new SaveFileDialog
+        {
+            Filter = "Master Duel Mod 包|*.mdmod.zip",
+            FileName = $"MD_Mods_{DateTime.Now:yyyyMMdd_HHmm}.mdmod.zip",
+            Title = "导出全部已启用 Mod"
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        try
+        {
+            UseWaitCursor = true; _status.Text = "正在打包全部已修改 Bundle…";
+            var info = await Task.Run(() => _mods.Export(_gameRoot, _textures, dialog.FileName));
+            _status.Text = $"已导出 {info.BundleCount:N0} 个 Mod Bundle：{dialog.FileName}";
+            MessageBox.Show(this, $"导出完成。\n\nBundle：{info.BundleCount:N0} 个\n原始大小：{FormatSize(info.TotalSize)}\n文件：{dialog.FileName}", "全部 Mod 已导出", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "导出 Mod 失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        finally { UseWaitCursor = false; }
+    }
+
+    async Task ImportModsAsync()
+    {
+        if (_gameRoot is null) { MessageBox.Show(this, "先选择 Master Duel 游戏目录。", Text); return; }
+        using var dialog = new OpenFileDialog { Filter = "Master Duel Mod 包|*.mdmod.zip|ZIP 压缩包|*.zip", Title = "导入 MD Mod 包" };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        try
+        {
+            var info = await Task.Run(() => _mods.Inspect(dialog.FileName));
+            var confirm = $"准备导入“{info.Name}”。\n\nBundle：{info.BundleCount:N0} 个\n原始大小：{FormatSize(info.TotalSize)}\n\n将直接覆盖对应游戏 Bundle；每个文件首次覆盖前都会自动保存原版备份。继续？";
+            if (MessageBox.Show(this, confirm, "确认导入 Mod", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
+            UseWaitCursor = true; _status.Text = "正在校验并导入 Mod 包…";
+            var result = await Task.Run(() => _mods.Import(_gameRoot, dialog.FileName));
+            await ReloadChangedBundlesAsync(result.ChangedBundlePaths);
+            await ApplyOverFrameTagsAsync();
+            await RefreshModFlagsAsync();
+            await Task.Run(() => IndexService.Save(_gameRoot, _textures));
+            RefreshCategories(); SetModsOnly(true); _category.SelectedItem = "全部"; RenderList();
+            _status.Text = $"已导入 {result.BundleCount:N0} 个 Mod Bundle，并加入“我的 Mod”。";
+            MessageBox.Show(this, $"已导入 {result.BundleCount:N0} 个 Bundle。\n\n现在可在“我的 Mod”中集中查看和还原。请完全退出并重启 Master Duel。", "导入完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "导入 Mod 失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        finally { UseWaitCursor = false; }
+    }
+
+    async Task ReloadChangedBundlesAsync(IReadOnlyList<string> changedPaths)
+    {
+        if (_gameRoot is null || _assetRoot is null || _streamingRoot is null) return;
+        foreach (var path in changedPaths.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var existing = _textures.Where(x => x.BundlePath.Equals(path, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (existing.Length == 0) continue;
+            var sourceKind = existing[0].SourceKind;
+            var root = sourceKind switch { "本地卡图" => _assetRoot, "游戏内图片" => _streamingRoot, _ => _gameRoot };
+            var scanned = await Task.Run(() => _engine.ScanBundle(path, root, sourceKind, includeDependencies: false).Textures);
+            foreach (var texture in existing)
+            {
+                var updated = scanned.FirstOrDefault(x => x.PathId == texture.PathId && x.AssetFileName == texture.AssetFileName);
+                if (updated is null) continue;
+                texture.Width = updated.Width; texture.Height = updated.Height; texture.Category = updated.Category; texture.OverrideBundlePath = null;
+                if (texture.SourceKind == "本地卡图" && texture.Width == 512 && texture.Height == 512)
+                    texture.Category = texture.IsAlternateArt ? "异画卡图" : texture.IsTokenOrMisc ? "Token／杂图" : "卡图缩略图";
+            }
+        }
+    }
+
     void OpenBackup() { if (_gameRoot is null) return; var path = Path.Combine(_gameRoot, "_MD卡图备份"); Directory.CreateDirectory(path); System.Diagnostics.Process.Start("explorer.exe", path); }
     void SelectTexture(TexRef texture)
     {
@@ -340,25 +459,6 @@ public sealed class MainForm : Form
             break;
         }
     }
-    async Task CapturePromoFrameAsync(string outputDirectory, string scene)
-    {
-        Directory.CreateDirectory(outputDirectory);
-        var (fileName, predicate) = scene.ToLowerInvariant() switch
-        {
-            "overframe" => ("02_overframe.png", new Func<TexRef, bool>(x => x.CardKey == "13670")),
-            "alternate" => ("03_alternate.png", new Func<TexRef, bool>(x => x.IsAlternateArt && x.Width == 512 && x.Height == 512)),
-            _ => ("01_overview.png", new Func<TexRef, bool>(x => x.Name.Equals("card_frame00", StringComparison.OrdinalIgnoreCase)))
-        };
-        var texture = _textures.FirstOrDefault(predicate);
-        if (texture is not null)
-        {
-            _category.SelectedItem = "全部"; _search.Text = texture.CardKey.Length > 0 ? texture.CardKey : texture.Name;
-            RenderList(); SelectTexture(texture); await ShowSelectionAsync();
-        }
-        await Task.Delay(650);
-        using var bitmap = new Bitmap(ClientSize.Width, ClientSize.Height);
-        DrawToBitmap(bitmap, new Rectangle(Point.Empty, ClientSize));
-        bitmap.Save(Path.Combine(outputDirectory, fileName), System.Drawing.Imaging.ImageFormat.Png);
-    }
+    static string FormatSize(long bytes) => bytes >= 1L << 30 ? $"{bytes / (double)(1L << 30):0.##} GB" : bytes >= 1L << 20 ? $"{bytes / (double)(1L << 20):0.##} MB" : $"{bytes / 1024d:0.##} KB";
     static string Safe(string n) => string.Concat(n.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
 }

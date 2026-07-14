@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace MdCardModTool;
 
 internal static class Program
@@ -38,9 +40,38 @@ internal static class Program
             IndexService.AddCardFramesAndSave(args[1]);
             return;
         }
+        if (args.Length == 3 && args[0] == "--export-mods")
+        {
+            var local = IndexService.FindLocalRoot(args[1]) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");
+            var cache = IndexService.CachePath(local, IndexService.StreamingRoot(args[1]));
+            var index = File.Exists(cache) ? JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(cache)) ?? new GameIndex() : new GameIndex();
+            var info = new ModPackageService().Export(args[1], index.Textures, args[2]);
+            Console.WriteLine($"{info.BundleCount} bundles; {info.TotalSize} bytes; {args[2]}");
+            return;
+        }
+        if (args.Length == 2 && args[0] == "--inspect-mod")
+        {
+            var info = new ModPackageService().Inspect(args[1]);
+            Console.WriteLine($"{info.Name}; {info.BundleCount} bundles; {info.TotalSize} bytes");
+            return;
+        }
+        if (args.Length == 3 && args[0] == "--import-mods")
+        {
+            var result = new ModPackageService().Import(args[1], args[2]);
+            Console.WriteLine($"{result.BundleCount} bundles imported");
+            return;
+        }
+        if (args.Length == 4 && args[0] == "--export-card")
+        {
+            var local = IndexService.FindLocalRoot(args[1]) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");
+            var cache = IndexService.CachePath(local, IndexService.StreamingRoot(args[1]));
+            var index = JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(cache)) ?? new GameIndex();
+            var texture = index.Textures.FirstOrDefault(x => x.SourceKind == "本地卡图" && x.CardKey == args[2]) ?? throw new FileNotFoundException($"索引中没有卡号 {args[2]}。");
+            File.WriteAllBytes(args[3], new ModEngine().DecodePng(texture));
+            Console.WriteLine(args[3]);
+            return;
+        }
         ApplicationConfiguration.Initialize();
-        var promoOutput = args.Length >= 2 && args[0] == "--capture-promo" ? args[1] : null;
-        var promoScene = args.Length >= 3 && args[0] == "--capture-promo" ? args[2] : null;
-        Application.Run(new MainForm(promoOutput, promoScene));
+        Application.Run(new MainForm());
     }
 }
