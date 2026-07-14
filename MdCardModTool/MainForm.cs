@@ -40,7 +40,7 @@ public sealed class MainForm : Form
         _search.TextChanged += (_, _) => RenderList();
         _category.Items.Add("全部"); _category.SelectedIndex = 0; _category.SelectedIndexChanged += (_, _) => RenderList();
         _groups.AfterSelect += (_, e) => SelectGroup(e.Node?.Tag as string);
-        var choose = Button("选择目录", async (_, _) => await ChooseGameAsync()); var scan = Button("重建索引", async (_, _) => await ScanAsync());
+        var choose = Button("选择目录", async (_, _) => await ChooseGameAsync()); var scan = Button("重建索引", async (_, _) => await RebuildIndexAsync());
         var replace = Button("替换所选", async (_, _) => await ReplaceSelectedAsync(), ButtonTone.Primary); var export = Button("导出 PNG", async (_, _) => await ExportSelectedAsync());
         var backup = Button("打开备份", (_, _) => OpenBackup()); var restore = Button("还原所选", async (_, _) => await RestoreSelectedAsync(), ButtonTone.Danger); var inspect = Button("检查 Bundle", async (_, _) => await InspectSelectedAsync());
         var overFrameReplace = Button("超框替换", async (_, _) => await OverFrameReplaceAsync(), ButtonTone.Gold); var frameEditor = Button("卡框选择 / 编辑", async (_, _) => await OpenFrameEditorAsync()); var framePreview = Button("卡框预览", (_, _) => OpenFramePreview()); var overFrameTable = Button("超框表", (_, _) => OpenOverFrameTable());
@@ -108,6 +108,11 @@ public sealed class MainForm : Form
         return panel;
     }
     async Task ChooseGameAsync() { using var d = new FolderBrowserDialog { Description = "选择 Yu-Gi-Oh! Master Duel 游戏根目录", InitialDirectory = Directory.Exists(DefaultGame) ? DefaultGame : "" }; if (d.ShowDialog(this) == DialogResult.OK) { _gameRoot = d.SelectedPath; _gameFolder.Text = d.SelectedPath; SetGameRoot(); await ScanAsync(); } }
+    async Task RebuildIndexAsync()
+    {
+        if (MessageBox.Show(this, "重建索引会忽略随包预绑定和本地缓存，重新扫描当前游戏文件，可能需要较长时间。\n\n只有游戏更新后资源对应错误时才需要执行。继续？", "确认重建索引", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
+        await ScanAsync(forceRebuild: true);
+    }
     void SetGameRoot()
     {
         if (_gameRoot is null) return;
@@ -121,7 +126,7 @@ public sealed class MainForm : Form
     }
     string CachePath() => IndexService.CachePath(_assetRoot!, _streamingRoot!);
 
-    async Task ScanAsync()
+    async Task ScanAsync(bool forceRebuild = false)
     {
         if (_assetRoot is null || !Directory.Exists(_assetRoot)) { MessageBox.Show(this, "未找到 LocalData\\<用户哈希>\\0000。请选择 Master Duel 游戏根目录。", Text); return; }
         UseWaitCursor = true; _textures.Clear(); _preview.Image = null; _previewHint.Visible = true;
@@ -129,25 +134,42 @@ public sealed class MainForm : Form
         {
             var cache = CachePath();
             GameIndex? cached = null;
-            if (File.Exists(cache))
+            var loadedFromPrebuilt = false;
+            var prebuiltBuildId = "";
+            if (!forceRebuild && File.Exists(cache))
             {
                 try { cached = JsonSerializer.Deserialize<GameIndex>(await File.ReadAllTextAsync(cache)); }
                 catch { File.Delete(cache); }
             }
-            if (cached is not null)
+            if (cached is null && !forceRebuild)
             {
-                // 480×700 是另一套界面用小卡框，不属于游戏超框预览。
-                cached.Textures.RemoveAll(x => x.SourceKind == "卡框资源" && (x.Width != 704 || x.Height != 1024));
-                _textures.AddRange(cached.Textures); _status.Text = $"已载入本地索引：{_textures.Count} 张图片。";
+                try
+                {
+                    _status.Text = "正在载入随程序提供的卡号预绑定索引…";
+                    var prebuilt = await Task.Run(() =>
+                    {
+                        var found = PortableIndexService.TryLoadBundled(_gameRoot!, out var index, out var buildId);
+                        return (Found: found, Index: index, BuildId: buildId);
+                    });
+                    loadedFromPrebuilt = prebuilt.Found; cached = loadedFromPrebuilt ? prebuilt.Index : null; prebuiltBuildId = prebuilt.BuildId;
+                    if (loadedFromPrebuilt && cached is not null) await Task.Run(() => IndexService.Save(_gameRoot!, cached));
+                }
+                catch (Exception ex) { _status.Text = "随包预绑定索引不可用，将自动重建：" + ex.Message; cached = null; }
             }
-            else
+            if (cached is null)
             {
-                _status.Text = "正在重建本地索引（仅此一次）…";
+                _status.Text = forceRebuild ? "正在按要求重新扫描全部资源…" : "未找到预绑定索引，正在建立本地索引（仅此一次）…";
                 await Task.Run(() => IndexService.BuildAndSave(_gameRoot!, (done, total, found) => BeginInvoke(() => _status.Text = $"正在重建索引：{done:N0}/{total:N0} Bundle，已索引 {found:N0} 张图片…")));
-                var found = JsonSerializer.Deserialize<GameIndex>(await File.ReadAllTextAsync(cache)) ?? new GameIndex();
-                _textures.AddRange(found.Textures); _status.Text = $"索引已重建：{_textures.Count:N0} 张图片；以后启动直接读取本地索引。";
-                cached = found;
+                cached = JsonSerializer.Deserialize<GameIndex>(await File.ReadAllTextAsync(cache)) ?? new GameIndex();
             }
+            // 480×700 是另一套界面用小卡框，不属于游戏超框预览。
+            cached.Textures.RemoveAll(x => x.SourceKind == "卡框资源" && (x.Width != 704 || x.Height != 1024));
+            _textures.AddRange(cached.Textures);
+            var currentBuildId = loadedFromPrebuilt ? PortableIndexService.GetGameBuildId(_gameRoot!) : "";
+            var buildNote = prebuiltBuildId.Length > 0 && currentBuildId.Length > 0 && prebuiltBuildId != currentBuildId ? $"；预绑定 Build {prebuiltBuildId}，本机 Build {currentBuildId}，若个别资源失效请重建索引" : "";
+            _status.Text = loadedFromPrebuilt
+                ? $"已用随包预绑定瞬时建立本机索引：{_textures.Count:N0} 张图片，无需首次扫描{buildNote}。"
+                : forceRebuild ? $"索引已重建：{_textures.Count:N0} 张图片。" : $"已载入本地索引：{_textures.Count:N0} 张图片。";
             if (cached is not null && cached.AlternateArtIndexVersion < YgoCdbCardCatalog.ClassificationVersion)
             {
                 _status.Text = "正在建立本地异画卡名单（仅首次，需要下载一次百鸽卡片库）…";

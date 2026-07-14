@@ -8,11 +8,12 @@
 
 [下载最新公开版本](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/latest)
 
-工具会自动定位游戏目录内的 `LocalData\\<用户哈希>\\0000` 与 `StreamingAssets\\AssetBundle`。首次建立本地索引后，之后启动直接读取缓存；异画、Token 与杂图的分类同样保存在本地。
+工具会自动定位游戏目录内的 `LocalData\\<用户哈希>\\0000` 与 `StreamingAssets\\AssetBundle`。分享包已经内置不含个人绝对路径的卡号预绑定索引，第一次启动会按对方的用户哈希自动重绑定并写入本地缓存，不再扫描数万个 Bundle；异画、Token 与杂图分类也已包含在索引中。
 
 ## 主要功能
 
 - 本地卡图、游戏内图片与 704×1024 卡框的分类浏览、搜索、导入替换和 PNG 导出
+- 内置 13,486 条可移植资源映射，换电脑第一次打开也能直接读取；游戏更新导致个别映射失效时可手动“重建索引”
 - 拖入图片替换、拖出条目导出
 - 自动备份，并可还原所选 Bundle
 - 独立“我的 Mod”栏：自动汇总所有仍在生效的卡图改动，集中查看与还原
@@ -37,6 +38,8 @@
 ```powershell
 dotnet publish .\MdCardModTool\MdCardModTool.csproj -c Release -r win-x64 --self-contained true
 ```
+
+维护者可在游戏资源更新后用 `--export-portable-index <游戏目录> <输出文件>` 重新生成 `prebuilt-index-v1.json.br`。导出过程会读取 `_MD卡图备份`，避免把维护者个人已经替换或超框后的尺寸写进公共索引。
 
 本项目以 [MIT License](LICENSE) 开源。Master Duel、游戏资源与相关商标归其权利人所有，本仓库不包含游戏本体文件。
 
