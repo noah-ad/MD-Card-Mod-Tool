@@ -44,4 +44,4 @@ dotnet publish .\MdCardModTool\MdCardModTool.csproj -c Release -r win-x64 --self
 
 本项目以 [MIT License](LICENSE) 开源。Master Duel、游戏资源与相关商标归其权利人所有，本仓库不包含游戏本体文件。
 
-云盘下载渠道：https://pan.quark.cn/s/a6bfde027547
+云盘下载渠道：[https://pan.quark.cn/s/a6bfde027547](https://pan.quark.cn/s/5d7137ad2cd7)
