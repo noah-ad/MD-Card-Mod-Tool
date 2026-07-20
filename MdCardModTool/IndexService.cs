@@ -160,10 +160,8 @@ public static class IndexService
             try
             {
                 var scan = engine.ScanBundle(path, localRoot, "本地卡图", includeDependencies: false);
-                foreach (var texture in scan.Textures.Where(texture => IsMissingCardCandidate(texture) || IsCardOriginal(texture) || texture.CardKey == cardKey))
+                foreach (var texture in scan.Textures.Where(IsMissingCardCandidate))
                 {
-                    // P<卡号> 是游戏使用的原画资源；当某些卡没有单独的 512 缩略图时，
-                    // 仍可按原卡号找到并替换，不能把它误报为“未下载”。
                     added.Add(texture);
                     if (texture.CardKey == cardKey)
                     {
@@ -195,8 +193,9 @@ public static class IndexService
     static bool IsMissingCardCandidate(TexRef texture) =>
         texture.CardKey.Length > 0 && texture.Width == 512 && texture.Height == 512;
 
-    static bool IsCardOriginal(TexRef texture) =>
-        texture.Name.StartsWith('P') && texture.CardKey.Length > 0 && texture.Width >= 512 && texture.Height >= 512;
+    /// <summary>LocalData 内的 P数字 2048 图是 Spine/角色动画图集部件，不是可替换的卡图缩略图。</summary>
+    public static int RemoveSpineAtlasParts(GameIndex index) => index.Textures.RemoveAll(x =>
+        x.SourceKind == "本地卡图" && x.Name.Length > 1 && x.Name[0] == 'P' && x.Name.AsSpan(1).ToString().All(char.IsAsciiDigit));
 
     static bool IsUnityBundle(string path)
     {

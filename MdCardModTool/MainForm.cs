@@ -169,6 +169,9 @@ public sealed class MainForm : Form
             }
             // 480×700 是另一套界面用小卡框，不属于游戏超框预览。
             cached.Textures.RemoveAll(x => x.SourceKind == "卡框资源" && (x.Width != 704 || x.Height != 1024));
+            // v1.3.1 曾误把 P数字 Spine 图集部件归为卡图原画；迁移旧缓存时一并移除。
+            var removedSpineParts = IndexService.RemoveSpineAtlasParts(cached);
+            if (removedSpineParts > 0) await Task.Run(() => IndexService.Save(_gameRoot!, cached));
             _index = cached;
             _textures.AddRange(cached.Textures);
             var currentBuildId = loadedFromPrebuilt ? PortableIndexService.GetGameBuildId(_gameRoot!) : "";
@@ -222,11 +225,19 @@ public sealed class MainForm : Form
         var q = _search.Text.Trim(); var filter = _category.Text; _list.BeginUpdate(); _list.Items.Clear();
         // 输入关键字时始终全局检索，不能被侧栏分类或“只看我的 Mod”悄悄过滤掉。
         var globalSearch = q.Length > 0;
-        foreach (var x in _textures.Where(x => (globalSearch || (!_modsOnly || x.IsModded) && (filter == "全部" || filter == $"{x.SourceKind}|{x.Category}")) && (q.Length == 0 || $"{x.Name} {x.CardKey} {x.SourceKind} {x.Category} {x.RelativeBundlePath}".Contains(q, StringComparison.OrdinalIgnoreCase))))
+        foreach (var x in _textures.Where(x => (globalSearch || (!_modsOnly || x.IsModded) && (filter == "全部" || filter == $"{x.SourceKind}|{x.Category}")) && MatchesSearch(x, q)))
             _list.Items.Add(new ListViewItem([x.Name, $"{x.SourceKind} / {x.Category}{(x.IsModded ? "  · MOD" : "")}", $"{x.Width}×{x.Height}", x.RelativeBundlePath]) { Tag = x });
         _list.EndUpdate();
         var total = globalSearch ? _textures.Count : _modsOnly ? _textures.Count(x => x.IsModded) : _textures.Count;
         _resultCount.Text = globalSearch ? $"全局 { _list.Items.Count:N0} / {total:N0}" : $"{_list.Items.Count:N0} / {total:N0} 项";
+    }
+
+    static bool MatchesSearch(TexRef texture, string query)
+    {
+        if (query.Length == 0) return true;
+        // 卡号必须精确匹配，避免 11213 把 112132、112133 等无关资源带进结果。
+        if (query.All(char.IsAsciiDigit)) return texture.CardKey == query || texture.Name == query;
+        return $"{texture.Name} {texture.CardKey} {texture.SourceKind} {texture.Category} {texture.RelativeBundlePath}".Contains(query, StringComparison.OrdinalIgnoreCase);
     }
 
     async Task ScanMissingCardAsync()
