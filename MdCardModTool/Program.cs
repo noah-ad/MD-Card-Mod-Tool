@@ -29,7 +29,7 @@ internal static class Program
             var local = IndexService.FindLocalRoot(args[1]) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");
             var cache = IndexService.CachePath(local, IndexService.StreamingRoot(args[1]));
             var index = File.Exists(cache) ? JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(cache)) ?? new GameIndex() : new GameIndex();
-            var result = IndexService.ScanMissingLocalCard(args[1], index, "0", (done, total, added) => Console.WriteLine($"{done}/{total}; added={added}"), default, ignorePreviouslyChecked: true);
+            var result = IndexService.ScanMissingLocalCard(args[1], index, "0", (done, total, added) => Console.WriteLine($"{done}/{total}; added={added}"));
             var known = index.Textures.Select(x => $"{x.BundlePath}\0{x.AssetFileName}\0{x.PathId}").ToHashSet(StringComparer.OrdinalIgnoreCase);
             var additions = result.Textures.Where(x => known.Add($"{x.BundlePath}\0{x.AssetFileName}\0{x.PathId}")).ToList();
             YgoCdbCardCatalog.ClassifyTexturesAsync(additions).GetAwaiter().GetResult();
@@ -44,6 +44,7 @@ internal static class Program
             var cache = IndexService.CachePath(local, IndexService.StreamingRoot(args[1]));
             var index = File.Exists(cache) ? JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(cache)) ?? new GameIndex() : new GameIndex();
             var removed = IndexService.RemoveSpineAtlasParts(index);
+            removed += IndexService.RemoveNonCardLocalTextures(index);
             // 补扫新增的 512 缩略图也要补上已有的异画／Token 分类，不把它们混进普通卡图。
             index.AlternateArtIndexVersion = 0;
             YgoCdbCardCatalog.ClassifyAlternateArtsAsync(index).GetAwaiter().GetResult();
@@ -108,6 +109,14 @@ internal static class Program
             var texture = index.Textures.FirstOrDefault(x => x.SourceKind == "本地卡图" && x.CardKey == args[2]) ?? throw new FileNotFoundException($"索引中没有卡号 {args[2]}。");
             File.WriteAllBytes(args[3], new ModEngine().DecodePng(texture));
             Console.WriteLine(args[3]);
+            return;
+        }
+        if (args.Length == 3 && args[0] == "--inspect-bundle")
+        {
+            var bundle = Path.GetFullPath(args[1]);
+            var root = Path.GetFullPath(args[2]);
+            foreach (var texture in new ModEngine().ScanBundle(bundle, root, "诊断", includeDependencies: false).Textures)
+                Console.WriteLine($"{texture.Name}; {texture.Width}x{texture.Height}; PathID={texture.PathId}; file={texture.AssetFileName}; {texture.RelativeBundlePath}");
             return;
         }
         if (args.Length == 3 && args[0] == "--export-portable-index")

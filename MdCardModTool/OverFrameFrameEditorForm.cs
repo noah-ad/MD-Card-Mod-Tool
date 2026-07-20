@@ -6,7 +6,6 @@ public sealed class OverFrameFrameEditorForm : Form
     readonly string _gameRoot;
     readonly TexRef _art;
     readonly ushort _cardId;
-    readonly ushort _artSlotId;
     readonly byte[]? _initialArt;
     readonly ModEngine _engine = new();
     readonly OverFrameService _overFrames = new();
@@ -54,11 +53,11 @@ public sealed class OverFrameFrameEditorForm : Form
 
     public string AppliedFrameName { get; private set; } = "";
 
-    public OverFrameFrameEditorForm(string gameRoot, TexRef art, IEnumerable<TexRef> frames, byte[]? initialArt = null, ushort? artSlotId = null)
+    public OverFrameFrameEditorForm(string gameRoot, TexRef art, IEnumerable<TexRef> frames, byte[]? initialArt = null)
     {
         UiTheme.ApplyDarkTitleBar(this);
         if (!ushort.TryParse(art.CardKey, out _cardId)) throw new ArgumentException("所选资源没有有效卡号。", nameof(art));
-        _gameRoot = gameRoot; _art = art; _initialArt = initialArt; _artSlotId = artSlotId ?? _cardId;
+        _gameRoot = gameRoot; _art = art; _initialArt = initialArt;
         Text = $"卡框选择与编辑 · {_cardId}"; StartPosition = FormStartPosition.CenterParent; Size = new Size(980, 860); MinimumSize = new Size(760, 650);
         BackColor = Color.FromArgb(15, 22, 35); ForeColor = Color.White; Font = new Font("Microsoft YaHei UI", 9F);
 
@@ -215,15 +214,14 @@ public sealed class OverFrameFrameEditorForm : Form
     async Task ApplyAsync()
     {
         if (_previewBytes is null || _frames.SelectedItem is not FrameChoice choice || _previewFrameKey != choice.Key) { MessageBox.Show(this, "当前卡框预览尚未生成完成，请稍候再应用。", Text); return; }
-        var carrierNote = _artSlotId == _cardId ? "" : $"\n\n将使用本地载体卡号 {_artSlotId} 承载高图；它只用于本卡的离线超框映射。";
-        if (MessageBox.Show(this, $"把“{choice.DisplayName}”合成进卡号 {_cardId} 的高图并写入游戏？\n\n只修改当前高图载体 Bundle，不会改全局 card_frame；原 Bundle 与透明原画均已保留。{carrierNote}", "确认应用卡框", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
+        if (MessageBox.Show(this, $"把“{choice.DisplayName}”合成进卡号 {_cardId} 的高图并写入游戏？\n\n只修改这张卡的 Bundle，不会改全局 card_frame；原 Bundle 与透明原画均已保留。", "确认应用卡框", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
         try
         {
             UseWaitCursor = true; _status.Text = "正在定位 LocalData 超框表…";
             await Task.Run(() => _overFrames.FindGate(_gameRoot, (done, total) => BeginInvoke(() => _status.Text = $"首次定位超框表：{done:N0}/{total:N0} Bundle…")));
             _status.Text = "正在写入单卡卡框合成图…";
             await Task.Run(() => _engine.Replace(_art, _previewBytes, Path.Combine(_gameRoot, "_MD卡图备份", _art.SourceKind)));
-            try { await Task.Run(() => _overFrames.EnableOrUpdate(_gameRoot, _cardId, _artSlotId)); }
+            try { await Task.Run(() => _overFrames.EnableOrUpdate(_gameRoot, _cardId, _cardId)); }
             catch (Exception gateError) { throw new InvalidOperationException("卡框合成图已经写入，但超框登记失败。请在主界面的“超框表”中为该卡重试启用。\n\n" + gateError.Message, gateError); }
             OverFrameArtStore.SaveSettings(_gameRoot, _cardId, new OverFrameFrameSettings(choice.Key, choice.IsCustom));
             _art.Category = "超框卡图"; AppliedFrameName = choice.DisplayName;

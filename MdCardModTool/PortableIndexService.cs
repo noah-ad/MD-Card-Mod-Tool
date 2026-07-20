@@ -119,8 +119,12 @@ public static class PortableIndexService
                     .FirstOrDefault(x => x.PathId == texture.PathId && x.AssetFileName == texture.AssetFileName);
                 if (original is null) continue;
                 var category = original.Category;
-                if (texture.SourceKind == "本地卡图" && original.Width == 512 && original.Height == 512)
-                    category = texture.IsAlternateArt ? "异画卡图" : texture.IsTokenOrMisc ? "Token／杂图" : "卡图缩略图";
+                if (texture.SourceKind == "本地卡图")
+                {
+                    if (original.Width == 512 && original.Height == 1024) category = "灵摆卡图";
+                    else if (original.Width == 512 && original.Height == 512)
+                        category = texture.IsAlternateArt ? "异画卡图" : texture.IsTokenOrMisc ? "Token／杂图" : "卡图缩略图";
+                }
                 entries[i] = new PortableTextureEntry
                 {
                     RelativeBundlePath = entries[i].RelativeBundlePath,

@@ -86,7 +86,7 @@ public sealed class ModEngine
     {
         if (name.StartsWith("card_frame", StringComparison.OrdinalIgnoreCase)) return "卡框 card_frame";
         if (Regex.IsMatch(name, "^P\\d+$", RegexOptions.IgnoreCase)) return "卡图原画";
-        if (Regex.IsMatch(name, "^\\d+$")) return "卡图缩略图";
+        if (Regex.IsMatch(name, "^\\d+$")) return width == 512 && height == 1024 ? "灵摆卡图" : "卡图缩略图";
         if (width >= 1024 && height >= 1024) return "大图贴图";
         return "其他贴图";
     }

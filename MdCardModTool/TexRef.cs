@@ -18,11 +18,6 @@ public sealed class TexRef
     public bool IsModded { get; set; }
     public string SourceKind { get; init; } = "";
     public string CardKey { get; init; } = "";
-    /// <summary>
-    /// 当本体没有该卡的 512 缩略图时，超框模式会用一个本地闲置资源承载高图。
-    /// 此字段保存承载资源的原卡号；为空表示资源就是本卡。
-    /// </summary>
-    public string? CarrierCardKey { get; init; }
     public string? OverrideBundlePath { get; set; }
     public string ActiveBundlePath => OverrideBundlePath ?? BundlePath;
     public override string ToString() => $"{Name}  ·  {Width}×{Height}";

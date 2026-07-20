@@ -8,7 +8,13 @@ namespace MdCardModTool;
 
 public static class IndexService
 {
-    const string CacheVersion = "v5";
+    const string CacheVersion = "v6";
+    static readonly uint[] Crc32Table = Enumerable.Range(0, 256).Select(index =>
+    {
+        var value = (uint)index;
+        for (var bit = 0; bit < 8; bit++) value = (value & 1) != 0 ? 0xEDB88320u ^ (value >> 1) : value >> 1;
+        return value;
+    }).ToArray();
     public static string? FindLocalRoot(string gameRoot)
     {
         var local = Path.Combine(gameRoot, "LocalData");
@@ -30,10 +36,12 @@ public static class IndexService
     {
         var localRoot = FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000");
         var streamingRoot = StreamingRoot(gameRoot);
-        // 大多数缩略图 Bundle 位于这个区间，首次索引先走快速路径。
-        // 少数不符合该大小规律的卡，在用户按卡号补查时再后台扫描并永久写进本地缓存。
+        var allLocalFiles = Directory.EnumerateFiles(localRoot, "*", SearchOption.AllDirectories).Select(x => new FileInfo(x)).ToArray();
+        // 普通卡图大多位于这个区间；灵摆卡图是 512×1024，Bundle 往往更大。
+        // 卡图资源的逻辑路径固定，因此用 CRC32 直接加入全部已下载卡图，不再盲扫 LocalData。
         // 已由本工具备份过的 Bundle 也要纳入：超框图会变成 704×1024，文件大小不再落在这个区间内。
-        var localPaths = new HashSet<string>(Directory.EnumerateFiles(localRoot, "*", SearchOption.AllDirectories).Select(x => new FileInfo(x)).Where(x => x.Length >= 200_000 && x.Length < 300_000 && IsUnityBundle(x.FullName)).Select(x => x.FullName), StringComparer.OrdinalIgnoreCase);
+        var localPaths = new HashSet<string>(allLocalFiles.Where(x => x.Length >= 200_000 && x.Length < 300_000 && IsUnityBundle(x.FullName)).Select(x => x.FullName), StringComparer.OrdinalIgnoreCase);
+        foreach (var path in EnumerateDownloadedCardIllustrationBundles(localRoot, allLocalFiles)) localPaths.Add(path);
         var backedLocal = Path.Combine(gameRoot, "_MD卡图备份", "本地卡图");
         if (Directory.Exists(backedLocal)) foreach (var backup in Directory.EnumerateFiles(backedLocal, "*", SearchOption.AllDirectories))
         {
@@ -48,7 +56,7 @@ public static class IndexService
             try
             {
                 var scan = engine.ScanBundle(file.Path, file.Root, file.Kind, includeDependencies: false);
-                foreach (var texture in scan.Textures.Where(x => file.Kind != "本地卡图" || (x.Width == 512 && x.Height == 512) || File.Exists(Path.Combine(backedLocal, x.RelativeBundlePath)))) bag.Add(texture);
+                foreach (var texture in scan.Textures.Where(x => file.Kind != "本地卡图" || IsDirectCardIllustration(x) || File.Exists(Path.Combine(backedLocal, x.RelativeBundlePath)))) bag.Add(texture);
             }
             catch { }
             var count = Interlocked.Increment(ref done);
@@ -116,51 +124,37 @@ public static class IndexService
     }
 
     /// <summary>
-    /// 补查首次快速索引漏掉的本地卡图。只在用户明确检索一个缺失卡号时调用；
-    /// 扫描在后台进行、并记录已检查过的 Bundle，后续不再重复扫描。
+    /// 按游戏实际使用的 Card/Images/Illust/{tcg|ocg}/{卡号} 逻辑路径计算 CRC32，
+    /// 直接定位一个卡号的 Bundle。正常卡为 512×512，灵摆卡为 512×1024。
     /// </summary>
     public static MissingCardScanResult ScanMissingLocalCard(
         string gameRoot,
         GameIndex index,
         string cardKey,
         Action<int, int, int>? progress = null,
-        CancellationToken cancellationToken = default,
-        bool ignorePreviouslyChecked = false)
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(cardKey) || !cardKey.All(char.IsAsciiDigit))
             throw new ArgumentException("补查只接受纯数字卡号。", nameof(cardKey));
 
         var localRoot = FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000");
-        var known = index.Textures
+        var knownBundles = index.Textures
             .Where(x => x.SourceKind == "本地卡图")
             .Select(x => Path.GetFullPath(x.BundlePath))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var checkedPaths = index.CheckedLocalBundlePaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var files = Directory.EnumerateFiles(localRoot, "*", SearchOption.AllDirectories)
-            .Where(path => !known.Contains(Path.GetFullPath(path)))
-            .Where(path => ignorePreviouslyChecked || !checkedPaths.Contains(Path.GetRelativePath(localRoot, path)))
-            .Where(IsUnityBundle)
-            // 200–300 KB 的 Bundle 已在首次快速索引中完整解析；即使它不含贴图，
-            // 也不应在补查时重新进入队列并拖慢一次按卡号检索。
-            .Select(path => new FileInfo(path))
-            .Where(file => file.Length < 200_000 || file.Length >= 300_000)
-            // 漏项通常只是原图压缩率让文件刚好越过 200–300 KB 边界；
-            // 先查最接近常规卡图 Bundle 大小的文件，避免一开始就卡在大型 UI 资源上。
-            .OrderBy(file => Math.Abs(file.Length - 250_000L))
-            .Select(file => file.FullName)
-            .ToArray();
+        var files = cardKey == "0"
+            ? EnumerateDownloadedCardIllustrationBundles(localRoot).Where(path => !knownBundles.Contains(Path.GetFullPath(path))).ToArray()
+            : CardIllustrationBundleCandidates(localRoot, cardKey).Where(path => !knownBundles.Contains(Path.GetFullPath(path))).ToArray();
 
         var found = 0; var done = 0;
         var added = new ConcurrentBag<TexRef>();
-        var newlyChecked = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
         var engine = new ModEngine();
-        Parallel.ForEach(files, new ParallelOptions { MaxDegreeOfParallelism = 2, CancellationToken = cancellationToken }, (path, state) =>
+        Parallel.ForEach(files, new ParallelOptions { MaxDegreeOfParallelism = Math.Max(2, Environment.ProcessorCount / 2), CancellationToken = cancellationToken }, (path, state) =>
         {
-            var relative = Path.GetRelativePath(localRoot, path);
             try
             {
                 var scan = engine.ScanBundle(path, localRoot, "本地卡图", includeDependencies: false);
-                foreach (var texture in scan.Textures.Where(IsMissingCardCandidate))
+                foreach (var texture in scan.Textures.Where(IsDirectCardIllustration))
                 {
                     added.Add(texture);
                     if (texture.CardKey == cardKey)
@@ -173,15 +167,11 @@ public static class IndexService
             catch { }
             finally
             {
-                newlyChecked.TryAdd(relative, 0);
                 var current = Interlocked.Increment(ref done);
                 if (current % 25 == 0 || current == files.Length || Volatile.Read(ref found) != 0)
                     progress?.Invoke(current, files.Length, added.Count);
             }
         });
-
-        foreach (var relative in newlyChecked.Keys)
-            if (!checkedPaths.Contains(relative)) index.CheckedLocalBundlePaths.Add(relative);
 
         var unique = added
             .GroupBy(x => $"{x.BundlePath}\0{x.AssetFileName}\0{x.PathId}", StringComparer.OrdinalIgnoreCase)
@@ -190,12 +180,62 @@ public static class IndexService
         return new MissingCardScanResult { Textures = unique, ScannedBundles = done, TotalBundles = files.Length, Found = Volatile.Read(ref found) != 0 };
     }
 
-    static bool IsMissingCardCandidate(TexRef texture) =>
-        texture.CardKey.Length > 0 && texture.Width == 512 && texture.Height == 512;
+    public static bool IsDirectCardIllustration(TexRef texture) =>
+        texture.CardKey.Length > 0 && texture.Width == 512 && (texture.Height == 512 || texture.Height == 1024);
+
+    public static void NormalizeLocalCardCategory(TexRef texture)
+    {
+        if (texture.SourceKind != "本地卡图" || texture.CardKey.Length == 0) return;
+        if (texture.Width == 512 && texture.Height == 1024) texture.Category = "灵摆卡图";
+        else if (texture.Width == 512 && texture.Height == 512)
+            texture.Category = texture.IsAlternateArt ? "异画卡图" : texture.IsTokenOrMisc ? "Token／杂图" : "卡图缩略图";
+    }
+
+    public static string CardIllustrationRelativePath(string cardKey, string illustrationType = "tcg")
+    {
+        if (string.IsNullOrWhiteSpace(cardKey) || !cardKey.All(char.IsAsciiDigit)) throw new ArgumentException("卡号必须是纯数字。", nameof(cardKey));
+        var logicalPath = $"Card/Images/Illust/{illustrationType}/{cardKey}";
+        var hash = Crc32(logicalPath).ToString("x8");
+        return Path.Combine(hash[..2], hash);
+    }
+
+    public static IEnumerable<string> CardIllustrationBundleCandidates(string localRoot, string cardKey)
+    {
+        foreach (var type in new[] { "tcg", "ocg" })
+        {
+            var path = Path.Combine(localRoot, CardIllustrationRelativePath(cardKey, type));
+            if (File.Exists(path) && IsUnityBundle(path)) yield return path;
+        }
+    }
+
+    static IEnumerable<string> EnumerateDownloadedCardIllustrationBundles(string localRoot, IReadOnlyCollection<FileInfo>? localFiles = null)
+    {
+        localFiles ??= Directory.EnumerateFiles(localRoot, "*", SearchOption.AllDirectories).Select(x => new FileInfo(x)).ToArray();
+        var available = localFiles.ToDictionary(x => Path.GetRelativePath(localRoot, x.FullName), x => x.FullName, StringComparer.OrdinalIgnoreCase);
+        for (var cardId = 1; cardId <= ushort.MaxValue; cardId++)
+        {
+            foreach (var type in new[] { "tcg", "ocg" })
+            {
+                var relative = CardIllustrationRelativePath(cardId.ToString(), type);
+                if (available.TryGetValue(relative, out var path) && IsUnityBundle(path)) yield return path;
+            }
+        }
+    }
+
+    static uint Crc32(string value)
+    {
+        var crc = uint.MaxValue;
+        foreach (var item in Encoding.UTF8.GetBytes(value)) crc = Crc32Table[(crc ^ item) & 0xFF] ^ (crc >> 8);
+        return crc ^ uint.MaxValue;
+    }
 
     /// <summary>LocalData 内的 P数字 2048 图是 Spine/角色动画图集部件，不是可替换的卡图缩略图。</summary>
     public static int RemoveSpineAtlasParts(GameIndex index) => index.Textures.RemoveAll(x =>
         x.SourceKind == "本地卡图" && x.Name.Length > 1 && x.Name[0] == 'P' && x.Name.AsSpan(1).ToString().All(char.IsAsciiDigit));
+
+    /// <summary>LocalData 只保留能对应到卡号的完整卡图；StreamingAssets 仍不做图片过滤。</summary>
+    public static int RemoveNonCardLocalTextures(GameIndex index) => index.Textures.RemoveAll(x =>
+        x.SourceKind == "本地卡图" && x.CardKey.Length == 0);
 
     static bool IsUnityBundle(string path)
     {

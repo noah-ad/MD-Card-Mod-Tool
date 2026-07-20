@@ -47,9 +47,9 @@ public sealed class MainForm : Form
         var choose = Button("选择目录", async (_, _) => await ChooseGameAsync()); var scan = Button("重建索引", async (_, _) => await RebuildIndexAsync());
         var replace = Button("替换所选", async (_, _) => await ReplaceSelectedAsync(), ButtonTone.Primary); var export = Button("导出 PNG", async (_, _) => await ExportSelectedAsync());
         var backup = Button("打开备份", (_, _) => OpenBackup()); var restore = Button("还原所选", async (_, _) => await RestoreSelectedAsync(), ButtonTone.Danger); var inspect = Button("检查 Bundle", async (_, _) => await InspectSelectedAsync());
-        var overFrameReplace = Button("超框替换", async (_, _) => await OverFrameReplaceAsync(), ButtonTone.Gold); var missingCard = Button("灵摆／缺图卡", async (_, _) => await OpenMissingCardAsync(), ButtonTone.Gold); var frameEditor = Button("卡框选择 / 编辑", async (_, _) => await OpenFrameEditorAsync()); var framePreview = Button("卡框预览", (_, _) => OpenFramePreview()); var overFrameTable = Button("超框表", (_, _) => OpenOverFrameTable());
+        var overFrameReplace = Button("超框替换", async (_, _) => await OverFrameReplaceAsync(), ButtonTone.Gold); var frameEditor = Button("卡框选择 / 编辑", async (_, _) => await OpenFrameEditorAsync()); var framePreview = Button("卡框预览", (_, _) => OpenFramePreview()); var overFrameTable = Button("超框表", (_, _) => OpenOverFrameTable());
         _modsOnlyButton = Button("只看我的 Mod", (_, _) => ToggleModsOnly(), ButtonTone.Gold);
-        _scanMissingButton = Button("本地补查", async (_, _) => await ScanMissingCardAsync(), ButtonTone.Neutral);
+        _scanMissingButton = Button("定位卡图", async (_, _) => await ScanMissingCardAsync(), ButtonTone.Neutral);
         var exportMods = Button("一键导出全部 Mod", async (_, _) => await ExportAllModsAsync(), ButtonTone.Primary);
         var importMods = Button("导入 Mod 包", async (_, _) => await ImportModsAsync());
 
@@ -80,7 +80,7 @@ public sealed class MainForm : Form
         var previewFrame = new BorderPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Surface, Padding = new Padding(18) };
         previewFrame.Controls.Add(_preview); previewFrame.Controls.Add(_previewHint); _previewHint.BringToFront();
         var rightActions = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, AutoScroll = true, BackColor = UiTheme.Surface, Padding = new Padding(5, 4, 4, 4) };
-        rightActions.Controls.Add(overFrameReplace); rightActions.Controls.Add(missingCard); rightActions.Controls.Add(frameEditor); rightActions.Controls.Add(framePreview); rightActions.Controls.Add(overFrameTable); rightActions.Controls.Add(inspect);
+        rightActions.Controls.Add(overFrameReplace); rightActions.Controls.Add(frameEditor); rightActions.Controls.Add(framePreview); rightActions.Controls.Add(overFrameTable); rightActions.Controls.Add(inspect);
         var previewLayout = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Window, RowCount = 4, ColumnCount = 1 };
         previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46)); previewLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 104)); previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 92));
         previewLayout.Controls.Add(SectionHeading("实时预览", "LIVE PREVIEW"), 0, 0); previewLayout.Controls.Add(previewFrame, 0, 1); previewLayout.Controls.Add(_info, 0, 2); previewLayout.Controls.Add(rightActions, 0, 3);
@@ -171,7 +171,8 @@ public sealed class MainForm : Form
             cached.Textures.RemoveAll(x => x.SourceKind == "卡框资源" && (x.Width != 704 || x.Height != 1024));
             // v1.3.1 曾误把 P数字 Spine 图集部件归为卡图原画；迁移旧缓存时一并移除。
             var removedSpineParts = IndexService.RemoveSpineAtlasParts(cached);
-            if (removedSpineParts > 0) await Task.Run(() => IndexService.Save(_gameRoot!, cached));
+            var removedNonCards = IndexService.RemoveNonCardLocalTextures(cached);
+            if (removedSpineParts + removedNonCards > 0) await Task.Run(() => IndexService.Save(_gameRoot!, cached));
             _index = cached;
             _textures.AddRange(cached.Textures);
             var currentBuildId = loadedFromPrebuilt ? PortableIndexService.GetGameBuildId(_gameRoot!) : "";
@@ -245,7 +246,7 @@ public sealed class MainForm : Form
         var cardKey = _search.Text.Trim();
         if (!Regex.IsMatch(cardKey, "^\\d+$"))
         {
-            MessageBox.Show(this, "“本地补查”只用于纯数字卡号，例如 11213。\n\n普通名称搜索会直接在现有索引中全局查找。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, "“定位卡图”只用于纯数字卡号，例如 11213。\n\n普通名称搜索会直接在现有索引中全局查找。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
         if (_gameRoot is null || _index is null) return;
@@ -259,10 +260,10 @@ public sealed class MainForm : Form
         try
         {
             _scanMissingButton.Enabled = false;
-            _status.Text = $"正在后台补查卡号 {cardKey}：只检查未索引的 LocalData Bundle，不会卡住界面…";
+            _status.Text = $"正在按游戏资源路径直接定位卡号 {cardKey}…";
             var result = await Task.Run(() => IndexService.ScanMissingLocalCard(_gameRoot, _index, cardKey, (done, total, added) =>
             {
-                if (!IsDisposed && IsHandleCreated) BeginInvoke(() => _status.Text = $"正在后台补查 {cardKey}：{done:N0}/{total:N0} 个未索引 Bundle，新增 {added:N0} 张卡图…");
+                if (!IsDisposed && IsHandleCreated) BeginInvoke(() => _status.Text = $"正在定位 {cardKey}：{done:N0}/{total:N0} 个候选 Bundle…");
             }));
             var known = _textures.Select(x => $"{x.BundlePath}\0{x.AssetFileName}\0{x.PathId}").ToHashSet(StringComparer.OrdinalIgnoreCase);
             var additions = result.Textures.Where(x => known.Add($"{x.BundlePath}\0{x.AssetFileName}\0{x.PathId}")).ToList();
@@ -277,93 +278,15 @@ public sealed class MainForm : Form
             if (found is not null)
             {
                 SetModsOnly(false); _category.SelectedItem = "全部"; RenderList(); SelectTexture(found);
-                _status.Text = $"已从本机 LocalData 补查到卡号 {cardKey}，映射已保存；以后启动和搜索都不会再扫描。";
+                _status.Text = found.Height == 1024
+                    ? $"已定位灵摆卡 {cardKey} 的 512×1024 原生卡图；可直接预览、裁剪和替换，映射已保存。"
+                    : $"已定位卡号 {cardKey} 的 512×512 卡图；映射已保存。";
             }
-            else _status.Text = $"本机 LocalData 中未找到 {cardKey} 的 512×512 缩略图；已检查 {result.ScannedBundles:N0} 个未索引 Bundle，结果已缓存，不会重复卡扫。可点击右下角“灵摆／缺图卡”离线替换。";
+            else _status.Text = $"本机 LocalData 中没有已下载的卡号 {cardKey} 卡图 Bundle；本次只检查了游戏计算出的 {result.TotalBundles:N0} 个候选路径，没有扫描整个文件夹。";
         }
-        catch (Exception ex) { MessageBox.Show(this, ex.Message, "本地补查失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "定位卡图失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         finally { _scanMissingButton.Enabled = true; }
     }
-
-    /// <summary>
-    /// 少数卡（常见于灵摆／Spine 资源）没有可直接替换的 512 缩略图。
-    /// 为它们分配一个未使用的本地 Token／杂图槽位作为高图载体，再用 of_card_asset
-    /// 把显示卡号映射到该槽位，整个过程不需要联网或修改 Spine 骨骼图集。
-    /// </summary>
-    async Task OpenMissingCardAsync()
-    {
-        if (_gameRoot is null || _assetRoot is null) { MessageBox.Show(this, "先选择 Master Duel 游戏目录。", Text); return; }
-        var key = _search.Text.Trim();
-        if (!ushort.TryParse(key, out var cardId))
-        {
-            MessageBox.Show(this, "先在上方搜索框输入要替换的卡号（例如 11213），再点击“灵摆／缺图卡”。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return;
-        }
-        var direct = _textures.FirstOrDefault(x => x.SourceKind == "本地卡图" && x.CardKey == key && x.CarrierCardKey is null);
-        if (direct is not null)
-        {
-            SetModsOnly(false); _category.SelectedItem = "全部"; RenderList(); SelectTexture(direct);
-            MessageBox.Show(this, $"卡号 {key} 已有可直接替换的本地缩略图，请使用“替换所选”或“超框替换”。\n\n此入口仅用于没有 512×512 缩略图的卡。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return;
-        }
-        var already = _textures.FirstOrDefault(x => x.CardKey == key && x.CarrierCardKey is not null);
-        if (already is not null)
-        {
-            SetModsOnly(false); _category.SelectedItem = "全部"; RenderList(); SelectTexture(already);
-            MessageBox.Show(this, $"卡号 {key} 已配置离线高图载体 {already.CarrierCardKey}。可直接使用“卡框选择 / 编辑”更换图片或卡框，也可“还原所选”。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return;
-        }
-
-        _status.Text = "正在读取本机超框映射并分配离线载体…";
-        var currentMappings = await Task.Run(() => _overFrames.Read(_gameRoot));
-        var usedSlots = currentMappings.SelectMany(x => new[] { x.CardId.ToString(), x.ArtId.ToString() }).ToHashSet(StringComparer.Ordinal);
-        var carrier = _textures
-            .Where(x => x.SourceKind == "本地卡图" && x.CarrierCardKey is null && x.Width == 512 && x.Height == 512 && x.CardKey.Length > 0)
-            .Where(x => x.IsTokenOrMisc && !x.IsModded && x.CardKey != key && !usedSlots.Contains(x.CardKey))
-            .OrderBy(x => x.CardKey, StringComparer.Ordinal)
-            .FirstOrDefault();
-        if (carrier is null)
-        {
-            MessageBox.Show(this, "没有找到可用的本地 Token／杂图载体。请先恢复一个未修改的 Token／杂图，或点击“重建索引”后重试。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-
-        using var dialog = new OpenFileDialog { Filter = "图片|*.png;*.jpg;*.jpeg;*.webp;*.bmp", Title = $"选择卡号 {cardId} 的离线超框卡图（下一步固定比例裁剪）" };
-        if (dialog.ShowDialog(this) != DialogResult.OK) return;
-        try
-        {
-            using var crop = new ImageCropForm(dialog.FileName, FrameComposer.Width, FrameComposer.Height, $"灵摆／缺图卡 {cardId}");
-            if (crop.ShowDialog(this) != DialogResult.OK || crop.OutputPng is null) return;
-            var virtualCard = CreateCarrierCard(cardId, carrier);
-            var applied = await OpenFrameEditorAsync(virtualCard, crop.OutputPng, ushort.Parse(carrier.CardKey));
-            if (!applied) return;
-            await ReloadChangedBundlesAsync([carrier.BundlePath]);
-            await ApplyOverFrameTagsAsync();
-            await RefreshModFlagsAsync();
-            if (_index is not null) await Task.Run(() => IndexService.Save(_gameRoot, _index));
-            RefreshCategories(); SetModsOnly(false); _category.SelectedItem = "全部"; RenderList();
-            var created = _textures.FirstOrDefault(x => x.CardKey == key && x.CarrierCardKey == carrier.CardKey);
-            if (created is not null) { SelectTexture(created); await ShowSelectionAsync(); }
-            _status.Text = $"卡号 {cardId} 已通过本地载体 {carrier.CardKey} 完成离线替换；可在“我的 Mod”中导出或还原。请完全退出并重启 Master Duel。";
-        }
-        catch (Exception ex) { MessageBox.Show(this, ex.Message, "灵摆／缺图卡替换失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
-    }
-
-    static TexRef CreateCarrierCard(ushort displayCardId, TexRef carrier) => new()
-    {
-        BundlePath = carrier.BundlePath,
-        RelativeBundlePath = carrier.RelativeBundlePath,
-        PathId = carrier.PathId,
-        AssetFileName = carrier.AssetFileName,
-        Name = displayCardId.ToString(),
-        Width = carrier.Width,
-        Height = carrier.Height,
-        Category = "超框卡图",
-        IsModded = carrier.IsModded,
-        SourceKind = "本地卡图",
-        CardKey = displayCardId.ToString(),
-        CarrierCardKey = carrier.CardKey
-    };
 
     void SelectGroup(string? key)
     {
@@ -451,11 +374,8 @@ public sealed class MainForm : Form
         if (!File.Exists(backup)) { MessageBox.Show(this, "该 Bundle 尚未被本工具备份，无法还原。", Text); return; }
         ushort cardId = 0;
         var isOverFrame = x.Category == "超框卡图" && ushort.TryParse(x.CardKey, out cardId);
-        var isCarrierMode = x.CarrierCardKey is not null;
-        var message = isCarrierMode
-            ? $"确认还原卡号 {cardId} 的离线载体？会还原载体卡图，并关闭本卡超框登记；不会再显示该虚拟卡图条目。"
-            : isOverFrame
-            ? "确认还原该超框卡？会还原原始 512×512 卡图、关闭本卡超框登记，并重新归类到卡图列表。"
+        var message = isOverFrame
+            ? "确认还原该超框卡？会还原原始卡图、关闭本卡超框登记，并重新归类到卡图列表。"
             : "确认把该 Bundle 还原为备份版本？";
         if (MessageBox.Show(this, message, "确认还原", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
         try
@@ -472,15 +392,10 @@ public sealed class MainForm : Form
                     foreach (var linked in _textures.Where(t => t.BundlePath.Equals(x.BundlePath, StringComparison.OrdinalIgnoreCase) && t.PathId == x.PathId && t.AssetFileName == x.AssetFileName))
                     {
                         linked.Width = reloaded.Width; linked.Height = reloaded.Height; linked.Category = reloaded.Category;
-                        if (linked.Width == 512 && linked.Height == 512) linked.Category = linked.IsAlternateArt ? "异画卡图" : linked.IsTokenOrMisc ? "Token／杂图" : "卡图缩略图";
+                        IndexService.NormalizeLocalCardCategory(linked);
                     }
                 }
             });
-            if (isCarrierMode)
-            {
-                _textures.Remove(x);
-                _index?.Textures.Remove(x);
-            }
             await ApplyOverFrameTagsAsync();
             await RefreshModFlagsAsync();
             await Task.Run(() => IndexService.Save(_gameRoot, _textures));
@@ -488,8 +403,8 @@ public sealed class MainForm : Form
             var targetCategory = $"{x.SourceKind}|{x.Category}";
             if (isOverFrame) SetModsOnly(false);
             if (_category.Items.Contains(targetCategory)) _category.SelectedItem = targetCategory;
-            RenderList(); if (!isCarrierMode) SelectTexture(x);
-            _status.Text = isCarrierMode ? $"已还原离线载体并关闭卡号 {cardId} 的超框登记。" : isOverFrame ? "已还原原始卡图并关闭本卡超框登记，已回到卡图列表。" : "已还原游戏本体中的该 Bundle。";
+            RenderList(); SelectTexture(x);
+            _status.Text = isOverFrame ? "已还原原始卡图并关闭本卡超框登记，已回到卡图列表。" : "已还原游戏本体中的该 Bundle。";
         }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "还原失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         finally { UseWaitCursor = false; }
@@ -506,22 +421,10 @@ public sealed class MainForm : Form
         {
             var mappings = await Task.Run(() => _overFrames.ReadCached(_gameRoot));
             var ids = mappings.Select(x => x.CardId.ToString()).ToHashSet(StringComparer.Ordinal);
-            // 虚拟条目只服务于“本体没有 512 缩略图”的离线载体模式；每次都从
-            // 当前超框表重建，避免把它们错误持久化成普通贴图。
-            _textures.RemoveAll(x => x.CarrierCardKey is not null);
-            _index?.Textures.RemoveAll(x => x.CarrierCardKey is not null);
             foreach (var x in _textures.Where(x => x.SourceKind == "本地卡图" && x.CardKey.Length > 0))
             {
                 if (ids.Contains(x.CardKey)) x.Category = "超框卡图";
-                else if (x.Category == "超框卡图") x.Category = x.Width == 512 && x.Height == 512 ? (x.IsAlternateArt ? "异画卡图" : x.IsTokenOrMisc ? "Token／杂图" : "卡图缩略图") : "其他贴图";
-            }
-            foreach (var mapping in mappings.Where(x => !_textures.Any(t => t.SourceKind == "本地卡图" && t.CardKey == x.CardId.ToString())))
-            {
-                var carrier = _textures.FirstOrDefault(x => x.SourceKind == "本地卡图" && x.CarrierCardKey is null && x.CardKey == mapping.ArtId.ToString());
-                if (carrier is null || carrier.Width != FrameComposer.Width || carrier.Height != FrameComposer.Height) continue;
-                var virtualCard = CreateCarrierCard(mapping.CardId, carrier);
-                _textures.Add(virtualCard);
-                _index?.Textures.Add(virtualCard);
+                else if (x.Category == "超框卡图") IndexService.NormalizeLocalCardCategory(x);
             }
         }
         catch { }
@@ -543,7 +446,7 @@ public sealed class MainForm : Form
 
     TexRef[] OverFrameFrames() => _textures.Where(x => x.SourceKind == "卡框资源" && x.Name.StartsWith("card_frame", StringComparison.OrdinalIgnoreCase) && x.Width == FrameComposer.Width && x.Height == FrameComposer.Height).ToArray();
 
-    async Task<bool> OpenFrameEditorAsync(TexRef? texture = null, byte[]? initialArt = null, ushort? artSlotId = null)
+    async Task<bool> OpenFrameEditorAsync(TexRef? texture = null, byte[]? initialArt = null)
     {
         var x = texture ?? Selected();
         if (x is null || _gameRoot is null) { MessageBox.Show(this, "先选择一张超框卡。", Text); return false; }
@@ -554,7 +457,7 @@ public sealed class MainForm : Form
         }
         var frames = OverFrameFrames();
         if (frames.Length == 0) { MessageBox.Show(this, "索引中没有 704×1024 card_frame。请点击“重建索引”后重试。", Text); return false; }
-        using var editor = new OverFrameFrameEditorForm(_gameRoot, x, frames, initialArt, artSlotId);
+        using var editor = new OverFrameFrameEditorForm(_gameRoot, x, frames, initialArt);
         if (editor.ShowDialog(this) != DialogResult.OK) return false;
         await RefreshModFlagsAsync();
         await Task.Run(() => IndexService.Save(_gameRoot, _textures));
@@ -640,8 +543,7 @@ public sealed class MainForm : Form
                 var updated = scanned.FirstOrDefault(x => x.PathId == texture.PathId && x.AssetFileName == texture.AssetFileName);
                 if (updated is null) continue;
                 texture.Width = updated.Width; texture.Height = updated.Height; texture.Category = updated.Category; texture.OverrideBundlePath = null;
-                if (texture.SourceKind == "本地卡图" && texture.Width == 512 && texture.Height == 512)
-                    texture.Category = texture.IsAlternateArt ? "异画卡图" : texture.IsTokenOrMisc ? "Token／杂图" : "卡图缩略图";
+                IndexService.NormalizeLocalCardCategory(texture);
             }
         }
     }
