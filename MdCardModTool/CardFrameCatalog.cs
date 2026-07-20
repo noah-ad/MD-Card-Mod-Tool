@@ -3,6 +3,9 @@ namespace MdCardModTool;
 /// <summary>游戏内 704×1024 卡框的显示名称、分组与默认选择。</summary>
 public static class CardFrameCatalog
 {
+    /// <summary>游戏把 512×1024 灵摆纹理顶部的 596 行映射进卡框插图区，其余部分作为向下延伸素材。</summary>
+    public const int PendulumVisibleStorageHeight = 596;
+
     static readonly IReadOnlyDictionary<string, string> FriendlyNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
         ["card_frame00"] = "通常怪兽",

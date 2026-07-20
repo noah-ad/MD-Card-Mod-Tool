@@ -28,7 +28,8 @@ public static class CardFrameRenderer
                 var row = data.Stride >= 0 ? y * stride : (source.Height - 1 - y) * stride;
                 for (var x = 0; x < source.Width; x++)
                 {
-                    if (bytes[row + x * 4 + 3] != 0) continue;
+                    // 游戏会让插图延伸到卡框抗锯齿边缘下面；128 阈值与实际渲染边界一致。
+                    if (bytes[row + x * 4 + 3] > 128) continue;
                     left = Math.Min(left, x); top = Math.Min(top, y); right = Math.Max(right, x); bottom = Math.Max(bottom, y);
                 }
             }
@@ -53,7 +54,10 @@ public static class CardFrameRenderer
         using var graphics = Graphics.FromImage(output);
         Configure(graphics);
         graphics.Clear(Color.White);
-        graphics.DrawImage(storedArt, artWindow);
+        var source = storedArt.Width == 512 && storedArt.Height == 1024
+            ? new Rectangle(0, 0, storedArt.Width, CardFrameCatalog.PendulumVisibleStorageHeight)
+            : new Rectangle(0, 0, storedArt.Width, storedArt.Height);
+        graphics.DrawImage(storedArt, artWindow, source, GraphicsUnit.Pixel);
         graphics.DrawImageUnscaled(frame, 0, 0);
         return output;
     }

@@ -346,7 +346,7 @@ public sealed class MainForm : Form
             }
             else if (PreviewFrameFor(x) is { } normalFrame)
             {
-                var window = x.Height == 1024 ? "灵摆宽画面 → 512×1024 存储" : "标准插图区 → 512×512 存储";
+                var window = x.Height == 1024 ? $"灵摆显示区 512×{CardFrameCatalog.PendulumVisibleStorageHeight} → 完整 512×1024 纹理" : "标准插图区 → 512×512 存储";
                 frameLine = $"\n实装预览：{normalFrame.Name} · {CardFrameCatalog.FriendlyName(normalFrame.Name)}  ·  {window}";
             }
             _info.Text = $"{x.Name}  ·  {x.Category}\n{x.Width} × {x.Height}   PathID {x.PathId}\n{x.RelativeBundlePath}{frameLine}";

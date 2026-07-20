@@ -145,6 +145,8 @@ public sealed class ImageCropForm : Form
             var window = _canvas.VisualArtSize;
             _mapping.Text = _fullCardOverlay
                 ? $"超框画布 {window.Width:0}×{window.Height:0}\n保存映射 → {_targetWidth}×{_targetHeight}"
+                : _targetWidth == 512 && _targetHeight == 1024
+                ? $"实际插图区 {window.Width:0}×{window.Height:0}\n显示区 → 512×{CardFrameCatalog.PendulumVisibleStorageHeight} · 完整纹理 512×1024"
                 : $"实际插图区 {window.Width:0}×{window.Height:0}\n保存映射 → {_targetWidth}×{_targetHeight}";
         }
         catch (Exception ex) { _mapping.Text = "卡框预览载入失败：" + ex.Message; }
@@ -160,7 +162,10 @@ public sealed class ImageCropForm : Form
         try
         {
             UseWaitCursor = true;
-            OutputPng = ImageCropService.RenderToTarget(_sourcePath, _canvas.RenderSpec, _targetWidth, _targetHeight);
+            var visibleTargetHeight = !_fullCardOverlay && _targetWidth == 512 && _targetHeight == 1024
+                ? CardFrameCatalog.PendulumVisibleStorageHeight
+                : _targetHeight;
+            OutputPng = ImageCropService.RenderToTarget(_sourcePath, _canvas.RenderSpec, _targetWidth, _targetHeight, visibleTargetHeight);
             DialogResult = DialogResult.OK; Close();
         }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "裁剪失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
@@ -182,9 +187,11 @@ public static class ImageCropService
     }
 
     /// <summary>按用户看到的卡框插图区布局作图，再非等比映射为游戏要求的存储纹理。</summary>
-    public static byte[] RenderToTarget(string sourcePath, ImageRenderSpec spec, int targetWidth, int targetHeight)
+    public static byte[] RenderToTarget(string sourcePath, ImageRenderSpec spec, int targetWidth, int targetHeight, int? visibleTargetHeight = null)
     {
         if (spec.VisualWidth <= 0 || spec.VisualHeight <= 0 || spec.ImageScale <= 0) throw new ArgumentException("裁剪布局无效。", nameof(spec));
+        var mappedHeight = visibleTargetHeight ?? targetHeight;
+        if (mappedHeight <= 0 || mappedHeight > targetHeight) throw new ArgumentOutOfRangeException(nameof(visibleTargetHeight), "显示区高度必须位于输出纹理范围内。");
         using var source = LoadPreview(sourcePath);
         using var output = new Bitmap(targetWidth, targetHeight, PixelFormat.Format32bppArgb);
         using (var graphics = Graphics.FromImage(output))
@@ -194,7 +201,7 @@ public static class ImageCropService
             graphics.CompositingMode = CompositingMode.SourceOver;
             CardFrameRenderer.Configure(graphics);
             var scaleX = targetWidth / spec.VisualWidth;
-            var scaleY = targetHeight / spec.VisualHeight;
+            var scaleY = mappedHeight / spec.VisualHeight;
             var visualWidth = source.Width * spec.ImageScale;
             var visualHeight = source.Height * spec.ImageScale;
             var left = spec.VisualWidth / 2f + spec.OffsetX - visualWidth / 2f;
