@@ -18,6 +18,8 @@ public sealed class TexRef
     public bool IsModded { get; set; }
     public string SourceKind { get; init; } = "";
     public string CardKey { get; init; } = "";
+    /// <summary>普通替换时用于还原游戏实装比例的本地预览卡框；只影响工具预览，不修改全局卡框。</summary>
+    public string PreviewFrameKey { get; set; } = "";
     public string? OverrideBundlePath { get; set; }
     public string ActiveBundlePath => OverrideBundlePath ?? BundlePath;
     public override string ToString() => $"{Name}  ·  {Width}×{Height}";

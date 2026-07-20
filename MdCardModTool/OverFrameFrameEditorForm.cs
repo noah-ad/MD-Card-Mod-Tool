@@ -7,6 +7,7 @@ public sealed class OverFrameFrameEditorForm : Form
     readonly TexRef _art;
     readonly ushort _cardId;
     readonly byte[]? _initialArt;
+    readonly string? _initialFrameKey;
     readonly ModEngine _engine = new();
     readonly OverFrameService _overFrames = new();
     readonly ComboBox _frames = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
@@ -31,39 +32,19 @@ public sealed class OverFrameFrameEditorForm : Form
         public override string ToString() => DisplayName;
     }
 
-    static readonly IReadOnlyDictionary<string, string> FriendlyNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-    {
-        ["card_frame00"] = "通常怪兽",
-        ["card_frame01"] = "效果怪兽",
-        ["card_frame02"] = "仪式怪兽",
-        ["card_frame03"] = "融合怪兽",
-        ["card_frame07"] = "魔法卡",
-        ["card_frame08"] = "陷阱卡",
-        ["card_frame09"] = "衍生物／灰色",
-        ["card_frame10"] = "同调怪兽",
-        ["card_frame12"] = "超量怪兽",
-        ["card_frame13"] = "灵摆通常怪兽",
-        ["card_frame14"] = "灵摆效果怪兽",
-        ["card_frame15"] = "灵摆超量怪兽",
-        ["card_frame16"] = "灵摆同调怪兽",
-        ["card_frame17"] = "灵摆融合怪兽",
-        ["card_frame18"] = "连接怪兽",
-        ["card_frame19"] = "灵摆仪式怪兽"
-    };
-
     public string AppliedFrameName { get; private set; } = "";
 
-    public OverFrameFrameEditorForm(string gameRoot, TexRef art, IEnumerable<TexRef> frames, byte[]? initialArt = null)
+    public OverFrameFrameEditorForm(string gameRoot, TexRef art, IEnumerable<TexRef> frames, byte[]? initialArt = null, string? initialFrameKey = null)
     {
         UiTheme.ApplyDarkTitleBar(this);
         if (!ushort.TryParse(art.CardKey, out _cardId)) throw new ArgumentException("所选资源没有有效卡号。", nameof(art));
-        _gameRoot = gameRoot; _art = art; _initialArt = initialArt;
+        _gameRoot = gameRoot; _art = art; _initialArt = initialArt; _initialFrameKey = initialFrameKey;
         Text = $"卡框选择与编辑 · {_cardId}"; StartPosition = FormStartPosition.CenterParent; Size = new Size(980, 860); MinimumSize = new Size(760, 650);
         BackColor = Color.FromArgb(15, 22, 35); ForeColor = Color.White; Font = new Font("Microsoft YaHei UI", 9F);
 
         foreach (var texture in frames.Where(x => x.Width == FrameComposer.Width && x.Height == FrameComposer.Height).OrderBy(x => x.Name))
         {
-            var suffix = FriendlyNames.TryGetValue(texture.Name, out var friendly) ? $" · {friendly}" : "";
+            var suffix = $" · {CardFrameCatalog.FriendlyName(texture.Name)}";
             _frames.Items.Add(new FrameChoice { Texture = texture, Key = texture.Name, DisplayName = $"{texture.Name}{suffix}" });
         }
 
@@ -116,7 +97,7 @@ public sealed class OverFrameFrameEditorForm : Form
             var settings = OverFrameArtStore.ReadSettings(_gameRoot, _cardId);
             var custom = OverFrameArtStore.CustomFramePath(_gameRoot, _cardId);
             if (File.Exists(custom)) AddOrSelectCustom(custom, select: false);
-            var wanted = settings.UsesCustomFrame ? "__custom__" : settings.FrameKey;
+            var wanted = !string.IsNullOrWhiteSpace(_initialFrameKey) ? _initialFrameKey : settings.UsesCustomFrame ? "__custom__" : settings.FrameKey;
             var index = Enumerable.Range(0, _frames.Items.Count).FirstOrDefault(i => (_frames.Items[i] as FrameChoice)?.Key == wanted, -1);
             if (index < 0) index = Enumerable.Range(0, _frames.Items.Count).FirstOrDefault(i => (_frames.Items[i] as FrameChoice)?.Key == "card_frame01", -1);
             if (index < 0 && _frames.Items.Count > 0) index = 0;
@@ -183,10 +164,17 @@ public sealed class OverFrameFrameEditorForm : Form
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         try
         {
-            using var crop = new ImageCropForm(dialog.FileName, FrameComposer.Width, FrameComposer.Height, $"更换透明高图 {_cardId}");
+            var builtInFrames = _frames.Items.Cast<object>().OfType<FrameChoice>().Where(x => x.Texture is not null).Select(x => x.Texture!).ToArray();
+            var selectedKey = (_frames.SelectedItem as FrameChoice)?.Key;
+            using var crop = new ImageCropForm(dialog.FileName, FrameComposer.Width, FrameComposer.Height, $"更换透明高图 {_cardId}", builtInFrames, selectedKey, fullCardOverlay: true);
             if (crop.ShowDialog(this) != DialogResult.OK || crop.OutputPng is null) return;
             await Task.Run(() => OverFrameArtStore.SaveArt(_gameRoot, _cardId, crop.OutputPng));
             _artBytes = await File.ReadAllBytesAsync(OverFrameArtStore.ArtPath(_gameRoot, _cardId));
+            if (crop.SelectedFrameKey.Length > 0)
+            {
+                var choice = _frames.Items.Cast<object>().OfType<FrameChoice>().FirstOrDefault(x => x.Key.Equals(crop.SelectedFrameKey, StringComparison.OrdinalIgnoreCase));
+                if (choice is not null) _frames.SelectedItem = choice;
+            }
             await RenderAsync();
         }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "透明高图无效", MessageBoxButtons.OK, MessageBoxIcon.Warning); }

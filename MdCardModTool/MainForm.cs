@@ -326,6 +326,11 @@ public sealed class MainForm : Form
             var data = await Task.Run(() => _engine.DecodePng(x));
             Bitmap display;
             if (x.Width == FrameComposer.Width && x.Height == FrameComposer.Height) display = FrameComposer.PreviewBitmap(data);
+            else if (PreviewFrameFor(x) is { } previewFrame)
+            {
+                var frameData = await Task.Run(() => _engine.DecodePng(previewFrame));
+                display = FrameComposer.BitmapFrom(CardFrameRenderer.ComposeStoredArtPreview(data, frameData));
+            }
             else { using var s = new MemoryStream(data); using var im = Image.FromStream(s); display = new Bitmap(im); }
             _preview.Image?.Dispose(); _preview.Image = display;
             _previewHint.Visible = false;
@@ -339,6 +344,11 @@ public sealed class MainForm : Form
                 }
                 else frameLine = "\n卡框：尚未单独合成  ·  点击右下角“卡框选择／编辑”修复白框或选择卡框";
             }
+            else if (PreviewFrameFor(x) is { } normalFrame)
+            {
+                var window = x.Height == 1024 ? "灵摆宽画面 → 512×1024 存储" : "标准插图区 → 512×512 存储";
+                frameLine = $"\n实装预览：{normalFrame.Name} · {CardFrameCatalog.FriendlyName(normalFrame.Name)}  ·  {window}";
+            }
             _info.Text = $"{x.Name}  ·  {x.Category}\n{x.Width} × {x.Height}   PathID {x.PathId}\n{x.RelativeBundlePath}{frameLine}";
         }
         catch (Exception ex) { _status.Text = "预览失败：" + ex.Message; }
@@ -350,9 +360,11 @@ public sealed class MainForm : Form
         byte[] cropped;
         try
         {
-            using var crop = new ImageCropForm(image, x.Width, x.Height, $"替换 {x.Name}");
+            var frames = x.SourceKind == "本地卡图" && x.CardKey.Length > 0 && x.Width == 512 && (x.Height == 512 || x.Height == 1024) ? OverFrameFrames() : null;
+            using var crop = new ImageCropForm(image, x.Width, x.Height, $"替换 {x.Name}", frames, x.PreviewFrameKey);
             if (crop.ShowDialog(this) != DialogResult.OK || crop.OutputPng is null) return;
             cropped = crop.OutputPng;
+            if (crop.SelectedFrameKey.Length > 0) x.PreviewFrameKey = crop.SelectedFrameKey;
         }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "无法打开裁剪器", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
         if (MessageBox.Show(this, $"裁剪结果将以 {x.Width}×{x.Height} 写入游戏 Bundle。原始文件会备份到游戏目录的 _MD卡图备份 中。继续？", "确认替换", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
@@ -433,10 +445,17 @@ public sealed class MainForm : Form
     {
         var art = Selected();
         if (art is null) { MessageBox.Show(this, "先选择一张卡图，再打开卡框预览。", Text); return; }
-        if (art.Width != 704 || art.Height != 1024) { MessageBox.Show(this, $"超框预览只接受 704×1024 高图；当前所选为 {art.Width}×{art.Height}。\n\n请先使用“超框替换”，或选中已经替换完成的高图。", "不是超框高图", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+        var supported = art.Width == FrameComposer.Width && art.Height == FrameComposer.Height || art.Width == 512 && (art.Height == 512 || art.Height == 1024);
+        if (!supported) { MessageBox.Show(this, $"当前图片尺寸 {art.Width}×{art.Height} 不是可预览的卡图。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
         var frames = OverFrameFrames();
         if (frames.Length == 0) { MessageBox.Show(this, "索引中没有 card_frame。请点击“重建索引”后重试。", Text); return; }
-        new FramePreviewForm(_engine, art, frames).Show(this);
+        var preview = new FramePreviewForm(_engine, art, frames);
+        preview.FormClosed += async (_, _) =>
+        {
+            if (_gameRoot is not null) await Task.Run(() => IndexService.Save(_gameRoot, _textures));
+            if (ReferenceEquals(Selected(), art)) await ShowSelectionAsync();
+        };
+        preview.Show(this);
     }
     void OpenOverFrameTable()
     {
@@ -446,7 +465,15 @@ public sealed class MainForm : Form
 
     TexRef[] OverFrameFrames() => _textures.Where(x => x.SourceKind == "卡框资源" && x.Name.StartsWith("card_frame", StringComparison.OrdinalIgnoreCase) && x.Width == FrameComposer.Width && x.Height == FrameComposer.Height).ToArray();
 
-    async Task<bool> OpenFrameEditorAsync(TexRef? texture = null, byte[]? initialArt = null)
+    TexRef? PreviewFrameFor(TexRef texture)
+    {
+        if (texture.SourceKind != "本地卡图" || texture.Width != 512 || (texture.Height != 512 && texture.Height != 1024)) return null;
+        var frames = CardFrameCatalog.CompatibleFrames(OverFrameFrames(), texture.Width, texture.Height).ToArray();
+        var wanted = texture.PreviewFrameKey.Length > 0 ? texture.PreviewFrameKey : CardFrameCatalog.DefaultKey(texture.Width, texture.Height);
+        return frames.FirstOrDefault(x => x.Name.Equals(wanted, StringComparison.OrdinalIgnoreCase)) ?? frames.FirstOrDefault();
+    }
+
+    async Task<bool> OpenFrameEditorAsync(TexRef? texture = null, byte[]? initialArt = null, string? initialFrameKey = null)
     {
         var x = texture ?? Selected();
         if (x is null || _gameRoot is null) { MessageBox.Show(this, "先选择一张超框卡。", Text); return false; }
@@ -457,7 +484,7 @@ public sealed class MainForm : Form
         }
         var frames = OverFrameFrames();
         if (frames.Length == 0) { MessageBox.Show(this, "索引中没有 704×1024 card_frame。请点击“重建索引”后重试。", Text); return false; }
-        using var editor = new OverFrameFrameEditorForm(_gameRoot, x, frames, initialArt);
+        using var editor = new OverFrameFrameEditorForm(_gameRoot, x, frames, initialArt, initialFrameKey);
         if (editor.ShowDialog(this) != DialogResult.OK) return false;
         await RefreshModFlagsAsync();
         await Task.Run(() => IndexService.Save(_gameRoot, _textures));
@@ -475,9 +502,12 @@ public sealed class MainForm : Form
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         try
         {
-            using var crop = new ImageCropForm(dialog.FileName, FrameComposer.Width, FrameComposer.Height, $"超框卡图 {cardId}");
+            var frames = OverFrameFrames();
+            if (frames.Length == 0) { MessageBox.Show(this, "索引中没有 704×1024 card_frame。请点击“重建索引”后重试。", Text); return; }
+            var settings = OverFrameArtStore.ReadSettings(_gameRoot, cardId);
+            using var crop = new ImageCropForm(dialog.FileName, FrameComposer.Width, FrameComposer.Height, $"超框卡图 {cardId}", frames, settings.FrameKey, fullCardOverlay: true);
             if (crop.ShowDialog(this) != DialogResult.OK || crop.OutputPng is null) return;
-            await OpenFrameEditorAsync(x, crop.OutputPng);
+            await OpenFrameEditorAsync(x, crop.OutputPng, crop.SelectedFrameKey);
         }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "超框替换失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         finally { UseWaitCursor = false; }

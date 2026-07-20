@@ -15,7 +15,7 @@ public sealed class FramePreviewForm : Form
     sealed class FrameChoice(TexRef texture)
     {
         public TexRef Texture { get; } = texture;
-        public override string ToString() => $"{Texture.Name}  ·  {Texture.Width}×{Texture.Height}";
+        public override string ToString() => $"{Texture.Name} · {CardFrameCatalog.FriendlyName(Texture.Name)}";
     }
 
     public FramePreviewForm(ModEngine engine, TexRef art, IEnumerable<TexRef> frames)
@@ -28,10 +28,13 @@ public sealed class FramePreviewForm : Form
         var top = new TableLayoutPanel { Dock = DockStyle.Top, Height = 70, Padding = new Padding(12, 10, 12, 8), ColumnCount = 3, BackColor = Color.FromArgb(20, 28, 45) };
         top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         top.Controls.Add(new Label { Text = "卡框", AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Color.FromArgb(160, 195, 255) }, 0, 0); top.Controls.Add(_frames, 1, 0); top.Controls.Add(export, 2, 0);
-        top.Controls.Add(new Label { Text = "按游戏超框层级预览：704×1024 卡框在下、透明高图在上；只合成显示，不写入游戏。", AutoSize = true, ForeColor = Color.Gainsboro }, 0, 1); top.SetColumnSpan(top.GetControlFromPosition(0, 1)!, 3);
-        var choices = frames.Where(x => x.Name.StartsWith("card_frame", StringComparison.OrdinalIgnoreCase) && x.Width == 704 && x.Height == 1024).OrderBy(x => x.Name).Select(x => new FrameChoice(x)).ToArray();
+        var directCard = art.Width == 512 && (art.Height == 512 || art.Height == 1024);
+        top.Controls.Add(new Label { Text = directCard ? "按游戏实际插图区还原显示比例；卡框只用于预览，不会修改全局卡框。" : "按游戏超框层级预览：卡框在下、透明高图在上；只合成显示，不写入游戏。", AutoSize = true, ForeColor = Color.Gainsboro }, 0, 1); top.SetColumnSpan(top.GetControlFromPosition(0, 1)!, 3);
+        var compatible = directCard ? CardFrameCatalog.CompatibleFrames(frames, art.Width, art.Height) : frames.Where(x => x.Name.StartsWith("card_frame", StringComparison.OrdinalIgnoreCase) && x.Width == 704 && x.Height == 1024).OrderBy(x => x.Name);
+        var choices = compatible.Select(x => new FrameChoice(x)).ToArray();
         _frames.Items.AddRange(choices);
-        var defaultIndex = Array.FindIndex(choices, x => x.Texture.Name == "card_frame00" && x.Texture.Width == 704);
+        var wanted = art.PreviewFrameKey.Length > 0 ? art.PreviewFrameKey : CardFrameCatalog.DefaultKey(art.Width, art.Height);
+        var defaultIndex = Array.FindIndex(choices, x => x.Texture.Name.Equals(wanted, StringComparison.OrdinalIgnoreCase));
         _frames.SelectedIndex = defaultIndex >= 0 ? defaultIndex : 0;
         _frames.SelectedIndexChanged += async (_, _) => await RenderAsync();
         Controls.Add(_preview); Controls.Add(_status); Controls.Add(top);
@@ -53,8 +56,11 @@ public sealed class FramePreviewForm : Form
         {
             var sources = await Task.WhenAll(Task.Run(() => _engine.DecodePng(_art)), Task.Run(() => _engine.DecodePng(choice.Texture)));
             if (generation != _generation) return;
-            var composed = await Task.Run(() => FrameComposer.Compose(sources[0], sources[1]));
-            var output = FrameComposer.PreviewBitmap(composed);
+            var composed = await Task.Run(() => _art.Width == FrameComposer.Width && _art.Height == FrameComposer.Height
+                ? FrameComposer.Compose(sources[0], sources[1])
+                : CardFrameRenderer.ComposeStoredArtPreview(sources[0], sources[1]));
+            var output = _art.Width == FrameComposer.Width && _art.Height == FrameComposer.Height ? FrameComposer.PreviewBitmap(composed) : FrameComposer.BitmapFrom(composed);
+            _art.PreviewFrameKey = choice.Texture.Name;
             var old = _preview.Image; _preview.Image = output; old?.Dispose();
             _status.Text = $"{_art.Name}  +  {choice.Texture.Name}（{output.Width}×{output.Height}）";
         }
