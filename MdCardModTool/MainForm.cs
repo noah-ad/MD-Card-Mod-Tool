@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace MdCardModTool;
 
@@ -22,10 +23,12 @@ public sealed class MainForm : Form
     readonly ToolStripStatusLabel _status = new() { Text = "选择游戏目录后扫描；首次扫描会建立缓存。" };
     readonly List<TexRef> _textures = [];
     readonly Button _modsOnlyButton;
+    readonly Button _scanMissingButton;
     string? _gameRoot;
     string? _assetRoot;
     string? _streamingRoot;
     bool _modsOnly;
+    GameIndex? _index;
 
     public MainForm()
     {
@@ -38,6 +41,7 @@ public sealed class MainForm : Form
         _list.SelectedIndexChanged += async (_, _) => await ShowSelectionAsync(); _list.DoubleClick += async (_, _) => await ReplaceSelectedAsync();
         _list.ItemDrag += async (_, e) => await DragOutAsync(e.Item as ListViewItem); _list.DragEnter += OnDragEnter; _list.DragDrop += async (_, e) => await OnDragDropAsync(e);
         _search.TextChanged += (_, _) => RenderList();
+        _search.KeyDown += async (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await ScanMissingCardAsync(); } };
         _category.Items.Add("全部"); _category.SelectedIndex = 0; _category.SelectedIndexChanged += (_, _) => RenderList();
         _groups.AfterSelect += (_, e) => SelectGroup(e.Node?.Tag as string);
         var choose = Button("选择目录", async (_, _) => await ChooseGameAsync()); var scan = Button("重建索引", async (_, _) => await RebuildIndexAsync());
@@ -45,6 +49,7 @@ public sealed class MainForm : Form
         var backup = Button("打开备份", (_, _) => OpenBackup()); var restore = Button("还原所选", async (_, _) => await RestoreSelectedAsync(), ButtonTone.Danger); var inspect = Button("检查 Bundle", async (_, _) => await InspectSelectedAsync());
         var overFrameReplace = Button("超框替换", async (_, _) => await OverFrameReplaceAsync(), ButtonTone.Gold); var frameEditor = Button("卡框选择 / 编辑", async (_, _) => await OpenFrameEditorAsync()); var framePreview = Button("卡框预览", (_, _) => OpenFramePreview()); var overFrameTable = Button("超框表", (_, _) => OpenOverFrameTable());
         _modsOnlyButton = Button("只看我的 Mod", (_, _) => ToggleModsOnly(), ButtonTone.Gold);
+        _scanMissingButton = Button("本地补查", async (_, _) => await ScanMissingCardAsync(), ButtonTone.Neutral);
         var exportMods = Button("一键导出全部 Mod", async (_, _) => await ExportAllModsAsync(), ButtonTone.Primary);
         var importMods = Button("导入 Mod 包", async (_, _) => await ImportModsAsync());
 
@@ -58,7 +63,7 @@ public sealed class MainForm : Form
 
         var commands = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(13, 7, 18, 7), BackColor = UiTheme.SurfaceAlt, ColumnCount = 7, RowCount = 1 };
         commands.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); commands.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 230)); for (var i = 0; i < 5; i++) commands.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        commands.Controls.Add(_search, 0, 0); commands.Controls.Add(_category, 1, 0); commands.Controls.Add(replace, 2, 0); commands.Controls.Add(export, 3, 0); commands.Controls.Add(restore, 4, 0); commands.Controls.Add(backup, 5, 0);
+        commands.Controls.Add(_search, 0, 0); commands.Controls.Add(_category, 1, 0); commands.Controls.Add(replace, 2, 0); commands.Controls.Add(export, 3, 0); commands.Controls.Add(restore, 4, 0); commands.Controls.Add(backup, 5, 0); commands.Controls.Add(_scanMissingButton, 6, 0);
 
         var modBar = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(18, 5, 18, 5), BackColor = Color.FromArgb(18, 31, 50), ColumnCount = 5, RowCount = 1 };
         modBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); modBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); modBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); modBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); modBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -164,6 +169,7 @@ public sealed class MainForm : Form
             }
             // 480×700 是另一套界面用小卡框，不属于游戏超框预览。
             cached.Textures.RemoveAll(x => x.SourceKind == "卡框资源" && (x.Width != 704 || x.Height != 1024));
+            _index = cached;
             _textures.AddRange(cached.Textures);
             var currentBuildId = loadedFromPrebuilt ? PortableIndexService.GetGameBuildId(_gameRoot!) : "";
             var buildNote = prebuiltBuildId.Length > 0 && currentBuildId.Length > 0 && prebuiltBuildId != currentBuildId ? $"；预绑定 Build {prebuiltBuildId}，本机 Build {currentBuildId}，若个别资源失效请重建索引" : "";
@@ -214,11 +220,58 @@ public sealed class MainForm : Form
     void RenderList()
     {
         var q = _search.Text.Trim(); var filter = _category.Text; _list.BeginUpdate(); _list.Items.Clear();
-        foreach (var x in _textures.Where(x => (!_modsOnly || x.IsModded) && (filter == "全部" || filter == $"{x.SourceKind}|{x.Category}") && (q.Length == 0 || $"{x.Name} {x.CardKey} {x.SourceKind} {x.Category} {x.RelativeBundlePath}".Contains(q, StringComparison.OrdinalIgnoreCase))))
+        // 输入关键字时始终全局检索，不能被侧栏分类或“只看我的 Mod”悄悄过滤掉。
+        var globalSearch = q.Length > 0;
+        foreach (var x in _textures.Where(x => (globalSearch || (!_modsOnly || x.IsModded) && (filter == "全部" || filter == $"{x.SourceKind}|{x.Category}")) && (q.Length == 0 || $"{x.Name} {x.CardKey} {x.SourceKind} {x.Category} {x.RelativeBundlePath}".Contains(q, StringComparison.OrdinalIgnoreCase))))
             _list.Items.Add(new ListViewItem([x.Name, $"{x.SourceKind} / {x.Category}{(x.IsModded ? "  · MOD" : "")}", $"{x.Width}×{x.Height}", x.RelativeBundlePath]) { Tag = x });
         _list.EndUpdate();
-        var total = _modsOnly ? _textures.Count(x => x.IsModded) : _textures.Count;
-        _resultCount.Text = $"{_list.Items.Count:N0} / {total:N0} 项";
+        var total = globalSearch ? _textures.Count : _modsOnly ? _textures.Count(x => x.IsModded) : _textures.Count;
+        _resultCount.Text = globalSearch ? $"全局 { _list.Items.Count:N0} / {total:N0}" : $"{_list.Items.Count:N0} / {total:N0} 项";
+    }
+
+    async Task ScanMissingCardAsync()
+    {
+        var cardKey = _search.Text.Trim();
+        if (!Regex.IsMatch(cardKey, "^\\d+$"))
+        {
+            MessageBox.Show(this, "“本地补查”只用于纯数字卡号，例如 11213。\n\n普通名称搜索会直接在现有索引中全局查找。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (_gameRoot is null || _index is null) return;
+        var existing = _textures.FirstOrDefault(x => x.SourceKind == "本地卡图" && x.CardKey == cardKey);
+        if (existing is not null)
+        {
+            SetModsOnly(false); _category.SelectedItem = "全部"; RenderList(); SelectTexture(existing);
+            _status.Text = $"卡号 {cardKey} 已在本机索引中；当前以全局检索显示，不受分类筛选影响。";
+            return;
+        }
+        try
+        {
+            _scanMissingButton.Enabled = false;
+            _status.Text = $"正在后台补查卡号 {cardKey}：只检查未索引的 LocalData Bundle，不会卡住界面…";
+            var result = await Task.Run(() => IndexService.ScanMissingLocalCard(_gameRoot, _index, cardKey, (done, total, added) =>
+            {
+                if (!IsDisposed && IsHandleCreated) BeginInvoke(() => _status.Text = $"正在后台补查 {cardKey}：{done:N0}/{total:N0} 个未索引 Bundle，新增 {added:N0} 张卡图…");
+            }));
+            var known = _textures.Select(x => $"{x.BundlePath}\0{x.AssetFileName}\0{x.PathId}").ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var additions = result.Textures.Where(x => known.Add($"{x.BundlePath}\0{x.AssetFileName}\0{x.PathId}")).ToList();
+            if (additions.Count > 0)
+            {
+                await YgoCdbCardCatalog.ClassifyTexturesAsync(additions);
+                _index.Textures.AddRange(additions); _textures.AddRange(additions);
+            }
+            await Task.Run(() => IndexService.Save(_gameRoot, _index));
+            RefreshCategories(); RenderList();
+            var found = _textures.FirstOrDefault(x => x.SourceKind == "本地卡图" && x.CardKey == cardKey);
+            if (found is not null)
+            {
+                SetModsOnly(false); _category.SelectedItem = "全部"; RenderList(); SelectTexture(found);
+                _status.Text = $"已从本机 LocalData 补查到卡号 {cardKey}，映射已保存；以后启动和搜索都不会再扫描。";
+            }
+            else _status.Text = $"本机 LocalData 中未找到 {cardKey} 的 512×512 缩略图；已检查 {result.ScannedBundles:N0} 个未索引 Bundle，结果已缓存，不会重复卡扫。";
+        }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "本地补查失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        finally { _scanMissingButton.Enabled = true; }
     }
 
     void SelectGroup(string? key)

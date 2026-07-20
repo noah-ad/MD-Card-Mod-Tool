@@ -30,7 +30,8 @@ public static class IndexService
     {
         var localRoot = FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000");
         var streamingRoot = StreamingRoot(gameRoot);
-        // 原始 512×512 卡图 Bundle 压缩后集中在 200–300 KB；先预筛，避免解析其余 2 万多个非卡图 Bundle。
+        // 大多数缩略图 Bundle 位于这个区间，首次索引先走快速路径。
+        // 少数不符合该大小规律的卡，在用户按卡号补查时再后台扫描并永久写进本地缓存。
         // 已由本工具备份过的 Bundle 也要纳入：超框图会变成 704×1024，文件大小不再落在这个区间内。
         var localPaths = new HashSet<string>(Directory.EnumerateFiles(localRoot, "*", SearchOption.AllDirectories).Select(x => new FileInfo(x)).Where(x => x.Length >= 200_000 && x.Length < 300_000 && IsUnityBundle(x.FullName)).Select(x => x.FullName), StringComparer.OrdinalIgnoreCase);
         var backedLocal = Path.Combine(gameRoot, "_MD卡图备份", "本地卡图");
@@ -69,7 +70,12 @@ public static class IndexService
         var localRoot = FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000");
         var path = CachePath(localRoot, StreamingRoot(gameRoot));
         var existing = File.Exists(path) ? JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(path)) : null;
-        Save(gameRoot, new GameIndex { Textures = textures.ToList(), AlternateArtIndexVersion = existing?.AlternateArtIndexVersion ?? 0 });
+        Save(gameRoot, new GameIndex
+        {
+            Textures = textures.ToList(),
+            AlternateArtIndexVersion = existing?.AlternateArtIndexVersion ?? 0,
+            CheckedLocalBundlePaths = existing?.CheckedLocalBundlePaths ?? []
+        });
     }
 
     public static void Save(string gameRoot, GameIndex index)
@@ -109,9 +115,100 @@ public static class IndexService
         catch { return []; }
     }
 
+    /// <summary>
+    /// 补查首次快速索引漏掉的本地卡图。只在用户明确检索一个缺失卡号时调用；
+    /// 扫描在后台进行、并记录已检查过的 Bundle，后续不再重复扫描。
+    /// </summary>
+    public static MissingCardScanResult ScanMissingLocalCard(
+        string gameRoot,
+        GameIndex index,
+        string cardKey,
+        Action<int, int, int>? progress = null,
+        CancellationToken cancellationToken = default,
+        bool ignorePreviouslyChecked = false)
+    {
+        if (string.IsNullOrWhiteSpace(cardKey) || !cardKey.All(char.IsAsciiDigit))
+            throw new ArgumentException("补查只接受纯数字卡号。", nameof(cardKey));
+
+        var localRoot = FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000");
+        var known = index.Textures
+            .Where(x => x.SourceKind == "本地卡图")
+            .Select(x => Path.GetFullPath(x.BundlePath))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var checkedPaths = index.CheckedLocalBundlePaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var files = Directory.EnumerateFiles(localRoot, "*", SearchOption.AllDirectories)
+            .Where(path => !known.Contains(Path.GetFullPath(path)))
+            .Where(path => ignorePreviouslyChecked || !checkedPaths.Contains(Path.GetRelativePath(localRoot, path)))
+            .Where(IsUnityBundle)
+            // 200–300 KB 的 Bundle 已在首次快速索引中完整解析；即使它不含贴图，
+            // 也不应在补查时重新进入队列并拖慢一次按卡号检索。
+            .Select(path => new FileInfo(path))
+            .Where(file => file.Length < 200_000 || file.Length >= 300_000)
+            // 漏项通常只是原图压缩率让文件刚好越过 200–300 KB 边界；
+            // 先查最接近常规卡图 Bundle 大小的文件，避免一开始就卡在大型 UI 资源上。
+            .OrderBy(file => Math.Abs(file.Length - 250_000L))
+            .Select(file => file.FullName)
+            .ToArray();
+
+        var found = 0; var done = 0;
+        var added = new ConcurrentBag<TexRef>();
+        var newlyChecked = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+        var engine = new ModEngine();
+        Parallel.ForEach(files, new ParallelOptions { MaxDegreeOfParallelism = 2, CancellationToken = cancellationToken }, (path, state) =>
+        {
+            var relative = Path.GetRelativePath(localRoot, path);
+            try
+            {
+                var scan = engine.ScanBundle(path, localRoot, "本地卡图", includeDependencies: false);
+                foreach (var texture in scan.Textures.Where(texture => IsMissingCardCandidate(texture) || IsCardOriginal(texture) || texture.CardKey == cardKey))
+                {
+                    // P<卡号> 是游戏使用的原画资源；当某些卡没有单独的 512 缩略图时，
+                    // 仍可按原卡号找到并替换，不能把它误报为“未下载”。
+                    added.Add(texture);
+                    if (texture.CardKey == cardKey)
+                    {
+                        Interlocked.Exchange(ref found, 1);
+                        state.Stop();
+                    }
+                }
+            }
+            catch { }
+            finally
+            {
+                newlyChecked.TryAdd(relative, 0);
+                var current = Interlocked.Increment(ref done);
+                if (current % 25 == 0 || current == files.Length || Volatile.Read(ref found) != 0)
+                    progress?.Invoke(current, files.Length, added.Count);
+            }
+        });
+
+        foreach (var relative in newlyChecked.Keys)
+            if (!checkedPaths.Contains(relative)) index.CheckedLocalBundlePaths.Add(relative);
+
+        var unique = added
+            .GroupBy(x => $"{x.BundlePath}\0{x.AssetFileName}\0{x.PathId}", StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.First())
+            .ToList();
+        return new MissingCardScanResult { Textures = unique, ScannedBundles = done, TotalBundles = files.Length, Found = Volatile.Read(ref found) != 0 };
+    }
+
+    static bool IsMissingCardCandidate(TexRef texture) =>
+        texture.CardKey.Length > 0 && texture.Width == 512 && texture.Height == 512;
+
+    static bool IsCardOriginal(TexRef texture) =>
+        texture.Name.StartsWith('P') && texture.CardKey.Length > 0 && texture.Width >= 512 && texture.Height >= 512;
+
     static bool IsUnityBundle(string path)
     {
         try { using var stream = File.OpenRead(path); var bytes = new byte[7]; return stream.Read(bytes) == 7 && Encoding.ASCII.GetString(bytes) == "UnityFS"; }
         catch { return false; }
     }
+}
+
+public sealed class MissingCardScanResult
+{
+    public List<TexRef> Textures { get; init; } = [];
+    public int ScannedBundles { get; init; }
+    public int TotalBundles { get; init; }
+    public bool Found { get; init; }
 }

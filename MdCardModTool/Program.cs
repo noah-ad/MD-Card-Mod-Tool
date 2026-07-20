@@ -12,6 +12,48 @@ internal static class Program
             IndexService.BuildAndSave(args[1], (done, total, found) => Console.WriteLine($"{done}/{total}; textures={found}"));
             return;
         }
+        if (args.Length == 3 && args[0] == "--scan-card")
+        {
+            var local = IndexService.FindLocalRoot(args[1]) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");
+            var cache = IndexService.CachePath(local, IndexService.StreamingRoot(args[1]));
+            var index = File.Exists(cache) ? JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(cache)) ?? new GameIndex() : new GameIndex();
+            var result = IndexService.ScanMissingLocalCard(args[1], index, args[2], (done, total, added) => Console.WriteLine($"{done}/{total}; added={added}"));
+            var known = index.Textures.Select(x => $"{x.BundlePath}\0{x.AssetFileName}\0{x.PathId}").ToHashSet(StringComparer.OrdinalIgnoreCase);
+            index.Textures.AddRange(result.Textures.Where(x => known.Add($"{x.BundlePath}\0{x.AssetFileName}\0{x.PathId}")));
+            IndexService.Save(args[1], index);
+            foreach (var x in index.Textures.Where(x => x.SourceKind == "本地卡图" && x.CardKey == args[2])) Console.WriteLine($"FOUND {x.Name}; {x.Width}x{x.Height}; {x.RelativeBundlePath}");
+            return;
+        }
+        if (args.Length == 3 && args[0] == "--scan-card-any")
+        {
+            var local = IndexService.FindLocalRoot(args[1]) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");
+            var cache = IndexService.CachePath(local, IndexService.StreamingRoot(args[1]));
+            var index = File.Exists(cache) ? JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(cache)) ?? new GameIndex() : new GameIndex();
+            var result = IndexService.ScanMissingLocalCard(args[1], index, args[2], null, default, ignorePreviouslyChecked: true);
+            foreach (var x in result.Textures.Where(x => x.CardKey == args[2])) Console.WriteLine($"FOUND {x.Name}; {x.Width}x{x.Height}; {x.RelativeBundlePath}");
+            return;
+        }
+        if (args.Length == 2 && args[0] == "--enrich-local-card-index")
+        {
+            var local = IndexService.FindLocalRoot(args[1]) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");
+            var cache = IndexService.CachePath(local, IndexService.StreamingRoot(args[1]));
+            var index = File.Exists(cache) ? JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(cache)) ?? new GameIndex() : new GameIndex();
+            var result = IndexService.ScanMissingLocalCard(args[1], index, "0", (done, total, added) => Console.WriteLine($"{done}/{total}; added={added}"), default, ignorePreviouslyChecked: true);
+            var known = index.Textures.Select(x => $"{x.BundlePath}\0{x.AssetFileName}\0{x.PathId}").ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var additions = result.Textures.Where(x => known.Add($"{x.BundlePath}\0{x.AssetFileName}\0{x.PathId}")).ToList();
+            YgoCdbCardCatalog.ClassifyTexturesAsync(additions).GetAwaiter().GetResult();
+            index.Textures.AddRange(additions);
+            IndexService.Save(args[1], index);
+            Console.WriteLine($"added={additions.Count}; originals={additions.Count(x => x.Name.StartsWith('P'))}; total={index.Textures.Count}");
+            return;
+        }
+        if (args.Length == 4 && args[0] == "--probe-card")
+        {
+            var found = new ModEngine().ScanBundle(args[1], args[2], "本地卡图", includeDependencies: false).Textures
+                .Any(x => x.CardKey == args[3]);
+            Environment.ExitCode = found ? 2 : 0;
+            return;
+        }
         if (args.Length == 2 && args[0] == "--find-card-frame")
         {
             var game = args[1];

@@ -14,11 +14,14 @@ namespace MdCardModTool;
 public sealed class ModEngine
 {
     readonly string _classData = Path.Combine(AppContext.BaseDirectory, "classdata.tpk");
+    // 索引会连续解析数万 Bundle。每个文件重载一次 classdata.tpk 会让扫描时间成倍膨胀；
+    // AssetsManager 不跨线程共享，因此按工作线程缓存，在每个 Bundle 后仍 UnloadAll 释放文件句柄。
+    [ThreadStatic] static AssetsManager? _threadManager;
 
     AssetsManager NewManager()
     {
-        var manager = new AssetsManager();
-        if (File.Exists(_classData)) manager.LoadClassPackage(_classData);
+        var manager = _threadManager ??= new AssetsManager();
+        if (manager.ClassPackage is null && File.Exists(_classData)) manager.LoadClassPackage(_classData);
         return manager;
     }
 

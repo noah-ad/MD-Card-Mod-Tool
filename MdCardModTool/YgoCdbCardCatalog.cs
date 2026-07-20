@@ -27,7 +27,17 @@ public static class YgoCdbCardCatalog
     {
         if (index.AlternateArtIndexVersion >= ClassificationVersion) return;
         var normalCardIds = await LoadCardIdsAsync();
-        foreach (var texture in index.Textures.Where(IsLocalCardTexture))
+        ClassifyTextures(index.Textures, normalCardIds);
+        index.AlternateArtIndexVersion = ClassificationVersion;
+    }
+
+    /// <summary>为按需补查加入的新卡图套用已有的本地 CID 名单；名单缺失时才会下载一次。</summary>
+    public static async Task ClassifyTexturesAsync(IEnumerable<TexRef> textures)
+        => ClassifyTextures(textures, await LoadCardIdsAsync());
+
+    static void ClassifyTextures(IEnumerable<TexRef> textures, HashSet<string> normalCardIds)
+    {
+        foreach (var texture in textures.Where(IsLocalCardTexture))
         {
             var isNormalCard = normalCardIds.Contains(texture.CardKey);
             var isInAlternateArtRange = int.TryParse(texture.CardKey, out var cardId) && cardId >= AlternateArtFirstId && cardId <= AlternateArtLastId;
@@ -37,7 +47,6 @@ public static class YgoCdbCardCatalog
             if (texture.Width == 512 && texture.Height == 512)
                 texture.Category = texture.IsAlternateArt ? "异画卡图" : texture.IsTokenOrMisc ? "Token／杂图" : "卡图缩略图";
         }
-        index.AlternateArtIndexVersion = ClassificationVersion;
     }
 
     static bool IsLocalCardTexture(TexRef texture) =>
