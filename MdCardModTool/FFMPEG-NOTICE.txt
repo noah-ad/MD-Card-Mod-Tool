@@ -1,0 +1,15 @@
+FFmpeg notice
+=============
+
+The portable release may include an unmodified FFmpeg executable in tools/ffmpeg.exe
+to decode GIF and video files locally. FFmpeg is a separate program and is not linked
+into MD Card Mod Tool. The v1.6.0 release uses the Windows essentials build from
+Gyan.dev; `ffmpeg -version` reports GPL v3 configuration.
+
+FFmpeg project: https://ffmpeg.org/
+Source code: https://ffmpeg.org/download.html#get-sources
+License information: https://ffmpeg.org/legal.html
+Windows build and corresponding source packages: https://www.gyan.dev/ffmpeg/builds/
+
+Run `tools\ffmpeg.exe -version` to see the exact build configuration and copyright
+information of the binary included in a particular release.

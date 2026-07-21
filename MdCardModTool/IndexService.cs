@@ -194,7 +194,12 @@ public static class IndexService
     public static string CardIllustrationRelativePath(string cardKey, string illustrationType = "tcg")
     {
         if (string.IsNullOrWhiteSpace(cardKey) || !cardKey.All(char.IsAsciiDigit)) throw new ArgumentException("卡号必须是纯数字。", nameof(cardKey));
-        var logicalPath = $"Card/Images/Illust/{illustrationType}/{cardKey}";
+        return ResourceBundleRelativePath($"Card/Images/Illust/{illustrationType}/{cardKey}");
+    }
+
+    public static string ResourceBundleRelativePath(string logicalPath)
+    {
+        if (string.IsNullOrWhiteSpace(logicalPath)) throw new ArgumentException("资源逻辑路径不能为空。", nameof(logicalPath));
         var hash = Crc32(logicalPath).ToString("x8");
         return Path.Combine(hash[..2], hash);
     }

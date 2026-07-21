@@ -8,6 +8,7 @@ using SharpImage = SixLabors.ImageSharp.Image;
 using SharpSize = SixLabors.ImageSharp.Size;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Diagnostics;
 
 namespace MdCardModTool;
 
@@ -82,6 +83,70 @@ public sealed class ModEngine
         return result;
     }
 
+    /// <summary>
+    /// Reads only the leading m_Name field of Texture2D/TextAsset objects. This is used to build
+    /// the portable summon-animation map without decoding tens of thousands of unrelated assets.
+    /// </summary>
+    public List<MonsterAnimationAssetRef> ScanAnimationAssetsFast(string bundlePath, string root)
+    {
+        var result = new List<MonsterAnimationAssetRef>();
+        var manager = NewManager();
+        try
+        {
+            var bundle = manager.LoadBundleFile(bundlePath);
+            foreach (var entry in bundle.file.GetAllFileNames())
+            {
+                try
+                {
+                    var assets = manager.LoadAssetsFileFromBundle(bundle, entry, false);
+                    foreach (var type in new[] { AssetClassID.Texture2D, AssetClassID.TextAsset })
+                    {
+                        foreach (var info in assets.file.GetAssetsOfType(type))
+                        {
+                            var reader = assets.file.Reader;
+                            var end = info.GetAbsoluteByteStart(assets.file) + info.ByteSize;
+                            reader.Position = info.GetAbsoluteByteStart(assets.file);
+                            var name = ReadAlignedString(reader, end);
+                            if (!TryAnimationName(name, type, out var cardId, out var kind)) continue;
+                            result.Add(new MonsterAnimationAssetRef
+                            {
+                                BundlePath = bundlePath,
+                                RelativeBundlePath = Path.GetRelativePath(root, bundlePath),
+                                AssetFileName = entry,
+                                PathId = info.PathId,
+                                Name = name,
+                                CardId = cardId,
+                                Kind = kind
+                            });
+                        }
+                    }
+                }
+                catch { }
+            }
+            return result;
+        }
+        finally { manager.UnloadAll(); }
+    }
+
+    static bool TryAnimationName(string name, AssetClassID type, out string cardId, out MonsterAnimationAssetKind kind)
+    {
+        cardId = ""; kind = default;
+        Match match;
+        if (type == AssetClassID.Texture2D)
+        {
+            match = Regex.Match(name, "^P(?<id>\\d+)$", RegexOptions.IgnoreCase);
+            kind = MonsterAnimationAssetKind.Texture;
+        }
+        else
+        {
+            match = Regex.Match(name, "^P(?<id>\\d+)(?<suffix>JS|\\.atlas)$", RegexOptions.IgnoreCase);
+            kind = name.EndsWith("JS", StringComparison.OrdinalIgnoreCase) ? MonsterAnimationAssetKind.Skeleton : MonsterAnimationAssetKind.Atlas;
+        }
+        if (!match.Success) return false;
+        cardId = match.Groups["id"].Value;
+        return true;
+    }
+
     static string CategoryFor(string name, int width, int height)
     {
         if (name.StartsWith("card_frame", StringComparison.OrdinalIgnoreCase)) return "卡框 card_frame";
@@ -119,6 +184,37 @@ public sealed class ModEngine
                 catch { }
             }
             return new BundleSummary { RelativePath = Path.GetRelativePath(root, bundlePath), SerializedFiles = serialized, AssetTypes = types };
+        }
+        finally { manager.UnloadAll(); }
+    }
+
+    public List<string> ReadAssetBundleContainerPaths(string bundlePath)
+    {
+        var result = new List<string>();
+        var manager = NewManager();
+        try
+        {
+            var bundle = manager.LoadBundleFile(bundlePath);
+            foreach (var entry in bundle.file.GetAllFileNames())
+            {
+                try
+                {
+                    var assets = manager.LoadAssetsFileFromBundle(bundle, entry);
+                    EnsureDatabase(manager, assets);
+                    foreach (var info in assets.file.GetAssetsOfType(AssetClassID.AssetBundle))
+                    {
+                        var field = manager.GetBaseField(assets, info);
+                        var array = field["m_Container"]["Array"];
+                        foreach (var pair in array.Children)
+                        {
+                            var path = pair["first"].AsString;
+                            if (!string.IsNullOrWhiteSpace(path)) result.Add(path);
+                        }
+                    }
+                }
+                catch { }
+            }
+            return result;
         }
         finally { manager.UnloadAll(); }
     }
@@ -178,6 +274,31 @@ public sealed class ModEngine
                 catch { }
             }
             return null;
+        }
+        finally { manager.UnloadAll(); }
+    }
+
+    public TextAssetRef ReadTextAsset(MonsterAnimationAssetRef asset)
+    {
+        if (asset.Kind == MonsterAnimationAssetKind.Texture) throw new ArgumentException("动画纹理不是 TextAsset。", nameof(asset));
+        var manager = NewManager();
+        try
+        {
+            var bundle = manager.LoadBundleFile(asset.BundlePath);
+            var assets = manager.LoadAssetsFileFromBundle(bundle, asset.AssetFileName);
+            EnsureDatabase(manager, assets);
+            var info = assets.file.GetAssetsOfType(AssetClassID.TextAsset).First(x => x.PathId == asset.PathId);
+            var field = manager.GetBaseField(assets, info);
+            return new TextAssetRef
+            {
+                BundlePath = asset.BundlePath,
+                RelativeBundlePath = asset.RelativeBundlePath,
+                AssetFileName = asset.AssetFileName,
+                Name = field["m_Name"].AsString,
+                PathName = field["m_PathName"].IsDummy ? "" : field["m_PathName"].AsString,
+                PathId = info.PathId,
+                Data = field["m_Script"].AsByteArray
+            };
         }
         finally { manager.UnloadAll(); }
     }
@@ -321,12 +442,68 @@ public sealed class ModEngine
 
     void ReplaceImage(TexRef texture, SixLabors.ImageSharp.Image<Rgba32> image, string backupRoot)
     {
-        var backup = Path.Combine(backupRoot, texture.RelativeBundlePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
-        if (!File.Exists(backup)) File.Copy(texture.BundlePath, backup);
         image.Mutate(x => x.Flip(FlipMode.Vertical));
         var pixels = new byte[image.Width * image.Height * 4];
         image.CopyPixelDataTo(pixels);
+        ReplaceTextureData(texture, image.Width, image.Height, 4, pixels, backupRoot);
+    }
+
+    public void ReplaceAnimationAtlas(MonsterAnimationAssetRef asset, SixLabors.ImageSharp.Image<Rgba32> atlas, string backupRoot)
+    {
+        if (asset.Kind != MonsterAnimationAssetKind.Texture) throw new ArgumentException("目标不是动画 Texture2D。", nameof(asset));
+        ReplaceAnimationAtlas(asset, EncodeAnimationAtlas(atlas), backupRoot);
+    }
+
+    public AnimationAtlasTextureData EncodeAnimationAtlas(SixLabors.ImageSharp.Image<Rgba32> atlas)
+    {
+        var texconv = Path.Combine(AppContext.BaseDirectory, "tools", "texconv.exe");
+        if (!File.Exists(texconv)) throw new FileNotFoundException("缺少动画图集编码器 tools\\texconv.exe，请使用完整分享包。", texconv);
+        var temporary = Path.Combine(Path.GetTempPath(), "MDCardModTool", "texconv_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporary);
+        try
+        {
+            var input = Path.Combine(temporary, "atlas.png");
+            using (var flipped = atlas.Clone(x => x.Flip(FlipMode.Vertical))) flipped.SaveAsPng(input);
+            var start = new ProcessStartInfo
+            {
+                FileName = texconv,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true
+            };
+            foreach (var arg in new[] { "-nologo", "-y", "-f", "BC3_UNORM", "-m", "1", "-o", temporary, input }) start.ArgumentList.Add(arg);
+            using var process = Process.Start(start) ?? throw new InvalidOperationException("无法启动 texconv.exe。");
+            var standardOutput = process.StandardOutput.ReadToEndAsync();
+            var standardError = process.StandardError.ReadToEndAsync();
+            process.WaitForExit();
+            Task.WaitAll(standardOutput, standardError);
+            if (process.ExitCode != 0) throw new InvalidDataException("texconv 无法压缩动画图集：" + (standardError.Result + " " + standardOutput.Result).Trim());
+            var dds = Directory.EnumerateFiles(temporary, "*.dds", SearchOption.TopDirectoryOnly).FirstOrDefault()
+                ?? Directory.EnumerateFiles(temporary, "*.DDS", SearchOption.TopDirectoryOnly).FirstOrDefault()
+                ?? throw new InvalidDataException("texconv 没有生成 DDS 数据。");
+            var bytes = File.ReadAllBytes(dds);
+            var expected = ((atlas.Width + 3) / 4) * ((atlas.Height + 3) / 4) * 16;
+            if (bytes.Length < expected + 128 || !bytes.AsSpan(0, 4).SequenceEqual("DDS "u8)) throw new InvalidDataException("texconv 生成的 DDS/BC3 数据不完整。");
+            return new AnimationAtlasTextureData(atlas.Width, atlas.Height, bytes.AsSpan(bytes.Length - expected, expected).ToArray());
+        }
+        finally
+        {
+            try { Directory.Delete(temporary, true); } catch { }
+        }
+    }
+
+    public void ReplaceAnimationAtlas(MonsterAnimationAssetRef asset, AnimationAtlasTextureData encoded, string backupRoot)
+    {
+        if (asset.Kind != MonsterAnimationAssetKind.Texture) throw new ArgumentException("目标不是动画 Texture2D。", nameof(asset));
+        ReplaceTextureData(asset.AsTexture(), encoded.Width, encoded.Height, 12, encoded.Data, backupRoot); // Unity TextureFormat.DXT5
+    }
+
+    void ReplaceTextureData(TexRef texture, int width, int height, int textureFormat, byte[] pixels, string backupRoot)
+    {
+        var backup = Path.Combine(backupRoot, texture.RelativeBundlePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
+        if (!File.Exists(backup)) File.Copy(texture.BundlePath, backup);
         var temporary = texture.ActiveBundlePath + ".mdcardtool.tmp";
         var manager = NewManager();
         try
@@ -336,9 +513,9 @@ public sealed class ModEngine
             EnsureDatabase(manager, assets);
             var info = assets.file.GetAssetsOfType(AssetClassID.Texture2D).First(x => x.PathId == texture.PathId);
             var field = manager.GetBaseField(assets, info);
-            field["m_Width"].AsInt = image.Width;
-            field["m_Height"].AsInt = image.Height;
-            field["m_TextureFormat"].AsInt = 4; // RGBA32: portable for the mod loader
+            field["m_Width"].AsInt = width;
+            field["m_Height"].AsInt = height;
+            field["m_TextureFormat"].AsInt = textureFormat;
             field["m_MipCount"].AsInt = 1;
             if (field["m_CompleteImageSize"] is { IsDummy: false } size) size.AsInt = pixels.Length;
             field["image data"].AsByteArray = pixels;
@@ -362,9 +539,9 @@ public sealed class ModEngine
         }
         finally { manager.UnloadAll(); }
         File.Move(temporary, texture.ActiveBundlePath, true);
-        texture.Width = image.Width;
-        texture.Height = image.Height;
-        texture.Category = CategoryFor(texture.Name, image.Width, image.Height);
+        texture.Width = width;
+        texture.Height = height;
+        texture.Category = CategoryFor(texture.Name, width, height);
     }
 
     public (int Width, int Height) ImageDimensions(string imagePath)
@@ -373,3 +550,5 @@ public sealed class ModEngine
         return (info.Width, info.Height);
     }
 }
+
+public sealed record AnimationAtlasTextureData(int Width, int Height, byte[] Data);

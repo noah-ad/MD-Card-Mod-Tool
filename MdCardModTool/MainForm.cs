@@ -29,6 +29,8 @@ public sealed class MainForm : Form
     string? _streamingRoot;
     bool _modsOnly;
     GameIndex? _index;
+    int _changedModBundleCount;
+    int _changedAnimationBundleCount;
 
     public MainForm()
     {
@@ -47,7 +49,7 @@ public sealed class MainForm : Form
         var choose = Button("选择目录", async (_, _) => await ChooseGameAsync()); var scan = Button("重建索引", async (_, _) => await RebuildIndexAsync());
         var replace = Button("替换所选", async (_, _) => await ReplaceSelectedAsync(), ButtonTone.Primary); var export = Button("导出 PNG", async (_, _) => await ExportSelectedAsync());
         var backup = Button("打开备份", (_, _) => OpenBackup()); var restore = Button("还原所选", async (_, _) => await RestoreSelectedAsync(), ButtonTone.Danger); var inspect = Button("检查 Bundle", async (_, _) => await InspectSelectedAsync());
-        var overFrameReplace = Button("超框替换", async (_, _) => await OverFrameReplaceAsync(), ButtonTone.Gold); var frameEditor = Button("卡框选择 / 编辑", async (_, _) => await OpenFrameEditorAsync()); var framePreview = Button("卡框预览", (_, _) => OpenFramePreview()); var overFrameTable = Button("超框表", (_, _) => OpenOverFrameTable());
+        var overFrameReplace = Button("超框替换", async (_, _) => await OverFrameReplaceAsync(), ButtonTone.Gold); var frameEditor = Button("卡框选择 / 编辑", async (_, _) => await OpenFrameEditorAsync()); var framePreview = Button("卡框预览", (_, _) => OpenFramePreview()); var overFrameTable = Button("超框表", (_, _) => OpenOverFrameTable()); var monsterAnimation = Button("怪兽动画", (_, _) => OpenMonsterAnimation(), ButtonTone.Gold);
         _modsOnlyButton = Button("只看我的 Mod", (_, _) => ToggleModsOnly(), ButtonTone.Gold);
         _scanMissingButton = Button("定位卡图", async (_, _) => await ScanMissingCardAsync(), ButtonTone.Neutral);
         var exportMods = Button("一键导出全部 Mod", async (_, _) => await ExportAllModsAsync(), ButtonTone.Primary);
@@ -55,7 +57,7 @@ public sealed class MainForm : Form
 
         var brand = new GradientBanner { Dock = DockStyle.Fill, Padding = new Padding(22, 11, 22, 9) };
         brand.Controls.Add(new Label { Text = "MD CARD STUDIO", Dock = DockStyle.Top, Height = 29, Font = new Font("Segoe UI Semibold", 17F), ForeColor = UiTheme.Text, BackColor = Color.Transparent });
-        brand.Controls.Add(new Label { Text = "MASTER DUEL  ·  卡图查看 / 替换 / 超框工作台", Dock = DockStyle.Bottom, Height = 23, Font = new Font("Microsoft YaHei UI", 9F), ForeColor = UiTheme.Primary, BackColor = Color.Transparent });
+        brand.Controls.Add(new Label { Text = "MASTER DUEL  ·  卡图 / 超框 / 怪兽动画 Mod 工作台", Dock = DockStyle.Bottom, Height = 23, Font = new Font("Microsoft YaHei UI", 9F), ForeColor = UiTheme.Primary, BackColor = Color.Transparent });
 
         var pathBar = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(18, 7, 18, 7), BackColor = UiTheme.Surface, ColumnCount = 4, RowCount = 1 };
         pathBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); pathBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); pathBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); pathBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -80,7 +82,7 @@ public sealed class MainForm : Form
         var previewFrame = new BorderPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Surface, Padding = new Padding(18) };
         previewFrame.Controls.Add(_preview); previewFrame.Controls.Add(_previewHint); _previewHint.BringToFront();
         var rightActions = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, AutoScroll = true, BackColor = UiTheme.Surface, Padding = new Padding(5, 4, 4, 4) };
-        rightActions.Controls.Add(overFrameReplace); rightActions.Controls.Add(frameEditor); rightActions.Controls.Add(framePreview); rightActions.Controls.Add(overFrameTable); rightActions.Controls.Add(inspect);
+        rightActions.Controls.Add(overFrameReplace); rightActions.Controls.Add(monsterAnimation); rightActions.Controls.Add(frameEditor); rightActions.Controls.Add(framePreview); rightActions.Controls.Add(overFrameTable); rightActions.Controls.Add(inspect);
         var previewLayout = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Window, RowCount = 4, ColumnCount = 1 };
         previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46)); previewLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 104)); previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 92));
         previewLayout.Controls.Add(SectionHeading("实时预览", "LIVE PREVIEW"), 0, 0); previewLayout.Controls.Add(previewFrame, 0, 1); previewLayout.Controls.Add(_info, 0, 2); previewLayout.Controls.Add(rightActions, 0, 3);
@@ -207,7 +209,7 @@ public sealed class MainForm : Form
     {
         var old = _category.Text; _category.Items.Clear(); _category.Items.Add("全部"); _groups.Nodes.Clear();
         var modCount = _textures.Count(x => x.IsModded);
-        var modNode = _groups.Nodes.Add($"我的 Mod（{modCount}）"); modNode.Tag = ModGroupKey; modNode.ForeColor = UiTheme.Gold;
+        var modNode = _groups.Nodes.Add($"我的 Mod（{modCount + _changedAnimationBundleCount}）"); modNode.Tag = ModGroupKey; modNode.ForeColor = UiTheme.Gold;
         foreach (var source in _textures.GroupBy(x => x.SourceKind).OrderBy(x => x.Key))
         {
             var sourceNode = _groups.Nodes.Add($"{source.Key}（{source.Count()}）");
@@ -307,14 +309,21 @@ public sealed class MainForm : Form
     void UpdateModSummary()
     {
         var textures = _textures.Where(x => x.IsModded).ToArray();
-        var bundles = textures.Select(x => x.BundlePath).Distinct(StringComparer.OrdinalIgnoreCase).Count();
-        _modSummary.Text = textures.Length == 0 ? "暂无改动；替换后的卡图会自动出现在这里" : $"已管理 {textures.Length:N0} 个资源 · {bundles:N0} 个已修改 Bundle";
+        _modSummary.Text = _changedModBundleCount == 0
+            ? "暂无改动；替换后的卡图与动画会自动纳入 Mod 管理"
+            : $"已管理 {textures.Length:N0} 个图片资源 · {_changedModBundleCount:N0} 个已修改 Bundle{(_changedAnimationBundleCount > 0 ? $" · 动画 {_changedAnimationBundleCount:N0}" : "")}";
     }
 
     async Task RefreshModFlagsAsync()
     {
         if (_gameRoot is null) return;
-        await Task.Run(() => _mods.RefreshFlags(_gameRoot, _textures));
+        var summary = await Task.Run(() =>
+        {
+            _mods.RefreshFlags(_gameRoot, _textures);
+            return _mods.GetChangeSummary(_gameRoot, _textures);
+        });
+        _changedModBundleCount = summary.BundleCount;
+        _changedAnimationBundleCount = summary.AnimationBundleCount;
         UpdateModSummary();
     }
     TexRef? Selected() => _list.SelectedItems.Count == 1 ? _list.SelectedItems[0].Tag as TexRef : null;
@@ -461,6 +470,20 @@ public sealed class MainForm : Form
     {
         if (_gameRoot is null) { MessageBox.Show(this, "先选择 Master Duel 游戏目录。", Text); return; }
         new OverFrameForm(_gameRoot, Selected()?.CardKey).Show(this);
+    }
+
+    void OpenMonsterAnimation()
+    {
+        if (_gameRoot is null) { MessageBox.Show(this, "先选择 Master Duel 游戏目录。", Text); return; }
+        var initial = Selected()?.CardKey;
+        if (string.IsNullOrWhiteSpace(initial) && _search.Text.Trim().All(char.IsAsciiDigit)) initial = _search.Text.Trim();
+        var form = new MonsterAnimationForm(_gameRoot, initial);
+        form.FormClosed += async (_, _) =>
+        {
+            await RefreshModFlagsAsync();
+            RefreshCategories(); RenderList();
+        };
+        form.Show(this);
     }
 
     TexRef[] OverFrameFrames() => _textures.Where(x => x.SourceKind == "卡框资源" && x.Name.StartsWith("card_frame", StringComparison.OrdinalIgnoreCase) && x.Width == FrameComposer.Width && x.Height == FrameComposer.Height).ToArray();

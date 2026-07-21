@@ -25,6 +25,7 @@ public sealed class ModPackageEntry
 
 public sealed record ModPackageInfo(string Name, DateTimeOffset CreatedAt, int BundleCount, long TotalSize);
 public sealed record ModImportResult(int BundleCount, IReadOnlyList<string> ChangedBundlePaths);
+public sealed record ModChangeSummary(int BundleCount, int AnimationBundleCount);
 
 /// <summary>
 /// 用 _MD卡图备份 作为轻量 Mod 台账。只比较实际改过的 Bundle，不扫描整个游戏目录。
@@ -32,7 +33,7 @@ public sealed record ModImportResult(int BundleCount, IReadOnlyList<string> Chan
 public sealed class ModPackageService
 {
     const string ManifestName = "manifest.json";
-    static readonly string[] SourceKinds = ["本地卡图", "游戏内图片", "卡框资源", "超框开关"];
+    static readonly string[] SourceKinds = ["本地卡图", "游戏内图片", "卡框资源", "超框开关", "召唤动画", "召唤动画-游戏内"];
 
     public int RefreshFlags(string gameRoot, IEnumerable<TexRef> textures)
     {
@@ -41,6 +42,12 @@ public sealed class ModPackageService
         var changed = EnumerateChangedBundles(gameRoot, list).Select(x => x.LivePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var texture in list.Where(x => changed.Contains(x.BundlePath))) texture.IsModded = true;
         return list.Count(x => x.IsModded);
+    }
+
+    public ModChangeSummary GetChangeSummary(string gameRoot, IEnumerable<TexRef> textures)
+    {
+        var changed = EnumerateChangedBundles(gameRoot, textures.ToList()).ToArray();
+        return new ModChangeSummary(changed.Length, changed.Count(x => x.SourceKind.StartsWith("召唤动画", StringComparison.Ordinal)));
     }
 
     public ModPackageInfo Export(string gameRoot, IEnumerable<TexRef> textures, string outputPath)
@@ -184,7 +191,8 @@ public sealed class ModPackageService
 
     static string TargetKindFor(string sourceKind) => sourceKind switch
     {
-        "本地卡图" or "超框开关" => "LocalData",
+        "本地卡图" or "超框开关" or "召唤动画" => "LocalData",
+        "召唤动画-游戏内" => "StreamingAssets",
         "游戏内图片" => "StreamingAssets",
         "卡框资源" => "GameRoot",
         _ => throw new InvalidDataException($"不支持的资源类型：{sourceKind}")

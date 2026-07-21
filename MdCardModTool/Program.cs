@@ -1,4 +1,5 @@
 using System.Text.Json;
+using SixLabors.ImageSharp;
 
 namespace MdCardModTool;
 
@@ -7,6 +8,90 @@ internal static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        if (args.Length == 3 && args[0] == "--build-animation-index")
+        {
+            var index = MonsterAnimationIndexService.Rebuild(args[1], (done, total, found) => Console.WriteLine($"{done}/{total}; animation assets={found}"));
+            MonsterAnimationIndexService.Export(args[1], index, args[2]);
+            Console.WriteLine($"build={index.GameBuildId}; assets={index.Assets.Count}; cards={index.Assets.Select(x => x.CardId).Distinct().Count()}; {args[2]}");
+            return;
+        }
+        if (args.Length == 3 && args[0] == "--inspect-animation-card")
+        {
+            var set = MonsterAnimationIndexService.Find(args[1], args[2]);
+            Console.WriteLine($"card={set.CardId}; complete={set.IsComplete}; {set.CountSummary}");
+            foreach (var asset in set.Assets) Console.WriteLine($"{asset.Kind}; {asset.Name}; PathID={asset.PathId}; {asset.RelativeBundlePath}");
+            return;
+        }
+        if (args.Length == 3 && args[0] == "--inspect-animation-bundle")
+        {
+            foreach (var asset in new ModEngine().ScanAnimationAssetsFast(Path.GetFullPath(args[1]), Path.GetFullPath(args[2])))
+            {
+                Console.WriteLine($"{asset.Kind}; {asset.Name}; PathID={asset.PathId}; {asset.RelativeBundlePath}");
+                if (asset.Kind != MonsterAnimationAssetKind.Texture)
+                {
+                    var data = new ModEngine().ReadTextAsset(asset).Data;
+                    var text = System.Text.Encoding.UTF8.GetString(data).TrimEnd('\0');
+                    Console.WriteLine(text[..Math.Min(text.Length, 3000)]);
+                }
+            }
+            return;
+        }
+        if (args.Length == 2 && args[0] == "--bundle-containers")
+        {
+            foreach (var path in new ModEngine().ReadAssetBundleContainerPaths(Path.GetFullPath(args[1]))) Console.WriteLine(path);
+            return;
+        }
+        if (args.Length == 4 && args[0] == "--test-animation-media")
+        {
+            Directory.CreateDirectory(args[3]);
+            Console.WriteLine("extracting");
+            using var media = MonsterAnimationMedia.ExtractAsync(args[1], 12, 48, 256).GetAwaiter().GetResult();
+            Console.WriteLine($"extracted {media.FramePaths.Count}");
+            using var built = MonsterAnimationBuilder.Build(media.FramePaths, args[2], 12, 100, 4096);
+            Console.WriteLine($"built {built.AtlasWidth}x{built.AtlasHeight}");
+            built.AtlasImage.SaveAsPng(Path.Combine(args[3], $"P{args[2]}.png"));
+            File.WriteAllText(Path.Combine(args[3], $"P{args[2]}.atlas.txt"), built.AtlasText);
+            File.WriteAllBytes(Path.Combine(args[3], $"P{args[2]}JS.json"), built.SkeletonJson);
+            Console.WriteLine("encoding dxt5");
+            var encoded = new ModEngine().EncodeAnimationAtlas(built.AtlasImage);
+            Console.WriteLine($"frames={built.FrameCount}; fps={built.FramesPerSecond}; atlas={built.AtlasWidth}x{built.AtlasHeight}; dxt5={encoded.Data.Length}");
+            return;
+        }
+        if (args.Length == 5 && args[0] == "--test-animation-texture")
+        {
+            var engine = new ModEngine();
+            var asset = engine.ScanAnimationAssetsFast(args[1], args[2]).First(x => x.Kind == MonsterAnimationAssetKind.Texture);
+            using var atlas = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Rgba32>(args[3]);
+            engine.ReplaceAnimationAtlas(asset, atlas, Path.Combine(args[2], "backup"));
+            File.WriteAllBytes(args[4], engine.DecodePng(asset.AsTexture()));
+            Console.WriteLine($"roundtrip={atlas.Width}x{atlas.Height}; {new FileInfo(args[1]).Length} bytes");
+            return;
+        }
+        if (args.Length == 4 && args[0] == "--test-animation-apply")
+        {
+            var set = MonsterAnimationIndexService.Find(args[1], args[2]);
+            var service = new MonsterAnimationService();
+            var template = service.ReadTemplate(set);
+            using var media = MonsterAnimationMedia.ExtractAsync(args[3], 12, 24, 128).GetAwaiter().GetResult();
+            using var built = MonsterAnimationBuilder.Build(media.FramePaths, args[2], 12, 100, template, 4096);
+            service.Apply(args[1], set, built);
+            var engine = new ModEngine();
+            var dimensions = set.Textures.Select(x =>
+            {
+                using var decoded = SixLabors.ImageSharp.Image.Load(engine.DecodePng(x.AsTexture()));
+                return $"{decoded.Width}x{decoded.Height}";
+            });
+            var texts = set.Atlases.Concat(set.Skeletons).Select(x => engine.ReadTextAsset(x).Data.Length);
+            Console.WriteLine($"complete={set.IsComplete}; textures={string.Join(',', dimensions)}; textBytes={string.Join(',', texts)}");
+            return;
+        }
+        if (args.Length == 3 && args[0] == "--test-animation-restore")
+        {
+            var set = MonsterAnimationIndexService.Find(args[1], args[2]);
+            var restored = new MonsterAnimationService().Restore(args[1], set);
+            Console.WriteLine($"restored={restored}");
+            return;
+        }
         if (args.Length == 2 && args[0] == "--build-index")
         {
             IndexService.BuildAndSave(args[1], (done, total, found) => Console.WriteLine($"{done}/{total}; textures={found}"));
@@ -163,7 +248,7 @@ internal static class Program
             var targetAspect = targetWidth / (double)targetHeight;
             var cropWidth = preview.Width; var cropHeight = (int)Math.Round(cropWidth / targetAspect);
             if (cropHeight > preview.Height) { cropHeight = preview.Height; cropWidth = (int)Math.Round(cropHeight * targetAspect); }
-            var crop = new RectangleF((preview.Width - cropWidth) / 2f, (preview.Height - cropHeight) / 2f, cropWidth, cropHeight);
+            var crop = new System.Drawing.RectangleF((preview.Width - cropWidth) / 2f, (preview.Height - cropHeight) / 2f, cropWidth, cropHeight);
             File.WriteAllBytes(args[2], ImageCropService.CropAndResize(args[1], crop, targetWidth, targetHeight));
             Console.WriteLine($"{targetWidth}x{targetHeight}; {new FileInfo(args[2]).Length} bytes; {args[2]}");
             return;

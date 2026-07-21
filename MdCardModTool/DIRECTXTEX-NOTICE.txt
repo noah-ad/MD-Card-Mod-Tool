@@ -1,0 +1,9 @@
+DirectXTex / texconv notice
+==========================
+
+The portable release includes Microsoft's unmodified texconv.exe from DirectXTex
+to encode animation atlases as BC3/DXT5. DirectXTex is licensed under the MIT License.
+
+Project and source: https://github.com/microsoft/DirectXTex
+Binary release: https://github.com/microsoft/DirectXTex/releases/tag/may2026
+License: https://github.com/microsoft/DirectXTex/blob/main/LICENSE

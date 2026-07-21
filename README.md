@@ -22,6 +22,8 @@
 - 一键导出全部 Mod 为 `.mdmod.zip`，在另一台电脑导入时自动适配不同的 `LocalData\<用户哈希>` 路径并建立原版备份
 - 超框卡图替换、单卡卡框选择/编辑和卡框预览；裁剪时卡框作为底层实时显示，任意尺寸原图都可构图为 704×1024，并保留透明通道
 - 灵摆卡原生支持：识别游戏实际使用的 512×1024 完整卡图，单列“灵摆卡图”；工具按游戏真实 UV 取顶部 512×596 映射到卡框宽插图区，裁剪确认后再反向写入完整 512×1024 纹理，预览与替换使用完全相同的缩放规则
+- 怪兽召唤动画替换：输入卡号直接定位 SD 与 highend_hd 两套 Texture2D、Atlas、Spine JSON 共 6 个资源；拖入 GIF、MP4、WebM、MOV、MKV 等文件即可抽帧预览，设置起点、帧率、帧数、清晰度与游戏显示比例后一次写入两套动画
+- 动画资源会与卡图一起纳入“我的 Mod”，支持一键导出、跨电脑导入和按卡号还原；写入失败时自动回滚全部 6 个 Bundle
 - 异画卡筛选：仅百鸽未收录且编号处于 `20567–22747` 的资源归为异画；其他未收录资源归为 Token／杂图
 
 ## 界面预览
@@ -34,9 +36,11 @@
 
 替换和 Mod 导入都会直接写入游戏文件。首次修改每个 Bundle 前，工具会在游戏目录创建 `_MD卡图备份`。工具通过比较这份备份与当前文件建立轻量 Mod 台账，不会为了刷新“我的 Mod”重新扫描整个游戏。完成替换、导入或还原后，请完全退出并重启 Master Duel。
 
+召唤动画功能只替换游戏中原本已经存在演出的卡，不能给本来没有召唤动画的卡新增演出。工具会保留原资源的动画名与显示边界，因此也能适配教程中提到的 `animation3` 等非默认名称，无须再修改第 7 个引用文件。正式分享包包含独立的 FFmpeg 与 DirectXTex 工具；它们仅在本机完成视频抽帧和 BC3/DXT5 图集编码，不会上传视频。
+
 ## 源码构建
 
-项目使用 .NET 8 WinForms。ImageSharp 通过 NuGet 自动还原；与现有 Bundle 写入逻辑兼容的 AssetsTools.NET 组件及 Unity 类型数据库已随仓库提供，克隆后可直接执行：
+项目使用 .NET 8 WinForms。ImageSharp 通过 NuGet 自动还原；与现有 Bundle 写入逻辑兼容的 AssetsTools.NET 组件、Unity 类型数据库以及 DirectXTex `texconv.exe` 已随仓库提供。动画导入还需要把 `ffmpeg.exe` 放在系统 PATH，或放到发布目录的 `tools` 文件夹；GitHub 的完整分享包已经包含它。克隆后可执行：
 
 ```powershell
 dotnet publish .\MdCardModTool\MdCardModTool.csproj -c Release -r win-x64 --self-contained true

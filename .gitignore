@@ -6,6 +6,7 @@
 index-build.log
 index-build.log.err
 *.tmp
+tmp/
 
 # Shareable build artifacts are published as GitHub Release assets.
 发布/
