@@ -22,6 +22,7 @@ public sealed class MonsterAnimationForm : Form
     readonly List<Bitmap> _previewFrames = [];
     ExtractedAnimation? _media;
     MonsterAnimationSet? _set;
+    int _previewFramesPerSecond = 15;
     bool _playing;
     bool _busy;
 
@@ -47,8 +48,8 @@ public sealed class MonsterAnimationForm : Form
         _cardId.Text = initialCardId?.All(char.IsAsciiDigit) == true ? initialCardId : "";
         _cardId.KeyDown += async (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await LocateAsync(); } };
         _timeline.ValueChanged += (_, _) => { if (!_busy) ShowFrame(_timeline.Value); };
-        _fps.ValueChanged += (_, _) => { _timer.Interval = Math.Max(15, 1000 / (int)_fps.Value); UpdateSourceStatus(); };
-        _scale.ValueChanged += (_, _) => { _preview.AnimationScale = (float)_scale.Value / 100f; _preview.Invalidate(); };
+        _fps.ValueChanged += (_, _) => { if (_media is not null) SetPreviewRate((int)_fps.Value); UpdateSourceStatus(); };
+        _scale.ValueChanged += (_, _) => { _preview.AnimationScale = (float)_scale.Value / 100f; _preview.ScalePercent = (int)_scale.Value; _preview.Invalidate(); };
         _timer.Interval = 1000 / (int)_fps.Value;
         _timer.Tick += (_, _) => AdvanceFrame();
         DragEnter += (_, e) => e.Effect = e.Data?.GetDataPresent(DataFormats.FileDrop) == true ? DragDropEffects.Copy : DragDropEffects.None;
@@ -77,13 +78,13 @@ public sealed class MonsterAnimationForm : Form
         AddOption(options, 2, "最多读取帧数", _maxFrames);
         AddOption(options, 3, "单帧最长边", _frameEdge);
         AddOption(options, 4, "单张图集上限", _atlasEdge);
-        AddOption(options, 5, "游戏显示缩放 %", _scale);
+        AddOption(options, 5, "游戏画面占比（实时）%", _scale);
 
         var note = new Label
         {
             Dock = DockStyle.Fill,
             ForeColor = UiTheme.Muted,
-            Text = "导入时按当前帧率抽帧；透明 GIF/带 Alpha 视频会保留透明通道。\n\n工具自动生成单张 2 的幂 Spine 图集，并保留原卡 JSON 的动画名称与显示边界，所以不需要教程中的 Spine、Python 和第 7 个 animation 引用修补。\n\n仅能替换游戏中原本已有召唤动画的卡。建议：15 FPS、384 px、最多 180 帧。长视频先截取需要的片段。",
+            Text = "100% 表示铺满游戏动画的可用显示范围；调整画面占比会立即在左侧按比例缩放预览。\n\n导入时按当前帧率抽帧；透明 GIF/带 Alpha 视频会保留透明通道。工具自动生成单张 2 的幂 Spine 图集，并保留原卡 JSON 的动画名称与显示边界。\n\n仅能替换游戏中原本已有召唤动画的卡。建议：15 FPS、384 px、最多 180 帧。长视频先截取需要的片段。",
             Padding = new Padding(0, 10, 0, 0)
         };
         var side = new BorderPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Surface, Padding = new Padding(18) };
@@ -147,6 +148,14 @@ public sealed class MonsterAnimationForm : Form
             {
                 var template = await Task.Run(() => _service.ReadTemplate(_set));
                 _resourceStatus.Text += $"  · 动画名 {template.AnimationName}";
+                if (_media is null) await LoadCurrentAnimationPreviewAsync(_set);
+            }
+            else if (_media is null)
+            {
+                DisposeMedia();
+                _sourceStatus.Text = "这张卡没有定位到完整的两套动画资源";
+                _preview.StatusText = "NO COMPLETE ANIMATION\n\n未定位到可预览的完整动画资源";
+                _preview.Invalidate();
             }
         }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "定位动画失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
@@ -193,6 +202,7 @@ public sealed class MonsterAnimationForm : Form
             DisposeMedia();
             _media = loadedMedia; loadedMedia = null;
             _previewFrames.AddRange(loadedFrames); loadedFrames = null;
+            SetPreviewRate((int)_fps.Value);
             _timeline.Maximum = Math.Max(0, _previewFrames.Count - 1); _timeline.Value = 0; _timeline.Enabled = _previewFrames.Count > 1;
             ShowFrame(0); UpdateSourceStatus();
             _apply.Enabled = _set?.IsComplete == true;
@@ -211,6 +221,39 @@ public sealed class MonsterAnimationForm : Form
     {
         if (_media is null) { _sourceStatus.Text = "拖入或选择 GIF / 视频后在左侧预览"; return; }
         _sourceStatus.Text = $"{Path.GetFileName(_media.SourcePath)}\n{_media.FramePaths.Count:N0} 帧 · 当前 {(int)_fps.Value} FPS · {_media.FramePaths.Count / (double)_fps.Value:0.00} 秒";
+    }
+
+    async Task LoadCurrentAnimationPreviewAsync(MonsterAnimationSet set)
+    {
+        _resourceStatus.Text += "  · 正在读取当前动画预览…";
+        var current = await Task.Run(() => MonsterAnimationCurrentPreview.TryLoad(set));
+        if (current is null)
+        {
+            DisposeMedia();
+            _sourceStatus.Text = "当前为原版多骨骼 / 网格 Spine 动画\n不会把拆散的关节图集冒充预览；导入 GIF / 视频后可实时查看替换效果";
+            _preview.StatusText = "CURRENT SPINE ANIMATION\n\n原版复杂骨骼动画已定位\n拖入 GIF / 视频查看待替换效果";
+            _preview.Invalidate();
+            _resourceStatus.Text = _resourceStatus.Text.Replace("  · 正在读取当前动画预览…", "  · 原版骨骼动画");
+            return;
+        }
+        var frames = current.Frames.ToList(); current.Frames.Clear();
+        var fps = current.FramesPerSecond; var animationName = current.AnimationName;
+        current.Dispose();
+        DisposeMedia();
+        _previewFrames.AddRange(frames);
+        SetPreviewRate(fps);
+        _timeline.Maximum = Math.Max(0, _previewFrames.Count - 1); _timeline.Value = 0; _timeline.Enabled = _previewFrames.Count > 1;
+        _preview.StatusText = "";
+        ShowFrame(0);
+        _sourceStatus.Text = $"当前游戏动画 · {animationName}\n{_previewFrames.Count:N0} 帧 · {fps} FPS · {_previewFrames.Count / (double)fps:0.00} 秒";
+        _resourceStatus.Text = _resourceStatus.Text.Replace("  · 正在读取当前动画预览…", "  · 正在预览当前动画");
+        if (!_playing) TogglePlay();
+    }
+
+    void SetPreviewRate(int framesPerSecond)
+    {
+        _previewFramesPerSecond = Math.Clamp(framesPerSecond, 1, 60);
+        _timer.Interval = Math.Max(15, 1000 / _previewFramesPerSecond);
     }
 
     void TogglePlay()
@@ -293,6 +336,7 @@ public sealed class MonsterAnimationForm : Form
         _timer.Stop(); _playing = false; _play.Text = "播放"; _preview.Frame = null;
         foreach (var frame in _previewFrames) frame.Dispose(); _previewFrames.Clear();
         _media?.Dispose(); _media = null;
+        _timeline.Value = 0; _timeline.Maximum = 0; _timeline.Enabled = false; _frameLabel.Text = "";
     }
 }
 
@@ -300,6 +344,8 @@ public sealed class AnimationPreviewCanvas : Control
 {
     public Bitmap? Frame { get; set; }
     public float AnimationScale { get; set; } = 1f;
+    public int ScalePercent { get; set; } = 100;
+    public string StatusText { get; set; } = "DROP GIF / VIDEO HERE\n\n拖入 GIF 或视频开始预览";
 
     public AnimationPreviewCanvas()
     {
@@ -320,17 +366,22 @@ public sealed class AnimationPreviewCanvas : Control
                 g.FillRectangle(((x / cell + y / cell) & 1) == 0 ? dark : light, x, y, cell, cell);
         if (Frame is null)
         {
-            TextRenderer.DrawText(g, "DROP GIF / VIDEO HERE\n\n拖入 GIF 或视频开始预览", Font, ClientRectangle, UiTheme.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
+            TextRenderer.DrawText(g, StatusText, Font, ClientRectangle, UiTheme.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
             return;
         }
         g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
         g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
-        var fit = Math.Min(ClientSize.Width * 0.82f / Frame.Width, ClientSize.Height * 0.82f / Frame.Height) * AnimationScale;
+        var viewport = new RectangleF(16, 16, Math.Max(1, ClientSize.Width - 32), Math.Max(1, ClientSize.Height - 32));
+        var fit = Math.Min(viewport.Width / Frame.Width, viewport.Height / Frame.Height) * AnimationScale;
         var width = Frame.Width * fit;
         var height = Frame.Height * fit;
-        var target = new RectangleF((ClientSize.Width - width) / 2f, (ClientSize.Height - height) / 2f, width, height);
+        var target = new RectangleF(viewport.X + (viewport.Width - width) / 2f, viewport.Y + (viewport.Height - height) / 2f, width, height);
+        var state = g.Save();
+        g.SetClip(viewport);
         g.DrawImage(Frame, target);
+        g.Restore(state);
         using var border = new Pen(Color.FromArgb(130, UiTheme.Primary), 1f);
-        g.DrawRectangle(border, target.X, target.Y, target.Width, target.Height);
+        g.DrawRectangle(border, viewport.X, viewport.Y, viewport.Width, viewport.Height);
+        TextRenderer.DrawText(g, $"游戏显示范围 · {ScalePercent}%", Font, Rectangle.Round(viewport), UiTheme.Primary, TextFormatFlags.Top | TextFormatFlags.Right | TextFormatFlags.NoPadding);
     }
 }

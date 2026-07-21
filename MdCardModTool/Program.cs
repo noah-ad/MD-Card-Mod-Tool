@@ -31,6 +31,29 @@ internal static class Program
             form.Close();
             return;
         }
+        if (args.Length == 3 && args[0] == "--test-animation-form-current")
+        {
+            using var form = new MonsterAnimationForm(args[1], args[2]) { Opacity = 0, ShowInTaskbar = false };
+            form.Show();
+            var label = (Label?)typeof(MonsterAnimationForm).GetField("_sourceStatus", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            var preview = (AnimationPreviewCanvas?)typeof(MonsterAnimationForm).GetField("_preview", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while (DateTime.UtcNow < deadline && preview?.Frame is null && label?.Text.Contains("原版多骨骼", StringComparison.Ordinal) != true)
+            {
+                Application.DoEvents();
+                Thread.Sleep(25);
+            }
+            var defaultFullSize = preview?.ScalePercent == 100 && Math.Abs(preview.AnimationScale - 1f) < 0.001f;
+            var scale = (NumericUpDown?)typeof(MonsterAnimationForm).GetField("_scale", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            if (scale is not null) scale.Value = 35;
+            Application.DoEvents();
+            var realtimeScale = preview?.ScalePercent == 35 && Math.Abs(preview.AnimationScale - 0.35f) < 0.001f;
+            var result = defaultFullSize && realtimeScale && (preview?.Frame is not null || label?.Text.Contains("原版多骨骼", StringComparison.Ordinal) == true);
+            Console.WriteLine($"status={label?.Text.Replace(Environment.NewLine, " | ")}; frame={preview?.Frame is not null}; defaultScale=100; realtimeScale={preview?.ScalePercent}");
+            form.Close();
+            if (!result) Environment.ExitCode = 2;
+            return;
+        }
         if (args.Length == 2 && args[0] == "--test-animation-catalog")
         {
             if (!PortableIndexService.TryLoadBundled(args[1], out var index, out _)) throw new FileNotFoundException("缺少卡图预绑定索引。");
@@ -62,6 +85,28 @@ internal static class Program
             var set = MonsterAnimationIndexService.Find(args[1], args[2]);
             Console.WriteLine($"card={set.CardId}; complete={set.IsComplete}; {set.CountSummary}");
             foreach (var asset in set.Assets) Console.WriteLine($"{asset.Kind}; {asset.Name}; PathID={asset.PathId}; {asset.RelativeBundlePath}");
+            return;
+        }
+        if (args.Length == 4 && args[0] == "--dump-animation-card")
+        {
+            var set = MonsterAnimationIndexService.Find(args[1], args[2]);
+            Directory.CreateDirectory(args[3]);
+            var engine = new ModEngine();
+            File.WriteAllBytes(Path.Combine(args[3], $"P{args[2]}JS.json"), engine.ReadTextAsset(set.Skeletons[0]).Data);
+            File.WriteAllBytes(Path.Combine(args[3], $"P{args[2]}.atlas"), engine.ReadTextAsset(set.Atlases[0]).Data);
+            var root = set.Textures[0].StorageKind == "StreamingAssets" ? IndexService.StreamingRoot(args[1]) : IndexService.FindLocalRoot(args[1])!;
+            foreach (var texture in engine.ScanBundle(set.Textures[0].BundlePath, root, set.Textures[0].ModSourceKind, includeDependencies: false).Textures)
+                File.WriteAllBytes(Path.Combine(args[3], texture.Name + ".png"), engine.DecodePng(texture));
+            Console.WriteLine(args[3]);
+            return;
+        }
+        if (args.Length == 4 && args[0] == "--test-current-animation-preview")
+        {
+            var set = MonsterAnimationIndexService.Find(args[1], args[2]);
+            using var preview = MonsterAnimationCurrentPreview.TryLoad(set) ?? throw new InvalidDataException("当前动画不是可逐帧还原的单槽序列动画。");
+            Directory.CreateDirectory(args[3]);
+            preview.Frames[0].Save(Path.Combine(args[3], "frame-0001.png"));
+            Console.WriteLine($"frames={preview.Frames.Count}; fps={preview.FramesPerSecond}; animation={preview.AnimationName}");
             return;
         }
         if (args.Length == 3 && args[0] == "--inspect-animation-bundle")
