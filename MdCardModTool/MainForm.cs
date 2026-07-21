@@ -41,7 +41,12 @@ public sealed class MainForm : Form
         UiTheme.StyleTextBox(_gameFolder); UiTheme.StyleTextBox(_search); UiTheme.StyleComboBox(_category); UiTheme.StyleTree(_groups); UiTheme.StyleList(_list);
         _list.Columns.Add("资源名称", 205); _list.Columns.Add("来源 / 分类", 190); _list.Columns.Add("尺寸", 100); _list.Columns.Add("Bundle 路径", 360);
         _list.Resize += (_, _) => { if (_list.Columns.Count == 4) _list.Columns[3].Width = Math.Max(220, _list.ClientSize.Width - 495); };
-        _list.SelectedIndexChanged += async (_, _) => await ShowSelectionAsync(); _list.DoubleClick += async (_, _) => await ReplaceSelectedAsync();
+        _list.SelectedIndexChanged += async (_, _) => await ShowSelectionAsync();
+        _list.DoubleClick += async (_, _) =>
+        {
+            if (_category.Text == AnimationGroupKey && Selected()?.HasMonsterAnimation == true) OpenRawAnimationAssets();
+            else await ReplaceSelectedAsync();
+        };
         _list.ItemDrag += async (_, e) => await DragOutAsync(e.Item as ListViewItem); _list.DragEnter += OnDragEnter; _list.DragDrop += async (_, e) => await OnDragDropAsync(e);
         _search.TextChanged += (_, _) => RenderList();
         _search.KeyDown += async (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await ScanMissingCardAsync(); } };
@@ -50,7 +55,7 @@ public sealed class MainForm : Form
         var choose = Button("选择目录", async (_, _) => await ChooseGameAsync()); var scan = Button("重建索引", async (_, _) => await RebuildIndexAsync());
         var replace = Button("替换所选", async (_, _) => await ReplaceSelectedAsync(), ButtonTone.Primary); var export = Button("导出 PNG", async (_, _) => await ExportSelectedAsync());
         var backup = Button("打开备份", (_, _) => OpenBackup()); var restore = Button("还原所选", async (_, _) => await RestoreSelectedAsync(), ButtonTone.Danger); var inspect = Button("检查 Bundle", async (_, _) => await InspectSelectedAsync());
-        var overFrameReplace = Button("超框替换", async (_, _) => await OverFrameReplaceAsync(), ButtonTone.Gold); var frameEditor = Button("卡框选择 / 编辑", async (_, _) => await OpenFrameEditorAsync()); var framePreview = Button("卡框预览", (_, _) => OpenFramePreview()); var overFrameTable = Button("超框表", (_, _) => OpenOverFrameTable()); var monsterAnimation = Button("怪兽动画", (_, _) => OpenMonsterAnimation(), ButtonTone.Gold);
+        var overFrameReplace = Button("超框替换", async (_, _) => await OverFrameReplaceAsync(), ButtonTone.Gold); var frameEditor = Button("卡框选择 / 编辑", async (_, _) => await OpenFrameEditorAsync()); var framePreview = Button("卡框预览", (_, _) => OpenFramePreview()); var overFrameTable = Button("超框表", (_, _) => OpenOverFrameTable()); var monsterAnimation = Button("怪兽动画", (_, _) => OpenMonsterAnimation(), ButtonTone.Gold); var rawAnimationAssets = Button("原始动画资源", (_, _) => OpenRawAnimationAssets());
         _modsOnlyButton = Button("只看我的 Mod", (_, _) => ToggleModsOnly(), ButtonTone.Gold);
         _scanMissingButton = Button("定位卡图", async (_, _) => await ScanMissingCardAsync(), ButtonTone.Neutral);
         var exportMods = Button("一键导出全部 Mod", async (_, _) => await ExportAllModsAsync(), ButtonTone.Primary);
@@ -83,7 +88,7 @@ public sealed class MainForm : Form
         var previewFrame = new BorderPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Surface, Padding = new Padding(18) };
         previewFrame.Controls.Add(_preview); previewFrame.Controls.Add(_previewHint); _previewHint.BringToFront();
         var rightActions = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, AutoScroll = true, BackColor = UiTheme.Surface, Padding = new Padding(5, 4, 4, 4) };
-        rightActions.Controls.Add(overFrameReplace); rightActions.Controls.Add(monsterAnimation); rightActions.Controls.Add(frameEditor); rightActions.Controls.Add(framePreview); rightActions.Controls.Add(overFrameTable); rightActions.Controls.Add(inspect);
+        rightActions.Controls.Add(overFrameReplace); rightActions.Controls.Add(monsterAnimation); rightActions.Controls.Add(rawAnimationAssets); rightActions.Controls.Add(frameEditor); rightActions.Controls.Add(framePreview); rightActions.Controls.Add(overFrameTable); rightActions.Controls.Add(inspect);
         var previewLayout = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Window, RowCount = 4, ColumnCount = 1 };
         previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46)); previewLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 104)); previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 92));
         previewLayout.Controls.Add(SectionHeading("实时预览", "LIVE PREVIEW"), 0, 0); previewLayout.Controls.Add(previewFrame, 0, 1); previewLayout.Controls.Add(_info, 0, 2); previewLayout.Controls.Add(rightActions, 0, 3);
@@ -382,6 +387,7 @@ public sealed class MainForm : Form
                 var window = x.Height == 1024 ? $"灵摆显示区 512×{CardFrameCatalog.PendulumVisibleStorageHeight} → 完整 512×1024 纹理" : "标准插图区 → 512×512 存储";
                 frameLine = $"\n实装预览：{normalFrame.Name} · {CardFrameCatalog.FriendlyName(normalFrame.Name)}  ·  {window}";
             }
+            if (x.HasMonsterAnimation) frameLine += "\n怪兽动画：双击动画分类中的卡图，或点击“原始动画资源”，查看 PNG / Atlas / JSON";
             _info.Text = $"{x.Name}  ·  {x.Category}\n{x.Width} × {x.Height}   PathID {x.PathId}\n{x.RelativeBundlePath}{frameLine}";
         }
         catch (Exception ex) { _status.Text = "预览失败：" + ex.Message; }
@@ -515,6 +521,25 @@ public sealed class MainForm : Form
         {
             await RefreshModFlagsAsync();
             RefreshCategories(); RenderList();
+        };
+        form.Show(this);
+    }
+
+    void OpenRawAnimationAssets()
+    {
+        if (_gameRoot is null) { MessageBox.Show(this, "先选择 Master Duel 游戏目录。", Text); return; }
+        var selected = Selected();
+        if (selected is null || !selected.HasMonsterAnimation)
+        {
+            MessageBox.Show(this, "请先在“有怪兽动画”分类中选择一张卡图。", Text);
+            return;
+        }
+        var form = new MonsterAnimationRawAssetsForm(_gameRoot, selected.CardKey);
+        form.FormClosed += async (_, _) =>
+        {
+            await RefreshModFlagsAsync();
+            RefreshCategories();
+            RenderList();
         };
         form.Show(this);
     }

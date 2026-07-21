@@ -20,6 +20,35 @@ internal static class Program
             foreach (var cardId in MonsterAnimationIndexService.FindInstalledCardIds(args[1])) Console.WriteLine(cardId);
             return;
         }
+        if (args.Length == 4 && args[0] == "--test-raw-animation-roundtrip")
+        {
+            var set = MonsterAnimationIndexService.Find(args[1], args[2]);
+            var service = new MonsterAnimationRawAssetService();
+            var manifest = service.ExportAll(set, args[3]);
+            var imported = service.ImportAll(args[1], set, args[3]);
+            var profiles = set.Assets.Select(x => service.ResolveProfile(x).DisplayName).Distinct().ToArray();
+            var extensions = manifest.Files.GroupBy(x => Path.GetExtension(x.FileName).ToLowerInvariant()).ToDictionary(x => x.Key, x => x.Count());
+            Console.WriteLine($"complete={set.IsComplete}; exported={manifest.Files.Count}; imported={imported}; profiles={string.Join(" / ", profiles)}; files={string.Join(',', extensions.Select(x => $"{x.Key}:{x.Value}"))}");
+            if (!set.IsComplete || manifest.Files.Count < 6 || imported != manifest.Files.Count || extensions.GetValueOrDefault(".png") < 2 || extensions.GetValueOrDefault(".atlas") < 2 || extensions.GetValueOrDefault(".json") < 2) Environment.ExitCode = 2;
+            return;
+        }
+        if (args.Length == 3 && args[0] == "--test-raw-animation-form")
+        {
+            using var form = new MonsterAnimationRawAssetsForm(args[1], args[2]) { Opacity = 0, ShowInTaskbar = false };
+            form.Show();
+            var list = (ListView?)typeof(MonsterAnimationRawAssetsForm).GetField("_assets", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            var image = (PictureBox?)typeof(MonsterAnimationRawAssetsForm).GetField("_imagePreview", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            var text = (TextBox?)typeof(MonsterAnimationRawAssetsForm).GetField("_textPreview", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            var deadline = DateTime.UtcNow.AddSeconds(60);
+            while (DateTime.UtcNow < deadline && ((list?.Items.Count ?? 0) < 6 || image?.Image is null && string.IsNullOrWhiteSpace(text?.Text))) { Application.DoEvents(); Thread.Sleep(25); }
+            var labels = list?.Items.Cast<ListViewItem>().Select(x => x.SubItems[0].Text).Distinct().ToArray() ?? [];
+            var previewLoaded = image?.Image is not null || !string.IsNullOrWhiteSpace(text?.Text);
+            Console.WriteLine($"items={list?.Items.Count}; preview={previewLoaded}; profiles={string.Join(" / ", labels)}");
+            var result = (list?.Items.Count ?? 0) >= 6 && previewLoaded && labels.Any(x => x.Contains("SD", StringComparison.OrdinalIgnoreCase)) && labels.Any(x => x.Contains("HighEnd_HD", StringComparison.OrdinalIgnoreCase));
+            form.Close();
+            if (!result) Environment.ExitCode = 2;
+            return;
+        }
         if (args.Length == 2 && args[0] == "--test-animation-form")
         {
             using var form = new MonsterAnimationForm(args[1]);
