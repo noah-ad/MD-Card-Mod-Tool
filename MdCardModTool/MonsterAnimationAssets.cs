@@ -84,6 +84,74 @@ public static class MonsterAnimationIndexService
         return new MonsterAnimationSet { CardId = cardId, Assets = assets };
     }
 
+    public static HashSet<string> LoadBundledCardIds()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "monster-animation-cards-v1.txt");
+        if (!File.Exists(path)) return [];
+        return File.ReadLines(path)
+            .Select(x => x.Trim())
+            .Where(x => x.Length > 0 && x.All(char.IsAsciiDigit))
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    public static bool HasInstalledAnimation(string gameRoot, string cardId)
+    {
+        if (!cardId.All(char.IsAsciiDigit) || cardId.Length == 0) return false;
+        var roots = AnimationRoots(gameRoot);
+        foreach (var region in new[] { "tcg", "ocg" })
+        {
+            var paths = SkeletonRelativePaths(cardId, region);
+            if (roots.Any(root => File.Exists(Path.Combine(root, paths.High))) &&
+                roots.Any(root => File.Exists(Path.Combine(root, paths.Sd)))) return true;
+        }
+        return false;
+    }
+
+    public static IReadOnlyList<string> FindInstalledCardIds(string gameRoot, int maximumCardId = 40_000)
+    {
+        var roots = AnimationRoots(gameRoot);
+        var files = roots
+            .SelectMany(root => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+            .Select(Path.GetFullPath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var result = new List<string>();
+        for (var id = 1; id <= maximumCardId; id++)
+        {
+            var cardId = id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            foreach (var region in new[] { "tcg", "ocg" })
+            {
+                var paths = SkeletonRelativePaths(cardId, region);
+                if (roots.Any(root => files.Contains(Path.GetFullPath(Path.Combine(root, paths.High)))) &&
+                    roots.Any(root => files.Contains(Path.GetFullPath(Path.Combine(root, paths.Sd)))))
+                {
+                    result.Add(cardId);
+                    break;
+                }
+            }
+        }
+        return result;
+    }
+
+    static string[] AnimationRoots(string gameRoot)
+    {
+        var roots = new List<string>();
+        var local = IndexService.FindLocalRoot(gameRoot);
+        if (local is not null && Directory.Exists(local)) roots.Add(local);
+        var streaming = IndexService.StreamingRoot(gameRoot);
+        if (Directory.Exists(streaming)) roots.Add(streaming);
+        return roots.ToArray();
+    }
+
+    static (string High, string Sd) SkeletonRelativePaths(string cardId, string region)
+    {
+        var basePath = $"Duel/Timeline/Duel/MonsterCutIn/{region}/P{cardId}";
+        return
+        (
+            IndexService.ResourceBundleRelativePath($"{basePath}/HighEnd_HD/P{cardId}JS"),
+            IndexService.ResourceBundleRelativePath($"{basePath}/SD/P{cardId}JS")
+        );
+    }
+
     static List<MonsterAnimationAssetRef> FindDeterministicCandidates(string gameRoot, string cardId)
     {
         var localRoot = IndexService.FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");

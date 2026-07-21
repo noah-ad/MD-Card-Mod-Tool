@@ -7,6 +7,7 @@ public sealed class MainForm : Form
 {
     const string DefaultGame = @"E:\steam\steamapps\common\Yu-Gi-Oh!  Master Duel";
     const string ModGroupKey = "__mods__";
+    const string AnimationGroupKey = "本地卡图|有怪兽动画";
     readonly ModEngine _engine = new();
     readonly OverFrameService _overFrames = new();
     readonly ModPackageService _mods = new();
@@ -198,6 +199,7 @@ public sealed class MainForm : Form
                 }
             }
             await ApplyOverFrameTagsAsync();
+            ApplyMonsterAnimationTags();
             await RefreshModFlagsAsync();
             RefreshCategories(); RenderList();
         }
@@ -213,6 +215,17 @@ public sealed class MainForm : Form
         foreach (var source in _textures.GroupBy(x => x.SourceKind).OrderBy(x => x.Key))
         {
             var sourceNode = _groups.Nodes.Add($"{source.Key}（{source.Count()}）");
+            if (source.Key == "本地卡图")
+            {
+                var animationCount = source.Count(x => x.HasMonsterAnimation);
+                if (animationCount > 0)
+                {
+                    _category.Items.Add(AnimationGroupKey);
+                    var animationNode = sourceNode.Nodes.Add($"有怪兽动画（{animationCount}）");
+                    animationNode.Tag = AnimationGroupKey;
+                    animationNode.ForeColor = UiTheme.Gold;
+                }
+            }
             foreach (var group in source.GroupBy(x => x.Category).OrderBy(x => x.Key))
             {
                 var key = $"{source.Key}|{group.Key}"; _category.Items.Add(key);
@@ -228,19 +241,27 @@ public sealed class MainForm : Form
         var q = _search.Text.Trim(); var filter = _category.Text; _list.BeginUpdate(); _list.Items.Clear();
         // 输入关键字时始终全局检索，不能被侧栏分类或“只看我的 Mod”悄悄过滤掉。
         var globalSearch = q.Length > 0;
-        foreach (var x in _textures.Where(x => (globalSearch || (!_modsOnly || x.IsModded) && (filter == "全部" || filter == $"{x.SourceKind}|{x.Category}")) && MatchesSearch(x, q)))
-            _list.Items.Add(new ListViewItem([x.Name, $"{x.SourceKind} / {x.Category}{(x.IsModded ? "  · MOD" : "")}", $"{x.Width}×{x.Height}", x.RelativeBundlePath]) { Tag = x });
+        foreach (var x in _textures.Where(x => (globalSearch || (!_modsOnly || x.IsModded) && CategoryMatches(x, filter)) && MatchesSearch(x, q)))
+            _list.Items.Add(new ListViewItem([x.Name, $"{x.SourceKind} / {x.Category}{(x.HasMonsterAnimation ? "  · 动画" : "")}{(x.IsModded ? "  · MOD" : "")}", $"{x.Width}×{x.Height}", x.RelativeBundlePath]) { Tag = x });
         _list.EndUpdate();
         var total = globalSearch ? _textures.Count : _modsOnly ? _textures.Count(x => x.IsModded) : _textures.Count;
         _resultCount.Text = globalSearch ? $"全局 { _list.Items.Count:N0} / {total:N0}" : $"{_list.Items.Count:N0} / {total:N0} 项";
     }
+
+    static bool CategoryMatches(TexRef texture, string filter) => filter switch
+    {
+        "全部" => true,
+        AnimationGroupKey => texture.SourceKind == "本地卡图" && texture.HasMonsterAnimation,
+        _ => filter == $"{texture.SourceKind}|{texture.Category}"
+    };
 
     static bool MatchesSearch(TexRef texture, string query)
     {
         if (query.Length == 0) return true;
         // 卡号必须精确匹配，避免 11213 把 112132、112133 等无关资源带进结果。
         if (query.All(char.IsAsciiDigit)) return texture.CardKey == query || texture.Name == query;
-        return $"{texture.Name} {texture.CardKey} {texture.SourceKind} {texture.Category} {texture.RelativeBundlePath}".Contains(query, StringComparison.OrdinalIgnoreCase);
+        var animation = texture.HasMonsterAnimation ? "有怪兽动画 召唤动画" : "";
+        return $"{texture.Name} {texture.CardKey} {texture.SourceKind} {texture.Category} {animation} {texture.RelativeBundlePath}".Contains(query, StringComparison.OrdinalIgnoreCase);
     }
 
     async Task ScanMissingCardAsync()
@@ -272,6 +293,9 @@ public sealed class MainForm : Form
             if (additions.Count > 0)
             {
                 await YgoCdbCardCatalog.ClassifyTexturesAsync(additions);
+                var animationIds = MonsterAnimationIndexService.LoadBundledCardIds();
+                foreach (var addition in additions)
+                    addition.HasMonsterAnimation = animationIds.Contains(addition.CardKey) || await Task.Run(() => MonsterAnimationIndexService.HasInstalledAnimation(_gameRoot, addition.CardKey));
                 _index.Textures.AddRange(additions); _textures.AddRange(additions);
             }
             await Task.Run(() => IndexService.Save(_gameRoot, _index));
@@ -449,6 +473,15 @@ public sealed class MainForm : Form
             }
         }
         catch { }
+    }
+
+    void ApplyMonsterAnimationTags()
+    {
+        var animationIds = MonsterAnimationIndexService.LoadBundledCardIds();
+        foreach (var texture in _textures)
+            texture.HasMonsterAnimation = texture.SourceKind == "本地卡图" && animationIds.Contains(texture.CardKey);
+        var count = _textures.Count(x => x.HasMonsterAnimation);
+        if (count > 0) _status.Text += $" 已标记 {count:N0} 张有怪兽召唤动画的卡图。";
     }
     void OpenFramePreview()
     {

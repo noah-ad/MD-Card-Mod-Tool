@@ -95,7 +95,7 @@ public sealed class MonsterAnimationForm : Form
         var previewPanel = new BorderPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Surface, Padding = new Padding(1) };
         previewPanel.Controls.Add(_preview); previewPanel.Controls.Add(timelineRow);
 
-        var body = new SplitContainer { Dock = DockStyle.Fill, SplitterDistance = 745, SplitterWidth = 8, Panel1MinSize = 500, Panel2MinSize = 350, FixedPanel = FixedPanel.Panel2, BackColor = UiTheme.Window };
+        var body = new SplitContainer { Dock = DockStyle.Fill, SplitterWidth = 8, FixedPanel = FixedPanel.Panel2, BackColor = UiTheme.Window };
         body.Panel1.Padding = new Padding(14, 14, 7, 14); body.Panel2.Padding = new Padding(7, 14, 14, 14);
         body.Panel1.Controls.Add(previewPanel); body.Panel2.Controls.Add(side);
 
@@ -107,7 +107,19 @@ public sealed class MonsterAnimationForm : Form
         root.Controls.Add(banner, 0, 0); root.Controls.Add(cardRow, 0, 1); root.Controls.Add(body, 0, 2); Controls.Add(root);
 
         FormClosed += (_, _) => DisposeMedia();
-        Shown += async (_, _) => { if (_cardId.Text.Length > 0) await LocateAsync(); };
+        Shown += async (_, _) =>
+        {
+            const int panel1Minimum = 500;
+            const int panel2Minimum = 350;
+            var maximum = body.Width - panel2Minimum - body.SplitterWidth;
+            if (maximum >= panel1Minimum)
+            {
+                body.SplitterDistance = Math.Clamp(body.Width - 380, panel1Minimum, maximum);
+                body.Panel1MinSize = panel1Minimum;
+                body.Panel2MinSize = panel2Minimum;
+            }
+            if (_cardId.Text.Length > 0) await LocateAsync();
+        };
     }
 
     static Label Label(string text, Color color) => new() { Text = text, AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = color, Padding = new Padding(0, 7, 8, 0) };

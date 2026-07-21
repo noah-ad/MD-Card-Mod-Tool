@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <PlatformTarget>x64</PlatformTarget>
-    <Version>1.6.0</Version>
+    <Version>1.6.1</Version>
     <AssemblyName>MD卡图查看替换器</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
@@ -17,6 +17,7 @@
   <ItemGroup>
     <None Include="Assets\classdata.tpk" Link="classdata.tpk" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Assets\prebuilt-index-v1.json.br" Link="prebuilt-index-v1.json.br" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Assets\monster-animation-cards-v1.txt" Link="monster-animation-cards-v1.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="FFMPEG-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="DIRECTXTEX-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Assets\tools\texconv.exe" Link="tools\texconv.exe" CopyToOutputDirectory="PreserveNewest" />

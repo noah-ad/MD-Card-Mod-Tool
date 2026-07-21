@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace MdCardModTool;
 
 public sealed class TexRef
@@ -16,6 +18,8 @@ public sealed class TexRef
     public bool IsTokenOrMisc { get; set; }
     /// <summary>当前 Bundle 与本工具保存的原版备份不同；启动时由轻量 Mod 台账重新计算。</summary>
     public bool IsModded { get; set; }
+    /// <summary>当前版本存在完整 SD/highend_hd 召唤动画；只用于运行时分类。</summary>
+    [JsonIgnore] public bool HasMonsterAnimation { get; set; }
     public string SourceKind { get; init; } = "";
     public string CardKey { get; init; } = "";
     /// <summary>普通替换时用于还原游戏实装比例的本地预览卡框；只影响工具预览，不修改全局卡框。</summary>

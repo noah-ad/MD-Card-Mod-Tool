@@ -15,6 +15,48 @@ internal static class Program
             Console.WriteLine($"build={index.GameBuildId}; assets={index.Assets.Count}; cards={index.Assets.Select(x => x.CardId).Distinct().Count()}; {args[2]}");
             return;
         }
+        if (args.Length == 2 && args[0] == "--list-animation-cards")
+        {
+            foreach (var cardId in MonsterAnimationIndexService.FindInstalledCardIds(args[1])) Console.WriteLine(cardId);
+            return;
+        }
+        if (args.Length == 2 && args[0] == "--test-animation-form")
+        {
+            using var form = new MonsterAnimationForm(args[1]);
+            form.Opacity = 0;
+            form.ShowInTaskbar = false;
+            form.Show();
+            Application.DoEvents();
+            Console.WriteLine($"shown={form.ClientSize.Width}x{form.ClientSize.Height}");
+            form.Close();
+            return;
+        }
+        if (args.Length == 2 && args[0] == "--test-animation-catalog")
+        {
+            if (!PortableIndexService.TryLoadBundled(args[1], out var index, out _)) throw new FileNotFoundException("缺少卡图预绑定索引。");
+            var ids = MonsterAnimationIndexService.LoadBundledCardIds();
+            var tagged = index.Textures.Where(x => x.SourceKind == "本地卡图" && ids.Contains(x.CardKey)).ToArray();
+            Console.WriteLine($"ids={ids.Count}; taggedTextures={tagged.Length}; distinctCards={tagged.Select(x => x.CardKey).Distinct().Count()}");
+            return;
+        }
+        if (args.Length == 1 && args[0] == "--test-main-form")
+        {
+            using var form = new MainForm { Opacity = 0, ShowInTaskbar = false };
+            form.Show();
+            var groups = (TreeView?)typeof(MainForm).GetField("_groups", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            TreeNode? animationNode = null;
+            while (DateTime.UtcNow < deadline && animationNode is null)
+            {
+                Application.DoEvents();
+                animationNode = groups?.Nodes.Cast<TreeNode>().SelectMany(x => x.Nodes.Cast<TreeNode>()).FirstOrDefault(x => x.Text.StartsWith("有怪兽动画", StringComparison.Ordinal));
+                if (animationNode is null) Thread.Sleep(25);
+            }
+            Console.WriteLine(animationNode is null ? "animationCategory=missing" : $"animationCategory={animationNode.Text}");
+            form.Close();
+            if (animationNode is null) Environment.ExitCode = 2;
+            return;
+        }
         if (args.Length == 3 && args[0] == "--inspect-animation-card")
         {
             var set = MonsterAnimationIndexService.Find(args[1], args[2]);
