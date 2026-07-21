@@ -9,6 +9,7 @@ public sealed class ExtractedAnimation : IDisposable
     public required string WorkingDirectory { get; init; }
     public required List<string> FramePaths { get; init; }
     public required int FramesPerSecond { get; init; }
+    public bool GreenScreenRemoved { get; init; }
     public double DurationSeconds => FramePaths.Count / (double)FramesPerSecond;
 
     public Bitmap LoadFrame(int index, int maxPreviewEdge = 0)
@@ -62,6 +63,7 @@ public static class MonsterAnimationMedia
         int maxFrames,
         int maxFrameEdge,
         double startSeconds = 0,
+        bool removeGreenScreen = false,
         CancellationToken cancellationToken = default)
     {
         if (!File.Exists(sourcePath)) throw new FileNotFoundException("找不到动画源文件。", sourcePath);
@@ -73,7 +75,18 @@ public static class MonsterAnimationMedia
         var directory = Path.Combine(Path.GetTempPath(), "MDCardModTool", "animation_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         var output = Path.Combine(directory, "frame_%05d.png");
-        var filter = $"fps={framesPerSecond.ToString(CultureInfo.InvariantCulture)},scale=w='min(iw\\,{maxFrameEdge})':h='min(ih\\,{maxFrameEdge})':force_original_aspect_ratio=decrease,format=rgba";
+        var filters = new List<string>
+        {
+            $"fps={framesPerSecond.ToString(CultureInfo.InvariantCulture)}",
+            $"scale=w='min(iw\\,{maxFrameEdge})':h='min(ih\\,{maxFrameEdge})':force_original_aspect_ratio=decrease"
+        };
+        if (removeGreenScreen)
+        {
+            filters.Add("colorkey=color=0x00FF00:similarity=0.25:blend=0.08");
+            filters.Add("despill=type=green:mix=0.5");
+        }
+        filters.Add("format=rgba");
+        var filter = string.Join(',', filters);
         var start = new ProcessStartInfo
         {
             FileName = ffmpeg,
@@ -106,7 +119,7 @@ public static class MonsterAnimationMedia
             if (process.ExitCode != 0) throw new InvalidDataException("FFmpeg 无法读取该文件：" + error.Trim());
             var frames = Directory.EnumerateFiles(directory, "frame_*.png").OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
             if (frames.Count == 0) throw new InvalidDataException("视频或 GIF 中没有可读取的画面。");
-            return new ExtractedAnimation { SourcePath = sourcePath, WorkingDirectory = directory, FramePaths = frames, FramesPerSecond = framesPerSecond };
+            return new ExtractedAnimation { SourcePath = sourcePath, WorkingDirectory = directory, FramePaths = frames, FramesPerSecond = framesPerSecond, GreenScreenRemoved = removeGreenScreen };
         }
         catch
         {

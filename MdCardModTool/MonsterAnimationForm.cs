@@ -16,6 +16,7 @@ public sealed class MonsterAnimationForm : Form
     readonly NumericUpDown _scale = new() { Minimum = 10, Maximum = 500, Value = 100, Increment = 5, Width = 88 };
     readonly ComboBox _frameEdge = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110 };
     readonly ComboBox _atlasEdge = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110 };
+    readonly CheckBox _removeGreenScreen = new() { Text = "自动去绿幕", AutoSize = true, ForeColor = UiTheme.Text, BackColor = Color.Transparent };
     readonly Label _frameLabel = new() { AutoSize = true, ForeColor = UiTheme.Muted, Padding = new Padding(8, 8, 0, 0) };
     readonly Button _play;
     readonly Button _apply;
@@ -76,7 +77,7 @@ public sealed class MonsterAnimationForm : Form
         foreach (var button in new[] { choose, _play, _apply, restore }) { button.AutoSize = false; button.Dock = DockStyle.Fill; button.Margin = new Padding(3); }
         buttons.Controls.Add(choose, 0, 0); buttons.Controls.Add(_play, 1, 0); buttons.Controls.Add(_apply, 0, 1); buttons.Controls.Add(restore, 1, 1);
 
-        var options = new TableLayoutPanel { Dock = DockStyle.Top, Height = 211, ColumnCount = 2, RowCount = 6, Padding = new Padding(0, 4, 0, 4), BackColor = UiTheme.Surface };
+        var options = new TableLayoutPanel { Dock = DockStyle.Top, Height = 244, ColumnCount = 2, RowCount = 7, Padding = new Padding(0, 4, 0, 4), BackColor = UiTheme.Surface };
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58)); options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
         AddOption(options, 0, "帧率 / 游戏速度", _fps);
         AddOption(options, 1, "视频起始秒", _startSeconds);
@@ -84,12 +85,13 @@ public sealed class MonsterAnimationForm : Form
         AddOption(options, 3, "画质 / 单帧最长边", _frameEdge);
         AddOption(options, 4, "单张图集上限", _atlasEdge);
         AddOption(options, 5, "全游戏画面占比（实时）%", _scale);
+        AddOption(options, 6, "绿幕背景透明化", _removeGreenScreen);
 
         var note = new Label
         {
             Dock = DockStyle.Fill,
             ForeColor = UiTheme.Muted,
-            Text = "100% 对应 Master Duel 完整 16:9 游戏画布（4800×2700），不再受原怪兽骨骼范围限制；调整占比会立即在左侧按全画布比例预览。\n\n“自动高清”会先快速探测实际帧数，再选择单张图集能容纳的最高画质；短动画通常可达到 1920 px，长动画会自动降档。\n\n工具会恢复并写入原卡的全部动画名，兼容 animation_USP。仅能替换游戏中原本已有召唤动画的卡。",
+            Text = "100% 对应 Master Duel 完整 16:9 游戏画布（4800×2700），不再受原怪兽骨骼范围限制；调整占比会立即在左侧按全画布比例预览。\n\n“自动高清”会先快速探测实际帧数，再选择图集能容纳的最高画质。勾选“自动去绿幕”后，纯绿色背景会变为透明并柔化边缘。\n\n工具会写入原卡的全部动画名，兼容 animation_USP。仅能替换原本已有召唤动画的卡。",
             Padding = new Padding(0, 10, 0, 0)
         };
         var side = new BorderPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Surface, Padding = new Padding(18) };
@@ -199,6 +201,7 @@ public sealed class MonsterAnimationForm : Form
         List<Bitmap>? loadedFrames = null;
         var resetToFullGameCanvas = _media is null;
         var automaticQuality = _frameEdge.Text == AutomaticQuality;
+        var removeGreenScreen = _removeGreenScreen.Checked;
         var resolvedFrameEdge = 0;
         var mediaWidth = 0;
         var mediaHeight = 0;
@@ -218,7 +221,7 @@ public sealed class MonsterAnimationForm : Form
                 SetBusy(true, $"正在按 {resolvedFrameEdge} px 用 FFmpeg 抽取画面…");
             }
 
-            loadedMedia = await MonsterAnimationMedia.ExtractAsync(path, (int)_fps.Value, (int)_maxFrames.Value, resolvedFrameEdge, (double)_startSeconds.Value);
+            loadedMedia = await MonsterAnimationMedia.ExtractAsync(path, (int)_fps.Value, (int)_maxFrames.Value, resolvedFrameEdge, (double)_startSeconds.Value, removeGreenScreen);
             using (var firstFrame = loadedMedia.LoadFrame(0)) { mediaWidth = firstFrame.Width; mediaHeight = firstFrame.Height; }
             var previewEdge = Math.Min(512, resolvedFrameEdge);
             var mediaForPreview = loadedMedia;
@@ -250,7 +253,8 @@ public sealed class MonsterAnimationForm : Form
     {
         if (_media is null) { _sourceStatus.Text = "拖入或选择 GIF / 视频后在左侧预览"; return; }
         var quality = _automaticQuality ? $"自动高清，上限 {_resolvedFrameEdge} px" : $"固定上限 {_resolvedFrameEdge} px";
-        _sourceStatus.Text = $"{Path.GetFileName(_media.SourcePath)}\n{_media.FramePaths.Count:N0} 帧 · 当前 {(int)_fps.Value} FPS · {_media.FramePaths.Count / (double)_fps.Value:0.00} 秒 · {_mediaWidth}×{_mediaHeight}（{quality}）";
+        var transparency = _media.GreenScreenRemoved ? " · 绿幕已透明" : "";
+        _sourceStatus.Text = $"{Path.GetFileName(_media.SourcePath)}\n{_media.FramePaths.Count:N0} 帧 · 当前 {(int)_fps.Value} FPS · {_media.FramePaths.Count / (double)_fps.Value:0.00} 秒 · {_mediaWidth}×{_mediaHeight}（{quality}）{transparency}";
     }
 
     async Task LoadCurrentAnimationPreviewAsync(MonsterAnimationSet set)

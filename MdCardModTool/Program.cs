@@ -55,12 +55,14 @@ internal static class Program
             if (!result) Environment.ExitCode = 2;
             return;
         }
-        if (args.Length == 4 && args[0] == "--test-animation-form-media")
+        if (args.Length == 4 && args[0] is "--test-animation-form-media" or "--test-animation-form-chroma")
         {
             using var form = new MonsterAnimationForm(args[1], args[2]) { Opacity = 0, ShowInTaskbar = false };
             form.Show();
             var preview = (AnimationPreviewCanvas?)typeof(MonsterAnimationForm).GetField("_preview", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
             var source = (Label?)typeof(MonsterAnimationForm).GetField("_sourceStatus", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            var removeGreenScreen = (CheckBox?)typeof(MonsterAnimationForm).GetField("_removeGreenScreen", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            if (args[0] == "--test-animation-form-chroma" && removeGreenScreen is not null) removeGreenScreen.Checked = true;
             var deadline = DateTime.UtcNow.AddSeconds(30);
             while (DateTime.UtcNow < deadline && preview?.Frame is null && source?.Text.Contains("原版多骨骼", StringComparison.Ordinal) != true) { Application.DoEvents(); Thread.Sleep(25); }
             var method = typeof(MonsterAnimationForm).GetMethod("LoadMediaAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic) ?? throw new MissingMethodException("LoadMediaAsync");
@@ -69,7 +71,8 @@ internal static class Program
             while (!task.IsCompleted && DateTime.UtcNow < deadline) { Application.DoEvents(); Thread.Sleep(25); }
             task.GetAwaiter().GetResult();
             var scale = (NumericUpDown?)typeof(MonsterAnimationForm).GetField("_scale", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
-            var result = task.IsCompletedSuccessfully && preview?.Frame is not null && scale?.Value == 100 && preview.ScalePercent == 100;
+            var result = task.IsCompletedSuccessfully && preview?.Frame is not null && scale?.Value == 100 && preview.ScalePercent == 100
+                && (args[0] != "--test-animation-form-chroma" || source?.Text.Contains("绿幕已透明", StringComparison.Ordinal) == true);
             Console.WriteLine($"media={source?.Text.Replace(Environment.NewLine, " | ")}; frame={preview?.Frame is not null}; fullCanvasScale={scale?.Value}");
             form.Close();
             if (!result) Environment.ExitCode = 2;
@@ -190,6 +193,20 @@ internal static class Program
             var longAnimation = MonsterAnimationBuilder.ChooseAutomaticFrameEdge(180, 16, 9, 8192);
             Console.WriteLine($"22frames={shortAnimation}; 60frames={mediumAnimation}; 180frames={longAnimation}");
             if (shortAnimation != 1920 || mediumAnimation != 1280 || longAnimation != 768) Environment.ExitCode = 2;
+            return;
+        }
+        if (args.Length == 3 && args[0] == "--test-animation-chroma-key")
+        {
+            using var keyed = MonsterAnimationMedia.ExtractAsync(args[1], 12, 12, 512, 0, true).GetAwaiter().GetResult();
+            using var plain = MonsterAnimationMedia.ExtractAsync(args[1], 12, 12, 512).GetAwaiter().GetResult();
+            using var keyedFrame = keyed.LoadFrame(0);
+            using var plainFrame = plain.LoadFrame(0);
+            var keyedBackground = keyedFrame.GetPixel(8, 8);
+            var keyedSubject = keyedFrame.GetPixel(keyedFrame.Width / 2, keyedFrame.Height / 2);
+            var plainBackground = plainFrame.GetPixel(8, 8);
+            keyedFrame.Save(args[2]);
+            Console.WriteLine($"keyedBackground={keyedBackground}; keyedSubject={keyedSubject}; plainBackground={plainBackground}; saved={args[2]}");
+            if (!keyed.GreenScreenRemoved || keyedBackground.A > 16 || keyedSubject.A < 240 || plainBackground.A < 240) Environment.ExitCode = 2;
             return;
         }
         if (args.Length == 5 && args[0] == "--test-animation-texture")
