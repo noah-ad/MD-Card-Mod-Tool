@@ -173,6 +173,25 @@ internal static class Program
             Console.WriteLine($"frames={built.FrameCount}; fps={built.FramesPerSecond}; atlas={built.AtlasWidth}x{built.AtlasHeight}; dxt5={encoded.Data.Length}");
             return;
         }
+        if (args.Length == 4 && args[0] == "--test-animation-hd-media")
+        {
+            Directory.CreateDirectory(args[3]);
+            using var media = MonsterAnimationMedia.ExtractAsync(args[1], 15, 28, 1920).GetAwaiter().GetResult();
+            using var first = media.LoadFrame(0);
+            using var built = MonsterAnimationBuilder.Build(media.FramePaths, args[2], 15, 100, 8192);
+            var encoded = new ModEngine().EncodeAnimationAtlas(built.AtlasImage);
+            Console.WriteLine($"frames={built.FrameCount}; frame={first.Width}x{first.Height}; atlas={built.AtlasWidth}x{built.AtlasHeight}; bc3={encoded.Data.Length}");
+            return;
+        }
+        if (args.Length == 1 && args[0] == "--test-animation-quality-plan")
+        {
+            var shortAnimation = MonsterAnimationBuilder.ChooseAutomaticFrameEdge(22, 16, 9, 8192);
+            var mediumAnimation = MonsterAnimationBuilder.ChooseAutomaticFrameEdge(60, 16, 9, 8192);
+            var longAnimation = MonsterAnimationBuilder.ChooseAutomaticFrameEdge(180, 16, 9, 8192);
+            Console.WriteLine($"22frames={shortAnimation}; 60frames={mediumAnimation}; 180frames={longAnimation}");
+            if (shortAnimation != 1920 || mediumAnimation != 1280 || longAnimation != 768) Environment.ExitCode = 2;
+            return;
+        }
         if (args.Length == 5 && args[0] == "--test-animation-texture")
         {
             var engine = new ModEngine();

@@ -2,6 +2,7 @@ namespace MdCardModTool;
 
 public sealed class MonsterAnimationForm : Form
 {
+    const string AutomaticQuality = "自动高清（推荐）";
     readonly string _gameRoot;
     readonly MonsterAnimationService _service = new();
     readonly TextBox _cardId = new() { Width = 130, PlaceholderText = "例如 4007" };
@@ -25,6 +26,10 @@ public sealed class MonsterAnimationForm : Form
     int _previewFramesPerSecond = 15;
     bool _playing;
     bool _busy;
+    bool _automaticQuality;
+    int _resolvedFrameEdge;
+    int _mediaWidth;
+    int _mediaHeight;
 
     public MonsterAnimationForm(string gameRoot, string? initialCardId = null)
     {
@@ -43,7 +48,7 @@ public sealed class MonsterAnimationForm : Form
         UiTheme.StyleTextBox(_cardId);
         UiTheme.StyleComboBox(_frameEdge);
         UiTheme.StyleComboBox(_atlasEdge);
-        _frameEdge.Items.AddRange(["256", "384", "512", "768", "1024"]); _frameEdge.SelectedItem = "384";
+        _frameEdge.Items.AddRange([AutomaticQuality, "512", "768", "1024", "1280", "1600", "1920", "2048"]); _frameEdge.SelectedItem = AutomaticQuality;
         _atlasEdge.Items.AddRange(["4096", "8192", "16384"]); _atlasEdge.SelectedItem = "8192";
         _cardId.Text = initialCardId?.All(char.IsAsciiDigit) == true ? initialCardId : "";
         _cardId.KeyDown += async (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await LocateAsync(); } };
@@ -76,7 +81,7 @@ public sealed class MonsterAnimationForm : Form
         AddOption(options, 0, "帧率 / 游戏速度", _fps);
         AddOption(options, 1, "视频起始秒", _startSeconds);
         AddOption(options, 2, "最多读取帧数", _maxFrames);
-        AddOption(options, 3, "单帧最长边", _frameEdge);
+        AddOption(options, 3, "画质 / 单帧最长边", _frameEdge);
         AddOption(options, 4, "单张图集上限", _atlasEdge);
         AddOption(options, 5, "全游戏画面占比（实时）%", _scale);
 
@@ -84,7 +89,7 @@ public sealed class MonsterAnimationForm : Form
         {
             Dock = DockStyle.Fill,
             ForeColor = UiTheme.Muted,
-            Text = "100% 对应 Master Duel 完整 16:9 游戏画布（4800×2700），不再受原怪兽骨骼范围限制；调整占比会立即在左侧按全画布比例预览。\n\n导入时按当前帧率抽帧；工具会恢复并写入原卡的全部动画名，兼容 animation_USP 等额外引用。\n\n仅能替换游戏中原本已有召唤动画的卡。建议：15 FPS、384 px、最多 180 帧。长视频先截取需要的片段。",
+            Text = "100% 对应 Master Duel 完整 16:9 游戏画布（4800×2700），不再受原怪兽骨骼范围限制；调整占比会立即在左侧按全画布比例预览。\n\n“自动高清”会先快速探测实际帧数，再选择单张图集能容纳的最高画质；短动画通常可达到 1920 px，长动画会自动降档。\n\n工具会恢复并写入原卡的全部动画名，兼容 animation_USP。仅能替换游戏中原本已有召唤动画的卡。",
             Padding = new Padding(0, 10, 0, 0)
         };
         var side = new BorderPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Surface, Padding = new Padding(18) };
@@ -193,15 +198,37 @@ public sealed class MonsterAnimationForm : Form
         ExtractedAnimation? loadedMedia = null;
         List<Bitmap>? loadedFrames = null;
         var resetToFullGameCanvas = _media is null;
+        var automaticQuality = _frameEdge.Text == AutomaticQuality;
+        var resolvedFrameEdge = 0;
+        var mediaWidth = 0;
+        var mediaHeight = 0;
         try
         {
-            SetBusy(true, "正在用 FFmpeg 抽取画面…");
-            loadedMedia = await MonsterAnimationMedia.ExtractAsync(path, (int)_fps.Value, (int)_maxFrames.Value, int.Parse(_frameEdge.Text), (double)_startSeconds.Value);
-            var previewEdge = Math.Min(384, int.Parse(_frameEdge.Text));
+            if (automaticQuality)
+            {
+                SetBusy(true, "正在低清探测实际帧数与画面比例…");
+                using var probe = await MonsterAnimationMedia.ExtractAsync(path, (int)_fps.Value, (int)_maxFrames.Value, 128, (double)_startSeconds.Value);
+                using var probeFrame = probe.LoadFrame(0);
+                resolvedFrameEdge = MonsterAnimationBuilder.ChooseAutomaticFrameEdge(probe.FramePaths.Count, probeFrame.Width, probeFrame.Height, int.Parse(_atlasEdge.Text));
+                SetBusy(true, $"检测到 {probe.FramePaths.Count:N0} 帧，正在按 {resolvedFrameEdge} px 自动高清抽帧…");
+            }
+            else
+            {
+                resolvedFrameEdge = int.Parse(_frameEdge.Text);
+                SetBusy(true, $"正在按 {resolvedFrameEdge} px 用 FFmpeg 抽取画面…");
+            }
+
+            loadedMedia = await MonsterAnimationMedia.ExtractAsync(path, (int)_fps.Value, (int)_maxFrames.Value, resolvedFrameEdge, (double)_startSeconds.Value);
+            using (var firstFrame = loadedMedia.LoadFrame(0)) { mediaWidth = firstFrame.Width; mediaHeight = firstFrame.Height; }
+            var previewEdge = Math.Min(512, resolvedFrameEdge);
             var mediaForPreview = loadedMedia;
             loadedFrames = await Task.Run(() => Enumerable.Range(0, mediaForPreview.FramePaths.Count).Select(i => mediaForPreview.LoadFrame(i, previewEdge)).ToList());
             DisposeMedia();
             _media = loadedMedia; loadedMedia = null;
+            _automaticQuality = automaticQuality;
+            _resolvedFrameEdge = resolvedFrameEdge;
+            _mediaWidth = mediaWidth;
+            _mediaHeight = mediaHeight;
             _previewFrames.AddRange(loadedFrames); loadedFrames = null;
             if (resetToFullGameCanvas) _scale.Value = 100;
             SetPreviewRate((int)_fps.Value);
@@ -222,7 +249,8 @@ public sealed class MonsterAnimationForm : Form
     void UpdateSourceStatus()
     {
         if (_media is null) { _sourceStatus.Text = "拖入或选择 GIF / 视频后在左侧预览"; return; }
-        _sourceStatus.Text = $"{Path.GetFileName(_media.SourcePath)}\n{_media.FramePaths.Count:N0} 帧 · 当前 {(int)_fps.Value} FPS · {_media.FramePaths.Count / (double)_fps.Value:0.00} 秒";
+        var quality = _automaticQuality ? $"自动高清，上限 {_resolvedFrameEdge} px" : $"固定上限 {_resolvedFrameEdge} px";
+        _sourceStatus.Text = $"{Path.GetFileName(_media.SourcePath)}\n{_media.FramePaths.Count:N0} 帧 · 当前 {(int)_fps.Value} FPS · {_media.FramePaths.Count / (double)_fps.Value:0.00} 秒 · {_mediaWidth}×{_mediaHeight}（{quality}）";
     }
 
     async Task LoadCurrentAnimationPreviewAsync(MonsterAnimationSet set)

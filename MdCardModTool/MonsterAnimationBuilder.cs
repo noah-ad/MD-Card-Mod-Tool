@@ -68,8 +68,58 @@ public sealed class MonsterAnimationBuildResult : IDisposable
 public static class MonsterAnimationBuilder
 {
     const int Padding = 2;
+    static readonly int[] AutomaticFrameEdges = [1920, 1600, 1280, 1024, 896, 768, 640, 512, 384, 256];
     public const double GameCanvasWidth = 4800d;
     public const double GameCanvasHeight = 2700d;
+
+    public static int ChooseAutomaticFrameEdge(int frameCount, int sourceWidth, int sourceHeight, int maxAtlasEdge)
+    {
+        if (frameCount < 1) throw new ArgumentOutOfRangeException(nameof(frameCount));
+        if (sourceWidth < 1) throw new ArgumentOutOfRangeException(nameof(sourceWidth));
+        if (sourceHeight < 1) throw new ArgumentOutOfRangeException(nameof(sourceHeight));
+        if (maxAtlasEdge is not (2048 or 4096 or 8192 or 16384)) throw new ArgumentOutOfRangeException(nameof(maxAtlasEdge));
+
+        foreach (var edge in AutomaticFrameEdges)
+        {
+            var (width, height) = ScaleToLongestEdge(sourceWidth, sourceHeight, edge);
+            if (CanPackUniformFrames(frameCount, width, height, maxAtlasEdge)) return edge;
+        }
+
+        throw new InvalidOperationException($"{frameCount:N0} 帧无法放进单张 {maxAtlasEdge}×{maxAtlasEdge} 图集。请降低帧率、时长或最多读取帧数。");
+    }
+
+    public static bool CanPackUniformFrames(int frameCount, int frameWidth, int frameHeight, int maxAtlasEdge)
+    {
+        if (frameCount < 1 || frameWidth < 1 || frameHeight < 1) return false;
+        for (var atlasWidth = 256; atlasWidth <= maxAtlasEdge; atlasWidth *= 2)
+        {
+            if (frameWidth + Padding * 2 > atlasWidth) continue;
+            var x = Padding;
+            var y = Padding;
+            var rowHeight = 0;
+            var failed = false;
+            for (var i = 0; i < frameCount; i++)
+            {
+                if (x + frameWidth + Padding > atlasWidth)
+                {
+                    x = Padding;
+                    y += rowHeight + Padding;
+                    rowHeight = 0;
+                }
+                if (y + frameHeight + Padding > maxAtlasEdge) { failed = true; break; }
+                x += frameWidth + Padding;
+                rowHeight = Math.Max(rowHeight, frameHeight);
+            }
+            if (!failed && NextPowerOfTwo(y + rowHeight + Padding) <= maxAtlasEdge) return true;
+        }
+        return false;
+    }
+
+    static (int Width, int Height) ScaleToLongestEdge(int width, int height, int edge)
+    {
+        var ratio = edge / (double)Math.Max(width, height);
+        return (Math.Max(1, (int)Math.Round(width * ratio)), Math.Max(1, (int)Math.Round(height * ratio)));
+    }
 
     public static MonsterAnimationBuildResult Build(
         IReadOnlyList<string> framePaths,

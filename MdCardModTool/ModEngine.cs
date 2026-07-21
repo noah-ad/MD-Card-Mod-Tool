@@ -472,7 +472,7 @@ public sealed class ModEngine
                 RedirectStandardError = true,
                 RedirectStandardOutput = true
             };
-            foreach (var arg in new[] { "-nologo", "-y", "-f", "BC3_UNORM", "-m", "1", "-o", temporary, input }) start.ArgumentList.Add(arg);
+            foreach (var arg in new[] { "-nologo", "-y", "-f", "BC3_UNORM", "-bc", "x", "-m", "1", "-o", temporary, input }) start.ArgumentList.Add(arg);
             using var process = Process.Start(start) ?? throw new InvalidOperationException("无法启动 texconv.exe。");
             var standardOutput = process.StandardOutput.ReadToEndAsync();
             var standardError = process.StandardError.ReadToEndAsync();
