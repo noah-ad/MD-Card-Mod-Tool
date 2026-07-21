@@ -78,13 +78,13 @@ public sealed class MonsterAnimationForm : Form
         AddOption(options, 2, "最多读取帧数", _maxFrames);
         AddOption(options, 3, "单帧最长边", _frameEdge);
         AddOption(options, 4, "单张图集上限", _atlasEdge);
-        AddOption(options, 5, "游戏画面占比（实时）%", _scale);
+        AddOption(options, 5, "全游戏画面占比（实时）%", _scale);
 
         var note = new Label
         {
             Dock = DockStyle.Fill,
             ForeColor = UiTheme.Muted,
-            Text = "100% 表示铺满游戏动画的可用显示范围；调整画面占比会立即在左侧按比例缩放预览。\n\n导入时按当前帧率抽帧；透明 GIF/带 Alpha 视频会保留透明通道。工具自动生成单张 2 的幂 Spine 图集，并保留原卡 JSON 的动画名称与显示边界。\n\n仅能替换游戏中原本已有召唤动画的卡。建议：15 FPS、384 px、最多 180 帧。长视频先截取需要的片段。",
+            Text = "100% 对应 Master Duel 完整 16:9 游戏画布（4800×2700），不再受原怪兽骨骼范围限制；调整占比会立即在左侧按全画布比例预览。\n\n导入时按当前帧率抽帧；工具会恢复并写入原卡的全部动画名，兼容 animation_USP 等额外引用。\n\n仅能替换游戏中原本已有召唤动画的卡。建议：15 FPS、384 px、最多 180 帧。长视频先截取需要的片段。",
             Padding = new Padding(0, 10, 0, 0)
         };
         var side = new BorderPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Surface, Padding = new Padding(18) };
@@ -146,8 +146,8 @@ public sealed class MonsterAnimationForm : Form
             _apply.Enabled = _set.IsComplete && _media is not null;
             if (_set.IsComplete)
             {
-                var template = await Task.Run(() => _service.ReadTemplate(_set));
-                _resourceStatus.Text += $"  · 动画名 {template.AnimationName}";
+                var template = await Task.Run(() => _service.ReadTemplate(_gameRoot, _set));
+                _resourceStatus.Text += $"  · 动画名 {string.Join(" / ", template.EffectiveAnimationNames)}";
                 if (_media is null) await LoadCurrentAnimationPreviewAsync(_set);
             }
             else if (_media is null)
@@ -192,6 +192,7 @@ public sealed class MonsterAnimationForm : Form
     {
         ExtractedAnimation? loadedMedia = null;
         List<Bitmap>? loadedFrames = null;
+        var resetToFullGameCanvas = _media is null;
         try
         {
             SetBusy(true, "正在用 FFmpeg 抽取画面…");
@@ -202,6 +203,7 @@ public sealed class MonsterAnimationForm : Form
             DisposeMedia();
             _media = loadedMedia; loadedMedia = null;
             _previewFrames.AddRange(loadedFrames); loadedFrames = null;
+            if (resetToFullGameCanvas) _scale.Value = 100;
             SetPreviewRate((int)_fps.Value);
             _timeline.Maximum = Math.Max(0, _previewFrames.Count - 1); _timeline.Value = 0; _timeline.Enabled = _previewFrames.Count > 1;
             ShowFrame(0); UpdateSourceStatus();
@@ -237,15 +239,16 @@ public sealed class MonsterAnimationForm : Form
             return;
         }
         var frames = current.Frames.ToList(); current.Frames.Clear();
-        var fps = current.FramesPerSecond; var animationName = current.AnimationName;
+        var fps = current.FramesPerSecond; var animationName = current.AnimationName; var scalePercent = current.ScalePercent;
         current.Dispose();
         DisposeMedia();
         _previewFrames.AddRange(frames);
+        _scale.Value = scalePercent;
         SetPreviewRate(fps);
         _timeline.Maximum = Math.Max(0, _previewFrames.Count - 1); _timeline.Value = 0; _timeline.Enabled = _previewFrames.Count > 1;
         _preview.StatusText = "";
         ShowFrame(0);
-        _sourceStatus.Text = $"当前游戏动画 · {animationName}\n{_previewFrames.Count:N0} 帧 · {fps} FPS · {_previewFrames.Count / (double)fps:0.00} 秒";
+        _sourceStatus.Text = $"当前游戏动画 · {animationName}\n{_previewFrames.Count:N0} 帧 · {fps} FPS · {_previewFrames.Count / (double)fps:0.00} 秒 · 全画布 {scalePercent}%";
         _resourceStatus.Text = _resourceStatus.Text.Replace("  · 正在读取当前动画预览…", "  · 正在预览当前动画");
         if (!_playing) TogglePlay();
     }
@@ -283,12 +286,12 @@ public sealed class MonsterAnimationForm : Form
         try
         {
             SetBusy(true, "正在生成单张 Spine 图集…");
-            var template = await Task.Run(() => _service.ReadTemplate(_set));
+            var template = await Task.Run(() => _service.ReadTemplate(_gameRoot, _set));
             using var built = await Task.Run(() => MonsterAnimationBuilder.Build(_media.FramePaths, _set.CardId, (int)_fps.Value, (int)_scale.Value, template, int.Parse(_atlasEdge.Text)));
             _resourceStatus.Text = $"图集 {built.AtlasWidth}×{built.AtlasHeight} · 正在 DXT5 压缩并写入 6 个 Bundle…";
             await Task.Run(() => _service.Apply(_gameRoot, _set, built));
             _resourceStatus.ForeColor = UiTheme.Primary;
-            _resourceStatus.Text = $"替换完成 · {built.FrameCount} 帧 / {built.FramesPerSecond} FPS · 图集 {built.AtlasWidth}×{built.AtlasHeight}";
+            _resourceStatus.Text = $"替换完成 · {built.FrameCount} 帧 / {built.FramesPerSecond} FPS · 全画布 {(int)_scale.Value}% · 图集 {built.AtlasWidth}×{built.AtlasHeight}";
             MessageBox.Show(this, "两套召唤动画资源已经全部替换并备份。\n\n请完全退出并重新启动 Master Duel 后测试召唤演出与商店预览。", "动画替换完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "动画替换失败（已回滚）", MessageBoxButtons.OK, MessageBoxIcon.Error); }
@@ -371,7 +374,12 @@ public sealed class AnimationPreviewCanvas : Control
         }
         g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
         g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
-        var viewport = new RectangleF(16, 16, Math.Max(1, ClientSize.Width - 32), Math.Max(1, ClientSize.Height - 32));
+        var available = new RectangleF(16, 16, Math.Max(1, ClientSize.Width - 32), Math.Max(1, ClientSize.Height - 32));
+        var gameAspect = (float)(MonsterAnimationBuilder.GameCanvasWidth / MonsterAnimationBuilder.GameCanvasHeight);
+        var viewportWidth = available.Width;
+        var viewportHeight = viewportWidth / gameAspect;
+        if (viewportHeight > available.Height) { viewportHeight = available.Height; viewportWidth = viewportHeight * gameAspect; }
+        var viewport = new RectangleF(available.X + (available.Width - viewportWidth) / 2f, available.Y + (available.Height - viewportHeight) / 2f, viewportWidth, viewportHeight);
         var fit = Math.Min(viewport.Width / Frame.Width, viewport.Height / Frame.Height) * AnimationScale;
         var width = Frame.Width * fit;
         var height = Frame.Height * fit;
@@ -382,6 +390,6 @@ public sealed class AnimationPreviewCanvas : Control
         g.Restore(state);
         using var border = new Pen(Color.FromArgb(130, UiTheme.Primary), 1f);
         g.DrawRectangle(border, viewport.X, viewport.Y, viewport.Width, viewport.Height);
-        TextRenderer.DrawText(g, $"游戏显示范围 · {ScalePercent}%", Font, Rectangle.Round(viewport), UiTheme.Primary, TextFormatFlags.Top | TextFormatFlags.Right | TextFormatFlags.NoPadding);
+        TextRenderer.DrawText(g, $"全游戏画布 16:9 · {ScalePercent}%", Font, Rectangle.Round(viewport), UiTheme.Primary, TextFormatFlags.Top | TextFormatFlags.Right | TextFormatFlags.NoPadding);
     }
 }

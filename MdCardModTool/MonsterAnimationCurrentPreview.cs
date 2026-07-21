@@ -13,6 +13,7 @@ public sealed class CurrentMonsterAnimationPreview : IDisposable
     public required List<Bitmap> Frames { get; init; }
     public required int FramesPerSecond { get; init; }
     public required string AnimationName { get; init; }
+    public required int ScalePercent { get; init; }
     public void Dispose() { foreach (var frame in Frames) frame.Dispose(); Frames.Clear(); }
 }
 
@@ -73,7 +74,15 @@ public static class MonsterAnimationCurrentPreview
                 using var bitmap = System.Drawing.Image.FromStream(encoded);
                 frames.Add(new Bitmap(bitmap));
             }
-            return new CurrentMonsterAnimationPreview { Frames = frames, FramesPerSecond = framesPerSecond, AnimationName = animationName };
+            var first = atlas.Regions[names[0]];
+            var fullFit = Math.Min(MonsterAnimationBuilder.GameCanvasWidth / Math.Max(1, first.OriginalWidth), MonsterAnimationBuilder.GameCanvasHeight / Math.Max(1, first.OriginalHeight));
+            var fullWidth = first.OriginalWidth * fullFit;
+            var fullHeight = first.OriginalHeight * fullFit;
+            var skeleton = root.TryGetProperty("skeleton", out var value) ? value : default;
+            var storedWidth = Number(skeleton, "width", fullWidth);
+            var storedHeight = Number(skeleton, "height", fullHeight);
+            var scalePercent = Math.Clamp((int)Math.Round(Math.Min(storedWidth / Math.Max(1, fullWidth), storedHeight / Math.Max(1, fullHeight)) * 100d), 10, 500);
+            return new CurrentMonsterAnimationPreview { Frames = frames, FramesPerSecond = framesPerSecond, AnimationName = animationName, ScalePercent = scalePercent };
         }
         catch
         {
@@ -150,6 +159,9 @@ public static class MonsterAnimationCurrentPreview
         var parts = value.Split(',', StringSplitOptions.TrimEntries);
         return (parts.Length > 0 && int.TryParse(parts[0], out var x) ? x : 0, parts.Length > 1 && int.TryParse(parts[1], out var y) ? y : 0);
     }
+
+    static double Number(JsonElement element, string name, double fallback) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.TryGetDouble(out var number) ? number : fallback;
 
     static void UnpremultiplyAlpha(Image<Rgba32> image)
     {

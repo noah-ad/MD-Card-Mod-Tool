@@ -43,13 +43,34 @@ internal static class Program
                 Application.DoEvents();
                 Thread.Sleep(25);
             }
-            var defaultFullSize = preview?.ScalePercent == 100 && Math.Abs(preview.AnimationScale - 1f) < 0.001f;
+            var initialScale = preview?.ScalePercent ?? 0;
+            var currentSizeLoaded = initialScale is >= 10 and <= 500 && Math.Abs((preview?.AnimationScale ?? 0f) - initialScale / 100f) < 0.001f;
             var scale = (NumericUpDown?)typeof(MonsterAnimationForm).GetField("_scale", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
             if (scale is not null) scale.Value = 35;
             Application.DoEvents();
             var realtimeScale = preview?.ScalePercent == 35 && Math.Abs(preview.AnimationScale - 0.35f) < 0.001f;
-            var result = defaultFullSize && realtimeScale && (preview?.Frame is not null || label?.Text.Contains("原版多骨骼", StringComparison.Ordinal) == true);
-            Console.WriteLine($"status={label?.Text.Replace(Environment.NewLine, " | ")}; frame={preview?.Frame is not null}; defaultScale=100; realtimeScale={preview?.ScalePercent}");
+            var result = currentSizeLoaded && realtimeScale && (preview?.Frame is not null || label?.Text.Contains("原版多骨骼", StringComparison.Ordinal) == true);
+            Console.WriteLine($"status={label?.Text.Replace(Environment.NewLine, " | ")}; frame={preview?.Frame is not null}; initialScale={initialScale}; realtimeScale={preview?.ScalePercent}");
+            form.Close();
+            if (!result) Environment.ExitCode = 2;
+            return;
+        }
+        if (args.Length == 4 && args[0] == "--test-animation-form-media")
+        {
+            using var form = new MonsterAnimationForm(args[1], args[2]) { Opacity = 0, ShowInTaskbar = false };
+            form.Show();
+            var preview = (AnimationPreviewCanvas?)typeof(MonsterAnimationForm).GetField("_preview", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            var source = (Label?)typeof(MonsterAnimationForm).GetField("_sourceStatus", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while (DateTime.UtcNow < deadline && preview?.Frame is null && source?.Text.Contains("原版多骨骼", StringComparison.Ordinal) != true) { Application.DoEvents(); Thread.Sleep(25); }
+            var method = typeof(MonsterAnimationForm).GetMethod("LoadMediaAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic) ?? throw new MissingMethodException("LoadMediaAsync");
+            var task = (Task?)method.Invoke(form, [args[3]]) ?? throw new InvalidOperationException("媒体加载任务没有启动。");
+            deadline = DateTime.UtcNow.AddSeconds(60);
+            while (!task.IsCompleted && DateTime.UtcNow < deadline) { Application.DoEvents(); Thread.Sleep(25); }
+            task.GetAwaiter().GetResult();
+            var scale = (NumericUpDown?)typeof(MonsterAnimationForm).GetField("_scale", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            var result = task.IsCompletedSuccessfully && preview?.Frame is not null && scale?.Value == 100 && preview.ScalePercent == 100;
+            Console.WriteLine($"media={source?.Text.Replace(Environment.NewLine, " | ")}; frame={preview?.Frame is not null}; fullCanvasScale={scale?.Value}");
             form.Close();
             if (!result) Environment.ExitCode = 2;
             return;
@@ -123,6 +144,14 @@ internal static class Program
             }
             return;
         }
+        if (args.Length == 4 && args[0] == "--dump-animation-text")
+        {
+            var engine = new ModEngine();
+            var asset = engine.ScanAnimationAssetsFast(Path.GetFullPath(args[1]), Path.GetFullPath(args[2])).First(x => x.Kind != MonsterAnimationAssetKind.Texture);
+            File.WriteAllBytes(Path.GetFullPath(args[3]), engine.ReadTextAsset(asset).Data);
+            Console.WriteLine($"{asset.Kind}; {asset.Name}; {new FileInfo(args[3]).Length} bytes; {Path.GetFullPath(args[3])}");
+            return;
+        }
         if (args.Length == 2 && args[0] == "--bundle-containers")
         {
             foreach (var path in new ModEngine().ReadAssetBundleContainerPaths(Path.GetFullPath(args[1]))) Console.WriteLine(path);
@@ -158,7 +187,7 @@ internal static class Program
         {
             var set = MonsterAnimationIndexService.Find(args[1], args[2]);
             var service = new MonsterAnimationService();
-            var template = service.ReadTemplate(set);
+            var template = service.ReadTemplate(args[1], set);
             using var media = MonsterAnimationMedia.ExtractAsync(args[3], 12, 24, 128).GetAwaiter().GetResult();
             using var built = MonsterAnimationBuilder.Build(media.FramePaths, args[2], 12, 100, template, 4096);
             service.Apply(args[1], set, built);
@@ -170,6 +199,21 @@ internal static class Program
             });
             var texts = set.Atlases.Concat(set.Skeletons).Select(x => engine.ReadTextAsset(x).Data.Length);
             Console.WriteLine($"complete={set.IsComplete}; textures={string.Join(',', dimensions)}; textBytes={string.Join(',', texts)}");
+            return;
+        }
+        if (args.Length == 4 && args[0] == "--test-animation-build-profile")
+        {
+            var set = MonsterAnimationIndexService.Find(args[1], args[2]);
+            var template = new MonsterAnimationService().ReadTemplate(args[1], set);
+            using var media = MonsterAnimationMedia.ExtractAsync(args[3], 12, 24, 256).GetAwaiter().GetResult();
+            using var built = MonsterAnimationBuilder.Build(media.FramePaths, args[2], 12, 100, template, 4096);
+            using var built35 = MonsterAnimationBuilder.Build(media.FramePaths, args[2], 12, 35, template, 4096);
+            using var document = JsonDocument.Parse(built.SkeletonJson);
+            var animationNames = document.RootElement.GetProperty("animations").EnumerateObject().Select(x => x.Name).ToArray();
+            var timelineCounts = document.RootElement.GetProperty("animations").EnumerateObject().Select(animation => animation.Value.GetProperty("slots").EnumerateObject().First().Value.GetProperty("attachment").GetArrayLength()).ToArray();
+            var timelinesValid = timelineCounts.All(x => x == media.FramePaths.Count + 1);
+            Console.WriteLine($"display100={built.DisplayWidth:0.##}x{built.DisplayHeight:0.##}; display35={built35.DisplayWidth:0.##}x{built35.DisplayHeight:0.##}; template={string.Join(',', template.EffectiveAnimationNames)}; generated={string.Join(',', animationNames)}; timelines={string.Join(',', timelineCounts)}");
+            if (Math.Abs(built.DisplayWidth - MonsterAnimationBuilder.GameCanvasWidth) > 0.1 || Math.Abs(built.DisplayHeight - MonsterAnimationBuilder.GameCanvasHeight) > 0.1 || Math.Abs(built35.DisplayWidth - MonsterAnimationBuilder.GameCanvasWidth * 0.35) > 0.1 || Math.Abs(built35.DisplayHeight - MonsterAnimationBuilder.GameCanvasHeight * 0.35) > 0.1 || !template.EffectiveAnimationNames.SequenceEqual(animationNames) || !timelinesValid) Environment.ExitCode = 2;
             return;
         }
         if (args.Length == 3 && args[0] == "--test-animation-restore")

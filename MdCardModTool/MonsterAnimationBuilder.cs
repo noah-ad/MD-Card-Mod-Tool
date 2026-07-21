@@ -17,8 +17,13 @@ public sealed record MonsterAnimationTemplate(
     double X,
     double Y,
     double Width,
-    double Height)
+    double Height,
+    IReadOnlyList<string>? AnimationNames = null)
 {
+    public IReadOnlyList<string> EffectiveAnimationNames => AnimationNames is { Count: > 0 }
+        ? AnimationNames
+        : [string.IsNullOrWhiteSpace(AnimationName) ? "animation" : AnimationName];
+
     public static MonsterAnimationTemplate Parse(byte[] data)
     {
         var text = Encoding.UTF8.GetString(data).TrimEnd('\0', '\r', '\n', ' ');
@@ -30,10 +35,13 @@ public sealed record MonsterAnimationTemplate(
         var height = Number(skeleton, "height", 0);
         var x = Number(skeleton, "x", -width / 2d);
         var y = Number(skeleton, "y", -height / 2d);
-        var animationName = "animation";
+        IReadOnlyList<string> animationNames = ["animation"];
         if (root.TryGetProperty("animations", out var animations) && animations.ValueKind == JsonValueKind.Object)
-            animationName = animations.EnumerateObject().Select(p => p.Name).FirstOrDefault() ?? animationName;
-        return new MonsterAnimationTemplate(spine, animationName, x, y, width, height);
+        {
+            var names = animations.EnumerateObject().Select(p => p.Name).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.Ordinal).ToArray();
+            if (names.Length > 0) animationNames = names;
+        }
+        return new MonsterAnimationTemplate(spine, animationNames[0], x, y, width, height, animationNames);
     }
 
     static string String(JsonElement element, string name, string fallback) =>
@@ -60,6 +68,8 @@ public sealed class MonsterAnimationBuildResult : IDisposable
 public static class MonsterAnimationBuilder
 {
     const int Padding = 2;
+    public const double GameCanvasWidth = 4800d;
+    public const double GameCanvasHeight = 2700d;
 
     public static MonsterAnimationBuildResult Build(
         IReadOnlyList<string> framePaths,
@@ -122,15 +132,11 @@ public static class MonsterAnimationBuilder
         }
 
         var sourceAspect = canvasWidth / (double)Math.Max(1, canvasHeight);
-        var boundWidth = template.Width > 1 ? template.Width : canvasWidth;
-        var boundHeight = template.Height > 1 ? template.Height : canvasHeight;
-        var fit = Math.Min(boundWidth / Math.Max(1, canvasWidth), boundHeight / Math.Max(1, canvasHeight));
+        var fit = Math.Min(GameCanvasWidth / Math.Max(1, canvasWidth), GameCanvasHeight / Math.Max(1, canvasHeight));
         var displayWidth = canvasWidth * fit * scalePercent / 100d;
         var displayHeight = displayWidth / sourceAspect;
-        var centerX = template.X + boundWidth / 2d;
-        var centerY = template.Y + boundHeight / 2d;
-        var skeletonX = centerX - displayWidth / 2d;
-        var skeletonY = centerY - displayHeight / 2d;
+        var skeletonX = -displayWidth / 2d;
+        var skeletonY = -displayHeight / 2d;
 
         return new MonsterAnimationBuildResult
         {
@@ -261,10 +267,9 @@ public static class MonsterAnimationBuilder
         var attachments = new JsonObject();
         foreach (var region in regions)
             attachments[region.Name] = new JsonObject { ["width"] = Round(width), ["height"] = Round(height) };
-        var keyframes = new JsonArray();
-        for (var i = 0; i < regions.Count; i++)
-            keyframes.Add(new JsonObject { ["time"] = Round(i / (double)framesPerSecond), ["name"] = regions[i].Name });
-        keyframes.Add(new JsonObject { ["time"] = Round(regions.Count / (double)framesPerSecond), ["name"] = regions[^1].Name });
+        var animations = new JsonObject();
+        foreach (var animationName in template.EffectiveAnimationNames.Distinct(StringComparer.Ordinal))
+            animations[string.IsNullOrWhiteSpace(animationName) ? "animation" : animationName] = BuildAttachmentAnimation(slotName, regions, framesPerSecond);
 
         var root = new JsonObject
         {
@@ -276,6 +281,7 @@ public static class MonsterAnimationBuilder
                 ["y"] = Round(y),
                 ["width"] = Round(width),
                 ["height"] = Round(height),
+                ["fps"] = framesPerSecond,
                 ["images"] = "../images/",
                 ["audio"] = ""
             },
@@ -286,18 +292,24 @@ public static class MonsterAnimationBuilder
                 ["name"] = "default",
                 ["attachments"] = new JsonObject { [slotName] = attachments }
             }),
-            ["animations"] = new JsonObject
-            {
-                [string.IsNullOrWhiteSpace(template.AnimationName) ? "animation" : template.AnimationName] = new JsonObject
-                {
-                    ["slots"] = new JsonObject
-                    {
-                        [slotName] = new JsonObject { ["attachment"] = keyframes }
-                    }
-                }
-            }
+            ["animations"] = animations
         };
         return Encoding.UTF8.GetBytes(root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    static JsonObject BuildAttachmentAnimation(string slotName, IReadOnlyList<AtlasRegion> regions, int framesPerSecond)
+    {
+        var keyframes = new JsonArray();
+        for (var i = 0; i < regions.Count; i++)
+            keyframes.Add(new JsonObject { ["time"] = Round(i / (double)framesPerSecond), ["name"] = regions[i].Name });
+        keyframes.Add(new JsonObject { ["time"] = Round(regions.Count / (double)framesPerSecond), ["name"] = regions[^1].Name });
+        return new JsonObject
+        {
+            ["slots"] = new JsonObject
+            {
+                [slotName] = new JsonObject { ["attachment"] = keyframes }
+            }
+        };
     }
 
     static double Round(double value) => Math.Round(value, 4, MidpointRounding.AwayFromZero);
@@ -326,8 +338,30 @@ public sealed class MonsterAnimationService
 
     public MonsterAnimationTemplate ReadTemplate(MonsterAnimationSet set)
     {
-        var skeleton = set.Skeletons.FirstOrDefault() ?? throw new InvalidOperationException("未找到 P卡号JS。");
-        return MonsterAnimationTemplate.Parse(_engine.ReadTextAsset(skeleton).Data);
+        if (set.Skeletons.Count == 0) throw new InvalidOperationException("未找到 P卡号JS。");
+        return MergeTemplates(set.Skeletons.Select(skeleton => MonsterAnimationTemplate.Parse(_engine.ReadTextAsset(skeleton).Data)));
+    }
+
+    public MonsterAnimationTemplate ReadTemplate(string gameRoot, MonsterAnimationSet set)
+    {
+        if (set.Skeletons.Count == 0) throw new InvalidOperationException("未找到 P卡号JS。");
+        var templates = new List<MonsterAnimationTemplate>();
+        foreach (var skeleton in set.Skeletons)
+        {
+            var backupRoot = Path.Combine(gameRoot, "_MD卡图备份", skeleton.ModSourceKind);
+            var backupPath = Path.Combine(backupRoot, skeleton.RelativeBundlePath);
+            var original = File.Exists(backupPath) ? _engine.FindTextAssetFast(backupPath, backupRoot, skeleton.Name) : null;
+            templates.Add(MonsterAnimationTemplate.Parse(original?.Data ?? _engine.ReadTextAsset(skeleton).Data));
+        }
+        return MergeTemplates(templates);
+    }
+
+    static MonsterAnimationTemplate MergeTemplates(IEnumerable<MonsterAnimationTemplate> source)
+    {
+        var templates = source.ToArray();
+        if (templates.Length == 0) throw new InvalidOperationException("未找到可读取的动画模板。");
+        var names = templates.SelectMany(x => x.EffectiveAnimationNames).Distinct(StringComparer.Ordinal).ToArray();
+        return templates[0] with { AnimationName = names[0], AnimationNames = names };
     }
 
     public void Apply(string gameRoot, MonsterAnimationSet set, MonsterAnimationBuildResult animation)
