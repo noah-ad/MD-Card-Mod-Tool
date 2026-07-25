@@ -521,6 +521,11 @@ public sealed class ModEngine
 
     void ReplaceTextureData(TexRef texture, int width, int height, int textureFormat, byte[] pixels, string backupRoot)
     {
+        var resolved = ResolveTextureReference(texture)
+            ?? throw new InvalidDataException($"当前 Bundle 中找不到可写入的 Texture2D：{texture.Name}（卡号 {texture.CardKey}）。");
+        texture.PathId = resolved.PathId;
+        texture.AssetFileName = resolved.AssetFileName;
+
         var backup = Path.Combine(backupRoot, texture.RelativeBundlePath);
         Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
         if (!File.Exists(backup)) File.Copy(texture.BundlePath, backup);
@@ -533,16 +538,25 @@ public sealed class ModEngine
             EnsureDatabase(manager, assets);
             var info = assets.file.GetAssetsOfType(AssetClassID.Texture2D).First(x => x.PathId == texture.PathId);
             var field = manager.GetBaseField(assets, info);
-            field["m_Width"].AsInt = width;
-            field["m_Height"].AsInt = height;
-            field["m_TextureFormat"].AsInt = textureFormat;
-            field["m_MipCount"].AsInt = 1;
+            if (field["m_Width"] is not { IsDummy: false } widthField ||
+                field["m_Height"] is not { IsDummy: false } heightField ||
+                field["m_TextureFormat"] is not { IsDummy: false } formatField ||
+                field["image data"] is not { IsDummy: false } imageDataField)
+                throw new InvalidDataException("当前手工 Mod 的 Texture2D 缺少必要像素字段，无法安全写入。");
+            widthField.AsInt = width;
+            heightField.AsInt = height;
+            formatField.AsInt = textureFormat;
+            if (field["m_MipCount"] is { IsDummy: false } mipCountField) mipCountField.AsInt = 1;
             if (field["m_CompleteImageSize"] is { IsDummy: false } size) size.AsInt = pixels.Length;
-            field["image data"].AsByteArray = pixels;
-            var streamData = field["m_StreamData"];
-            streamData["offset"].AsLong = 0;
-            streamData["size"].AsLong = 0;
-            streamData["path"].AsString = "";
+            imageDataField.AsByteArray = pixels;
+            // 外部 Mod 制作器常把贴图改成 inline image data，并省略或裁掉 m_StreamData。
+            // 这时 image data 已足够，不能再无条件访问不存在的 offset/size/path。
+            if (field["m_StreamData"] is { IsDummy: false } streamData)
+            {
+                if (streamData["offset"] is { IsDummy: false } offsetField) offsetField.AsLong = 0;
+                if (streamData["size"] is { IsDummy: false } streamSizeField) streamSizeField.AsLong = 0;
+                if (streamData["path"] is { IsDummy: false } pathField) pathField.AsString = "";
+            }
             var replacements = new List<AssetsReplacer> { new AssetsReplacerFromMemory(assets.file, info, field) };
             byte[] serialized;
             using (var stream = new MemoryStream())
@@ -556,6 +570,11 @@ public sealed class ModEngine
             {
                 new BundleReplacerFromMemory(assets.name, assets.name, true, serialized, -1)
             });
+        }
+        catch
+        {
+            try { if (File.Exists(temporary)) File.Delete(temporary); } catch { }
+            throw;
         }
         finally { manager.UnloadAll(); }
         File.Move(temporary, texture.ActiveBundlePath, true);

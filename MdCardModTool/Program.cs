@@ -1,5 +1,6 @@
 using System.Text.Json;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Processing;
 
 namespace MdCardModTool;
 
@@ -474,6 +475,44 @@ internal static class Program
             var png = engine.DecodePng(texture, 512);
             Console.WriteLine($"card={args[2]}; expectedPathId={expectedPathId}; resolvedPathId={resolved.PathId}; assetFile={resolved.AssetFileName}; pngBytes={png.Length}");
             if (resolved.PathId != expectedPathId || png.Length < 100) Environment.ExitCode = 2;
+            return;
+        }
+        if (args.Length == 4 && args[0] == "--test-texture-write-repair")
+        {
+            if (!PortableIndexService.TryLoadBundled(args[1], out var index, out _)) throw new FileNotFoundException("缺少卡图预绑定索引。");
+            var source = index.Textures.FirstOrDefault(x => x.SourceKind == "本地卡图" && x.CardKey == args[2])
+                ?? throw new InvalidDataException($"预绑定索引不含卡号 {args[2]}。");
+            Directory.CreateDirectory(args[3]);
+            var copy = Path.Combine(args[3], "manual-mod.bundle");
+            File.Copy(source.BundlePath, copy, true);
+            var target = new TexRef
+            {
+                BundlePath = copy,
+                RelativeBundlePath = "manual-mod.bundle",
+                PathId = long.MinValue,
+                AssetFileName = "stale-manual-mod-mapping",
+                Name = source.Name,
+                Width = source.Width,
+                Height = source.Height,
+                Category = source.Category,
+                SourceKind = source.SourceKind,
+                CardKey = source.CardKey
+            };
+            var engine = new ModEngine();
+            var before = engine.DecodePng(source);
+            byte[] overFrame;
+            using (var image = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Rgba32>(before))
+            {
+                image.Mutate(x => x.Resize(FrameComposer.Width, FrameComposer.Height));
+                using var stream = new MemoryStream();
+                image.SaveAsPng(stream);
+                overFrame = stream.ToArray();
+            }
+            engine.Replace(target, overFrame, Path.Combine(args[3], "backup"));
+            var after = engine.DecodePng(target);
+            var info = SixLabors.ImageSharp.Image.Identify(after) ?? throw new InvalidDataException("写回后的 PNG 无法识别。");
+            Console.WriteLine($"card={args[2]}; resolvedPathId={target.PathId}; assetFile={target.AssetFileName}; result={info.Width}x{info.Height}; pngBytes={after.Length}");
+            if (target.PathId == long.MinValue || target.AssetFileName == "stale-manual-mod-mapping" || info.Width != FrameComposer.Width || info.Height != FrameComposer.Height) Environment.ExitCode = 2;
             return;
         }
         if (args.Length == 2 && args[0] == "--install-prebuilt-index")
