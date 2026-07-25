@@ -428,6 +428,26 @@ public sealed class ModEngine
         finally { manager.UnloadAll(); }
     }
 
+    /// <summary>
+    /// 手工制作的 Mod 可能重建了 serialized file 或 PathID。预绑定路径仍然正确时，
+    /// 从当前 Bundle 重新找到实际 Texture2D，供预览、导出和后续替换使用。
+    /// </summary>
+    public TexRef? ResolveTextureReference(TexRef texture)
+    {
+        if (!File.Exists(texture.ActiveBundlePath)) return null;
+        var root = Path.GetDirectoryName(texture.ActiveBundlePath) ?? texture.ActiveBundlePath;
+        var candidates = ScanBundle(texture.ActiveBundlePath, root, texture.SourceKind, includeDependencies: false).Textures;
+        if (candidates.Count == 0) return null;
+
+        var resolved = candidates.FirstOrDefault(x => x.PathId == texture.PathId && string.Equals(x.AssetFileName, texture.AssetFileName, StringComparison.Ordinal))
+            ?? candidates.FirstOrDefault(x => string.Equals(x.Name, texture.Name, StringComparison.OrdinalIgnoreCase))
+            ?? candidates.FirstOrDefault(x => texture.CardKey.Length > 0 && x.CardKey == texture.CardKey);
+        if (resolved is not null) return resolved;
+        var sameSize = candidates.Where(x => x.Width == texture.Width && x.Height == texture.Height).Take(2).ToArray();
+        if (sameSize.Length == 1) return sameSize[0];
+        return candidates.Count == 1 ? candidates[0] : null;
+    }
+
     public void Replace(TexRef texture, string imagePath, string backupRoot)
     {
         using var image = SharpImage.Load<Rgba32>(imagePath);

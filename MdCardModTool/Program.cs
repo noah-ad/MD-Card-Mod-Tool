@@ -429,6 +429,53 @@ internal static class Program
             Console.WriteLine($"build={buildId}; textures={index.Textures.Count}; first={first?.BundlePath}");
             return;
         }
+        if (args.Length == 3 && args[0] == "--test-index-repair")
+        {
+            if (!PortableIndexService.TryLoadBundled(args[1], out var complete, out _)) throw new FileNotFoundException("缺少卡图预绑定索引。");
+            var expected = complete.Textures.FirstOrDefault(x => x.CardKey == args[2]) ?? throw new InvalidDataException($"预绑定索引不含卡号 {args[2]}。");
+            var incomplete = new GameIndex
+            {
+                AlternateArtIndexVersion = complete.AlternateArtIndexVersion,
+                Textures = complete.Textures.Where(x => x.CardKey != args[2]).ToList()
+            };
+            incomplete.Textures.Add(new TexRef
+            {
+                BundlePath = expected.BundlePath,
+                RelativeBundlePath = "diagnostic/retained-extra",
+                PathId = long.MinValue,
+                AssetFileName = expected.AssetFileName,
+                Name = "diagnostic-extra",
+                Width = 1,
+                Height = 1,
+                Category = "诊断",
+                SourceKind = expected.SourceKind,
+                CardKey = "999999"
+            });
+            if (!PortableIndexService.TryRepairFromBundled(args[1], incomplete, out var repaired, out var buildId, out var retainedExtras))
+                throw new InvalidDataException("预绑定索引修复没有执行。");
+            var restored = repaired.Textures.Any(x => x.CardKey == args[2]);
+            var extraRetained = repaired.Textures.Any(x => x.PathId == long.MinValue);
+            Console.WriteLine($"build={buildId}; before={incomplete.Textures.Count}; after={repaired.Textures.Count}; restored={restored}; retainedExtras={retainedExtras}; extraRetained={extraRetained}");
+            if (!restored || !extraRetained || retainedExtras != 1) Environment.ExitCode = 2;
+            return;
+        }
+        if (args.Length == 3 && args[0] == "--test-texture-reference-repair")
+        {
+            if (!PortableIndexService.TryLoadBundled(args[1], out var index, out _)) throw new FileNotFoundException("缺少卡图预绑定索引。");
+            var texture = index.Textures.FirstOrDefault(x => x.SourceKind == "本地卡图" && x.CardKey == args[2])
+                ?? throw new InvalidDataException($"预绑定索引不含卡号 {args[2]}。");
+            var expectedPathId = texture.PathId;
+            texture.PathId = long.MinValue;
+            texture.AssetFileName = "stale-manual-mod-mapping";
+            var engine = new ModEngine();
+            var resolved = engine.ResolveTextureReference(texture) ?? throw new InvalidDataException("未能从当前 Bundle 重新定位 Texture2D。");
+            texture.PathId = resolved.PathId;
+            texture.AssetFileName = resolved.AssetFileName;
+            var png = engine.DecodePng(texture, 512);
+            Console.WriteLine($"card={args[2]}; expectedPathId={expectedPathId}; resolvedPathId={resolved.PathId}; assetFile={resolved.AssetFileName}; pngBytes={png.Length}");
+            if (resolved.PathId != expectedPathId || png.Length < 100) Environment.ExitCode = 2;
+            return;
+        }
         if (args.Length == 2 && args[0] == "--install-prebuilt-index")
         {
             if (!PortableIndexService.TryLoadBundled(args[1], out var index, out var buildId)) throw new FileNotFoundException("程序目录没有随包预绑定索引。", PortableIndexService.BundledPath);

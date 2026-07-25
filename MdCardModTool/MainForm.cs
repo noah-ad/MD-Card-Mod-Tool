@@ -32,6 +32,7 @@ public sealed class MainForm : Form
     GameIndex? _index;
     int _changedModBundleCount;
     int _changedAnimationBundleCount;
+    int _previewGeneration;
 
     public MainForm()
     {
@@ -123,8 +124,29 @@ public sealed class MainForm : Form
     async Task ChooseGameAsync() { using var d = new FolderBrowserDialog { Description = "选择 Yu-Gi-Oh! Master Duel 游戏根目录", InitialDirectory = Directory.Exists(DefaultGame) ? DefaultGame : "" }; if (d.ShowDialog(this) == DialogResult.OK) { _gameRoot = d.SelectedPath; _gameFolder.Text = d.SelectedPath; SetGameRoot(); await ScanAsync(); } }
     async Task RebuildIndexAsync()
     {
-        if (MessageBox.Show(this, "重建索引会忽略随包预绑定和本地缓存，重新扫描当前游戏文件，可能需要较长时间。\n\n只有游戏更新后资源对应错误时才需要执行。继续？", "确认重建索引", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
-        await ScanAsync(forceRebuild: true);
+        if (_gameRoot is null) return;
+        if (MessageBox.Show(this, "将用随程序提供的完整预绑定修复本地索引，并保留本机额外发现的新卡。\n\n这个操作不会重新扫描整个 LocalData，也不会再因游戏按需缓存而漏掉部分卡图。继续？", "确认修复索引", MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK) return;
+        try
+        {
+            UseWaitCursor = true;
+            _status.Text = "正在用随包预绑定修复本地索引…";
+            var repair = await Task.Run(() =>
+            {
+                var found = PortableIndexService.TryRepairFromBundled(_gameRoot, _index, out var index, out var buildId, out var retainedExtras);
+                if (found) IndexService.Save(_gameRoot, index);
+                return (Found: found, BuildId: buildId, RetainedExtras: retainedExtras);
+            });
+            if (!repair.Found)
+            {
+                _status.Text = "分享包缺少预绑定索引，改为扫描当前游戏资源…";
+                await ScanAsync(forceRebuild: true);
+                return;
+            }
+            await ScanAsync();
+            _status.Text = $"索引修复完成：已恢复随包完整映射，并保留 {repair.RetainedExtras:N0} 个本机额外资源。";
+        }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "索引修复失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        finally { UseWaitCursor = false; }
     }
     void SetGameRoot()
     {
@@ -184,7 +206,7 @@ public sealed class MainForm : Form
             _index = cached;
             _textures.AddRange(cached.Textures);
             var currentBuildId = loadedFromPrebuilt ? PortableIndexService.GetGameBuildId(_gameRoot!) : "";
-            var buildNote = prebuiltBuildId.Length > 0 && currentBuildId.Length > 0 && prebuiltBuildId != currentBuildId ? $"；预绑定 Build {prebuiltBuildId}，本机 Build {currentBuildId}，若个别资源失效请重建索引" : "";
+            var buildNote = prebuiltBuildId.Length > 0 && currentBuildId.Length > 0 && prebuiltBuildId != currentBuildId ? $"；预绑定 Build {prebuiltBuildId}，本机 Build {currentBuildId}，新版卡可用“定位卡图”补充" : "";
             _status.Text = loadedFromPrebuilt
                 ? $"已用随包预绑定瞬时建立本机索引：{_textures.Count:N0} 张图片，无需首次扫描{buildNote}。"
                 : forceRebuild ? $"索引已重建：{_textures.Count:N0} 张图片。" : $"已载入本地索引：{_textures.Count:N0} 张图片。";
@@ -358,10 +380,15 @@ public sealed class MainForm : Form
     TexRef? Selected() => _list.SelectedItems.Count == 1 ? _list.SelectedItems[0].Tag as TexRef : null;
     async Task ShowSelectionAsync()
     {
-        var x = Selected(); if (x is null) return;
+        var generation = Interlocked.Increment(ref _previewGeneration);
+        var x = Selected();
+        _preview.Image?.Dispose(); _preview.Image = null;
+        _previewHint.Text = x is null ? "SELECT A RESOURCE\n\n选择一张卡图查看预览" : "LOADING\n\n正在读取当前 Bundle…";
+        _previewHint.Visible = true;
+        if (x is null) return;
         try
         {
-            var data = await Task.Run(() => _engine.DecodePng(x));
+            var data = await DecodeWithReferenceRepairAsync(x);
             Bitmap display;
             if (x.Width == FrameComposer.Width && x.Height == FrameComposer.Height) display = FrameComposer.PreviewBitmap(data);
             else if (PreviewFrameFor(x) is { } previewFrame)
@@ -370,6 +397,7 @@ public sealed class MainForm : Form
                 display = FrameComposer.BitmapFrom(CardFrameRenderer.ComposeStoredArtPreview(data, frameData));
             }
             else { using var s = new MemoryStream(data); using var im = Image.FromStream(s); display = new Bitmap(im); }
+            if (generation != _previewGeneration || !ReferenceEquals(Selected(), x)) { display.Dispose(); return; }
             _preview.Image?.Dispose(); _preview.Image = display;
             _previewHint.Visible = false;
             var frameLine = "";
@@ -390,7 +418,41 @@ public sealed class MainForm : Form
             if (x.HasMonsterAnimation) frameLine += "\n怪兽动画：双击动画分类中的卡图，或点击“原始动画资源”，查看 PNG / Atlas / JSON";
             _info.Text = $"{x.Name}  ·  {x.Category}\n{x.Width} × {x.Height}   PathID {x.PathId}\n{x.RelativeBundlePath}{frameLine}";
         }
-        catch (Exception ex) { _status.Text = "预览失败：" + ex.Message; }
+        catch (Exception ex)
+        {
+            if (generation != _previewGeneration) return;
+            _preview.Image?.Dispose(); _preview.Image = null;
+            _previewHint.Text = "PREVIEW FAILED\n\n当前 Bundle 无法按索引读取\n可尝试“重建索引”或检查手工 Mod";
+            _previewHint.Visible = true;
+            _info.Text = $"{x.Name}  ·  {x.Category}\n映射 PathID {x.PathId}\n{x.RelativeBundlePath}";
+            _status.Text = "预览失败：" + ex.Message;
+        }
+    }
+
+    async Task<byte[]> DecodeWithReferenceRepairAsync(TexRef texture)
+    {
+        try { return await Task.Run(() => _engine.DecodePng(texture)); }
+        catch (Exception original)
+        {
+            var resolved = await Task.Run(() => _engine.ResolveTextureReference(texture));
+            if (resolved is null) throw new InvalidDataException($"当前 Bundle 中找不到可对应卡号 {texture.CardKey} 的 Texture2D。手工 Mod 可能改变了资源结构。", original);
+            var changed = texture.PathId != resolved.PathId || !string.Equals(texture.AssetFileName, resolved.AssetFileName, StringComparison.Ordinal);
+            if (!changed) throw new InvalidDataException($"已找到 Texture2D，但无法解码当前手工 Mod：{original.Message}", original);
+
+            texture.PathId = resolved.PathId;
+            texture.AssetFileName = resolved.AssetFileName;
+            texture.Width = resolved.Width;
+            texture.Height = resolved.Height;
+            var data = await Task.Run(() => _engine.DecodePng(texture));
+            if (_gameRoot is not null && _index is not null) await Task.Run(() => IndexService.Save(_gameRoot, _index));
+            if (_list.SelectedItems.Count == 1 && ReferenceEquals(_list.SelectedItems[0].Tag, texture))
+            {
+                _list.SelectedItems[0].SubItems[2].Text = $"{texture.Width}×{texture.Height}";
+                _list.SelectedItems[0].SubItems[3].Text = texture.RelativeBundlePath;
+            }
+            _status.Text = $"已自动适配手工 Mod 的 Texture2D 映射：PathID {texture.PathId}";
+            return data;
+        }
     }
     async Task ReplaceSelectedAsync(string? image = null)
     {
@@ -460,8 +522,30 @@ public sealed class MainForm : Form
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "还原失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         finally { UseWaitCursor = false; }
     }
-    async Task ExportSelectedAsync() { var x = Selected(); if (x is null) return; using var d = new SaveFileDialog { Filter = "PNG 图片|*.png", FileName = Safe(x.Name) + ".png" }; if (d.ShowDialog(this) == DialogResult.OK) await File.WriteAllBytesAsync(d.FileName, await Task.Run(() => _engine.DecodePng(x))); }
-    async Task DragOutAsync(ListViewItem? item) { if (item?.Tag is not TexRef x) return; var path = Path.Combine(Path.GetTempPath(), "MDCardModTool", Safe(x.Name) + "_" + x.PathId + ".png"); Directory.CreateDirectory(Path.GetDirectoryName(path)!); await File.WriteAllBytesAsync(path, await Task.Run(() => _engine.DecodePng(x))); _list.DoDragDrop(new DataObject(DataFormats.FileDrop, new[] { path }), DragDropEffects.Copy); }
+    async Task ExportSelectedAsync()
+    {
+        var x = Selected(); if (x is null) return;
+        using var d = new SaveFileDialog { Filter = "PNG 图片|*.png", FileName = Safe(x.Name) + ".png" };
+        if (d.ShowDialog(this) != DialogResult.OK) return;
+        try
+        {
+            await File.WriteAllBytesAsync(d.FileName, await DecodeWithReferenceRepairAsync(x));
+            _status.Text = "已导出当前游戏内卡图：" + d.FileName;
+        }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "导出 PNG 失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+    }
+    async Task DragOutAsync(ListViewItem? item)
+    {
+        if (item?.Tag is not TexRef x) return;
+        try
+        {
+            var path = Path.Combine(Path.GetTempPath(), "MDCardModTool", Safe(x.Name) + "_" + x.PathId + ".png");
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllBytesAsync(path, await DecodeWithReferenceRepairAsync(x));
+            _list.DoDragDrop(new DataObject(DataFormats.FileDrop, new[] { path }), DragDropEffects.Copy);
+        }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "拖出 PNG 失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+    }
     void OnDragEnter(object? sender, DragEventArgs e) => e.Effect = e.Data?.GetDataPresent(DataFormats.FileDrop) == true ? DragDropEffects.Copy : DragDropEffects.None;
     async Task OnDragDropAsync(DragEventArgs e) { if (e.Data?.GetData(DataFormats.FileDrop) is not string[] files || files.Length == 0) return; if (!new[] { ".png", ".jpg", ".jpeg", ".webp", ".bmp" }.Contains(Path.GetExtension(files[0]).ToLowerInvariant())) return; await ReplaceSelectedAsync(files[0]); }
     async Task InspectSelectedAsync() { var x = Selected(); if (x is null || _assetRoot is null) return; try { var s = await Task.Run(() => _engine.InspectBundle(x.BundlePath, _assetRoot)); MessageBox.Show(this, $"Bundle: {s.RelativePath}\nSerialized 文件: {s.SerializedFiles}\n\nAsset 类型：\n{s.Describe()}", "Bundle 检查"); } catch (Exception ex) { MessageBox.Show(this, ex.Message, "检查失败"); } }

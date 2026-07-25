@@ -66,6 +66,36 @@ public static class PortableIndexService
         return true;
     }
 
+    /// <summary>
+    /// 以随包预绑定为完整基线修复本地索引，同时保留本机索引中预绑定尚未收录、
+    /// 且底层 Bundle 仍然存在的新版或额外资源。
+    /// </summary>
+    public static bool TryRepairFromBundled(string gameRoot, GameIndex? existing, out GameIndex repaired, out string buildId, out int retainedExtras)
+    {
+        retainedExtras = 0;
+        if (!TryLoadBundled(gameRoot, out repaired, out buildId)) return false;
+        if (existing is null) return true;
+
+        repaired.AlternateArtIndexVersion = Math.Max(repaired.AlternateArtIndexVersion, existing.AlternateArtIndexVersion);
+        var known = repaired.Textures.Select(TextureLogicalIdentity).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var texture in existing.Textures)
+        {
+            if (!File.Exists(texture.BundlePath) || !known.Add(TextureLogicalIdentity(texture))) continue;
+            repaired.Textures.Add(texture);
+            retainedExtras++;
+        }
+
+        var checkedPaths = repaired.CheckedLocalBundlePaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in existing.CheckedLocalBundlePaths)
+            if (checkedPaths.Add(path)) repaired.CheckedLocalBundlePaths.Add(path);
+
+        repaired.Textures.Sort((a, b) => string.Compare(
+            $"{a.SourceKind}\0{a.Category}\0{a.Name}\0{a.Width:D8}",
+            $"{b.SourceKind}\0{b.Category}\0{b.Name}\0{b.Width:D8}",
+            StringComparison.Ordinal));
+        return true;
+    }
+
     public static void Export(string gameRoot, GameIndex index, string outputPath)
     {
         var entries = index.Textures.Select(ToPortable).ToList();
@@ -103,6 +133,9 @@ public static class PortableIndexService
         SourceKind = x.SourceKind,
         CardKey = x.CardKey
     };
+
+    static string TextureLogicalIdentity(TexRef texture) =>
+        $"{texture.SourceKind}\0{texture.RelativeBundlePath.Replace('\\', '/')}\0{texture.CardKey}\0{texture.Name}";
 
     static void NormalizeBackedUpBundles(string gameRoot, IReadOnlyList<TexRef> textures, List<PortableTextureEntry> entries)
     {

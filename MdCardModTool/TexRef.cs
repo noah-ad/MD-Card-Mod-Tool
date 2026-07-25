@@ -6,8 +6,8 @@ public sealed class TexRef
 {
     public required string BundlePath { get; init; }
     public required string RelativeBundlePath { get; init; }
-    public long PathId { get; init; }
-    public string AssetFileName { get; init; } = "";
+    public long PathId { get; set; }
+    public string AssetFileName { get; set; } = "";
     public string Name { get; init; } = "";
     public int Width { get; set; }
     public int Height { get; set; }
