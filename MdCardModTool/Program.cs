@@ -430,6 +430,21 @@ internal static class Program
             Console.WriteLine($"build={buildId}; textures={index.Textures.Count}; first={first?.BundlePath}");
             return;
         }
+        if (args.Length == 2 && args[0] == "--test-classification-overrides")
+        {
+            if (!PortableIndexService.TryLoadBundled(args[1], out var index, out _)) throw new FileNotFoundException("缺少卡图预绑定索引。");
+            index.AlternateArtIndexVersion = 3;
+            YgoCdbCardCatalog.ClassifyAlternateArtsAsync(index).GetAwaiter().GetResult();
+            var normalIds = new[] { "30000", "30064" };
+            var alternateIds = new[] { "3401", "3899", "19736", "20040" };
+            var normalOk = normalIds.All(id => index.Textures.Any(x => x.CardKey == id && x.Category == "卡图缩略图" && !x.IsAlternateArt && !x.IsTokenOrMisc));
+            var alternateOk = alternateIds.All(id => index.Textures.Any(x => x.CardKey == id && x.Category == "异画卡图" && x.IsAlternateArt && !x.IsTokenOrMisc));
+            var forcedNormal = index.Textures.Count(x => int.TryParse(x.CardKey, out var id) && id is >= 30000 and <= 30064 && x.Category == "卡图缩略图");
+            var forcedAlternate = index.Textures.Count(x => int.TryParse(x.CardKey, out var id) && (id is >= 3401 and <= 3899 or 19736 or 20040) && x.Category == "异画卡图");
+            Console.WriteLine($"version={index.AlternateArtIndexVersion}; normalOk={normalOk}; alternateOk={alternateOk}; forcedNormal={forcedNormal}; forcedAlternate={forcedAlternate}");
+            if (index.AlternateArtIndexVersion != YgoCdbCardCatalog.ClassificationVersion || !normalOk || !alternateOk || forcedNormal < 2 || forcedAlternate < 4) Environment.ExitCode = 2;
+            return;
+        }
         if (args.Length == 3 && args[0] == "--test-index-repair")
         {
             if (!PortableIndexService.TryLoadBundled(args[1], out var complete, out _)) throw new FileNotFoundException("缺少卡图预绑定索引。");

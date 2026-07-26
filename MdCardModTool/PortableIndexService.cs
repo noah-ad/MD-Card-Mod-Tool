@@ -76,7 +76,6 @@ public static class PortableIndexService
         if (!TryLoadBundled(gameRoot, out repaired, out buildId)) return false;
         if (existing is null) return true;
 
-        repaired.AlternateArtIndexVersion = Math.Max(repaired.AlternateArtIndexVersion, existing.AlternateArtIndexVersion);
         var known = repaired.Textures.Select(TextureLogicalIdentity).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var texture in existing.Textures)
         {

@@ -10,7 +10,7 @@ namespace MdCardModTool;
 /// </summary>
 public static class YgoCdbCardCatalog
 {
-    public const int ClassificationVersion = 3;
+    public const int ClassificationVersion = 4;
     const int CatalogVersion = 1;
     const int AlternateArtFirstId = 20567;
     const int AlternateArtLastId = 22747;
@@ -26,6 +26,13 @@ public static class YgoCdbCardCatalog
     public static async Task ClassifyAlternateArtsAsync(GameIndex index)
     {
         if (index.AlternateArtIndexVersion >= ClassificationVersion) return;
+        // v3 已完成百鸽全量分类；v4 只增加用户确认过的本地强制覆盖，可完全离线迁移。
+        if (index.AlternateArtIndexVersion == 3)
+        {
+            ApplyForcedOverrides(index.Textures);
+            index.AlternateArtIndexVersion = ClassificationVersion;
+            return;
+        }
         var normalCardIds = await LoadCardIdsAsync();
         ClassifyTextures(index.Textures, normalCardIds);
         index.AlternateArtIndexVersion = ClassificationVersion;
@@ -47,6 +54,29 @@ public static class YgoCdbCardCatalog
             if (texture.Width == 512 && texture.Height == 512)
                 texture.Category = texture.IsAlternateArt ? "异画卡图" : texture.IsTokenOrMisc ? "Token／杂图" : "卡图缩略图";
         }
+        ApplyForcedOverrides(textures);
+    }
+
+    /// <summary>
+    /// 用户实机确认的资源号覆盖规则，优先级高于百鸽 CID 名单和默认异画号段。
+    /// </summary>
+    public static int ApplyForcedOverrides(IEnumerable<TexRef> textures)
+    {
+        var changed = 0;
+        foreach (var texture in textures.Where(IsLocalCardTexture))
+        {
+            if (!int.TryParse(texture.CardKey, out var cardId)) continue;
+            var forceNormal = cardId is >= 30000 and <= 30064;
+            var forceAlternate = cardId is >= 3401 and <= 3899 or 19736 or 20040;
+            if (!forceNormal && !forceAlternate) continue;
+
+            var category = forceAlternate ? "异画卡图" : "卡图缩略图";
+            if (texture.IsAlternateArt != forceAlternate || texture.IsTokenOrMisc || texture.Category != category) changed++;
+            texture.IsAlternateArt = forceAlternate;
+            texture.IsTokenOrMisc = false;
+            if (texture.Width == 512 && texture.Height == 512) texture.Category = category;
+        }
+        return changed;
     }
 
     static bool IsLocalCardTexture(TexRef texture) =>
