@@ -128,6 +128,104 @@ public sealed class ModEngine
         finally { manager.UnloadAll(); }
     }
 
+    /// <summary>
+    /// Reads the hash-relative Bundle dependency paths recorded in the AssetBundle object.
+    /// Unlike CAB-name discovery this follows the game's own dependency table directly and
+    /// therefore never needs to enumerate all of LocalData.
+    /// </summary>
+    public List<string> ReadBundleDependencies(string bundlePath)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var manager = NewManager();
+        try
+        {
+            var bundle = manager.LoadBundleFile(bundlePath, false);
+            foreach (var entry in bundle.file.GetAllFileNames())
+            {
+                if (entry.EndsWith(".resS", StringComparison.OrdinalIgnoreCase) ||
+                    entry.EndsWith(".resource", StringComparison.OrdinalIgnoreCase)) continue;
+                try
+                {
+                    var assets = manager.LoadAssetsFileFromBundle(bundle, entry, false);
+                    EnsureDatabase(manager, assets);
+                    foreach (var info in assets.file.GetAssetsOfType(AssetClassID.AssetBundle))
+                    {
+                        var field = manager.GetBaseField(assets, info);
+                        foreach (var dependency in field["m_Dependencies"]["Array"].Children)
+                        {
+                            var relative = dependency.AsString.Replace('/', Path.DirectorySeparatorChar);
+                            if (!string.IsNullOrWhiteSpace(relative) && !Path.IsPathRooted(relative)) result.Add(relative);
+                        }
+                    }
+                }
+                catch { }
+            }
+        }
+        finally { manager.UnloadAll(); }
+        return result.ToList();
+    }
+
+    /// <summary>
+    /// Finds the primary atlas assets of one animation inside a dependency Bundle. Newer
+    /// alternate-art Spine exports use ForUnity / ForUnity.atlas instead of P{cardId}.
+    /// Secondary pages such as ForUnity_2 are deliberately left alone; a generated animation
+    /// is packed into the primary page and its new atlas no longer references those pages.
+    /// </summary>
+    public List<MonsterAnimationAssetRef> ScanAnimationDependencyAssets(string bundlePath, string root, string cardId)
+    {
+        var result = new List<MonsterAnimationAssetRef>();
+        var manager = NewManager();
+        try
+        {
+            var bundle = manager.LoadBundleFile(bundlePath, false);
+            foreach (var entry in bundle.file.GetAllFileNames())
+            {
+                if (entry.EndsWith(".resS", StringComparison.OrdinalIgnoreCase) ||
+                    entry.EndsWith(".resource", StringComparison.OrdinalIgnoreCase)) continue;
+                try
+                {
+                    var assets = manager.LoadAssetsFileFromBundle(bundle, entry, false);
+                    foreach (var type in new[] { AssetClassID.Texture2D, AssetClassID.TextAsset })
+                    {
+                        foreach (var info in assets.file.GetAssetsOfType(type))
+                        {
+                            var reader = assets.file.Reader;
+                            var end = info.GetAbsoluteByteStart(assets.file) + info.ByteSize;
+                            reader.Position = info.GetAbsoluteByteStart(assets.file);
+                            var name = ReadAlignedString(reader, end);
+                            MonsterAnimationAssetKind? kind = null;
+                            if (type == AssetClassID.Texture2D &&
+                                (name.Equals($"P{cardId}", StringComparison.OrdinalIgnoreCase) ||
+                                 name.Equals("ForUnity", StringComparison.OrdinalIgnoreCase)))
+                                kind = MonsterAnimationAssetKind.Texture;
+                            else if (type == AssetClassID.TextAsset &&
+                                     (name.Equals($"P{cardId}.atlas", StringComparison.OrdinalIgnoreCase) ||
+                                      name.Equals("ForUnity.atlas", StringComparison.OrdinalIgnoreCase)))
+                                kind = MonsterAnimationAssetKind.Atlas;
+                            else if (type == AssetClassID.TextAsset &&
+                                     name.Equals($"P{cardId}JS", StringComparison.OrdinalIgnoreCase))
+                                kind = MonsterAnimationAssetKind.Skeleton;
+                            if (kind is null) continue;
+                            result.Add(new MonsterAnimationAssetRef
+                            {
+                                BundlePath = bundlePath,
+                                RelativeBundlePath = Path.GetRelativePath(root, bundlePath),
+                                AssetFileName = entry,
+                                PathId = info.PathId,
+                                Name = name,
+                                CardId = cardId,
+                                Kind = kind.Value
+                            });
+                        }
+                    }
+                }
+                catch { }
+            }
+        }
+        finally { manager.UnloadAll(); }
+        return result;
+    }
+
     static bool TryAnimationName(string name, AssetClassID type, out string cardId, out MonsterAnimationAssetKind kind)
     {
         cardId = ""; kind = default;

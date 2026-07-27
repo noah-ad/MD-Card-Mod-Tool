@@ -24,6 +24,9 @@ public sealed class MonsterAnimationAssetRef
     [JsonPropertyName("c")] public string CardId { get; init; } = "";
     [JsonPropertyName("k")] public MonsterAnimationAssetKind Kind { get; init; }
     [JsonPropertyName("s")] public string StorageKind { get; init; } = "LocalData";
+    [JsonPropertyName("t")] public string ProfileTier { get; init; } = "";
+    [JsonPropertyName("g")] public string ProfileRegion { get; init; } = "";
+    [JsonPropertyName("z")] public string ProfileScale { get; init; } = "";
     [JsonIgnore] public string ModSourceKind => StorageKind == "StreamingAssets" ? "召唤动画-游戏内" : "召唤动画";
 
     public TexRef AsTexture() => new()
@@ -200,6 +203,65 @@ public static class MonsterAnimationIndexService
                 catch { }
             }
         }
+        if (result.Count(x => x.Kind == MonsterAnimationAssetKind.Texture) < 2 ||
+            result.Count(x => x.Kind == MonsterAnimationAssetKind.Atlas) < 2)
+            result.AddRange(FindPrefabDependencyCandidates(roots, cardId, engine));
+        return result;
+    }
+
+    static IEnumerable<MonsterAnimationAssetRef> FindPrefabDependencyCandidates(
+        IEnumerable<(string Root, string Storage)> roots,
+        string cardId,
+        ModEngine engine)
+    {
+        var result = new List<MonsterAnimationAssetRef>();
+        foreach (var root in roots)
+        {
+            if (!Directory.Exists(root.Root)) continue;
+            foreach (var region in new[] { "tcg", "ocg" })
+            foreach (var tier in new[] { "HighEnd_HD", "SD" })
+            {
+                var logical = $"Duel/Timeline/Duel/MonsterCutIn/{region}/P{cardId}/{tier}/P{cardId}";
+                var entry = IndexService.ResourceBundleRelativePath(logical);
+                if (!File.Exists(Path.Combine(root.Root, entry))) continue;
+                var queue = new Queue<string>();
+                var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                queue.Enqueue(entry);
+                while (queue.Count > 0 && visited.Count < 96)
+                {
+                    var relative = queue.Dequeue().Replace('/', Path.DirectorySeparatorChar);
+                    if (!visited.Add(relative) || Path.IsPathRooted(relative)) continue;
+                    var path = Path.GetFullPath(Path.Combine(root.Root, relative));
+                    if (!path.StartsWith(Path.GetFullPath(root.Root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+                        !File.Exists(path)) continue;
+                    try
+                    {
+                        var tierNeedle = $"/p{cardId}/{tier.ToLowerInvariant()}/";
+                        var belongsToTier = engine.ReadAssetBundleContainerPaths(path)
+                            .Any(x => x.Replace('\\', '/').Contains(tierNeedle, StringComparison.OrdinalIgnoreCase));
+                        if (belongsToTier)
+                            foreach (var asset in engine.ScanAnimationDependencyAssets(path, root.Root, cardId))
+                                result.Add(new MonsterAnimationAssetRef
+                                {
+                                    BundlePath = asset.BundlePath,
+                                    RelativeBundlePath = asset.RelativeBundlePath,
+                                    AssetFileName = asset.AssetFileName,
+                                    PathId = asset.PathId,
+                                    Name = asset.Name,
+                                    CardId = asset.CardId,
+                                    Kind = asset.Kind,
+                                    StorageKind = root.Storage,
+                                    ProfileTier = tier,
+                                    ProfileRegion = region,
+                                    ProfileScale = "Prefab依赖"
+                                });
+                        foreach (var dependency in engine.ReadBundleDependencies(path))
+                            if (!visited.Contains(dependency)) queue.Enqueue(dependency);
+                    }
+                    catch { }
+                }
+            }
+        }
         return result;
     }
 
@@ -226,7 +288,10 @@ public static class MonsterAnimationIndexService
             Name = x.Name,
             CardId = x.CardId,
             Kind = x.Kind,
-            StorageKind = x.StorageKind
+            StorageKind = x.StorageKind,
+            ProfileTier = x.ProfileTier,
+            ProfileRegion = x.ProfileRegion,
+            ProfileScale = x.ProfileScale
         }).ToList();
     }
 
@@ -315,7 +380,10 @@ public static class MonsterAnimationIndexService
         Name = x.Name,
         CardId = x.CardId,
         Kind = x.Kind,
-        StorageKind = x.StorageKind
+        StorageKind = x.StorageKind,
+        ProfileTier = x.ProfileTier,
+        ProfileRegion = x.ProfileRegion,
+        ProfileScale = x.ProfileScale
     };
 
     static string ResolveInside(string fullRoot, string relative)

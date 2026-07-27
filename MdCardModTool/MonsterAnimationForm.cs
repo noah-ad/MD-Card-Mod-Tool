@@ -146,7 +146,7 @@ public sealed class MonsterAnimationForm : Form
         if (!cardId.All(char.IsAsciiDigit) || cardId.Length == 0) { MessageBox.Show(this, "请输入纯数字卡号。", Text); return; }
         try
         {
-            SetBusy(true, "正在按卡号计算 SD / highend_hd 的 6 个资源路径…");
+            SetBusy(true, "正在按卡号计算 SD / highend_hd 路径并跟随 Prefab 依赖…");
             _set = await Task.Run(() => MonsterAnimationIndexService.Find(_gameRoot, cardId));
             _resourceStatus.Text = _set.Assets.Count == 0 ? "本机没有定位到这张卡的召唤动画" : _set.CountSummary + (_set.IsComplete ? "  · 可替换" : "  · 资源不完整");
             _resourceStatus.ForeColor = _set.IsComplete ? UiTheme.Primary : Color.OrangeRed;
@@ -171,14 +171,13 @@ public sealed class MonsterAnimationForm : Form
 
     async Task RebuildIndexAsync()
     {
-        if (MessageBox.Show(this, "正常情况下会按卡号直接计算 SD / highend_hd 的资源路径，不需要扫描。\n\n这个高级修复操作会扫描 LocalData 与 StreamingAssets 的全部 Bundle，可能需要数分钟；只有游戏更新后路径规则变化时才需要。继续？", "重建动画映射", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
+        var cardId = _cardId.Text.Trim();
+        if (!cardId.All(char.IsAsciiDigit) || cardId.Length == 0) { MessageBox.Show(this, "先输入要修复的纯数字卡号。", Text); return; }
         try
         {
-            SetBusy(true, "正在扫描动画资源名…");
-            await Task.Run(() => MonsterAnimationIndexService.Rebuild(_gameRoot, (done, total, found) =>
-            {
-                if (!IsDisposed && IsHandleCreated) BeginInvoke(() => _resourceStatus.Text = $"扫描 {done:N0}/{total:N0} · 已找到 {found:N0} 个动画资源");
-            }));
+            SetBusy(true, $"正在重算卡号 {cardId} 的资源路径与 Prefab 依赖…");
+            // 只修复当前卡。旧版会扫描 LocalData 的数万个文件，在尾部异常 Bundle
+            // 上可能长时间无响应；动画资源的哈希路径和依赖表本身已经足够定位。
             await LocateAsync();
         }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "重建动画映射失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }

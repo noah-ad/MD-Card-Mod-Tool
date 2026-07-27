@@ -101,9 +101,10 @@ internal static class Program
             while (!task.IsCompleted && DateTime.UtcNow < deadline) { Application.DoEvents(); Thread.Sleep(25); }
             task.GetAwaiter().GetResult();
             var scale = (NumericUpDown?)typeof(MonsterAnimationForm).GetField("_scale", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
-            var result = task.IsCompletedSuccessfully && preview?.Frame is not null && scale?.Value == 100 && preview.ScalePercent == 100
+            var apply = (Button?)typeof(MonsterAnimationForm).GetField("_apply", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            var result = task.IsCompletedSuccessfully && preview?.Frame is not null && scale?.Value == 100 && preview.ScalePercent == 100 && apply?.Enabled == true
                 && (args[0] != "--test-animation-form-chroma" || source?.Text.Contains("绿幕已透明", StringComparison.Ordinal) == true);
-            Console.WriteLine($"media={source?.Text.Replace(Environment.NewLine, " | ")}; frame={preview?.Frame is not null}; fullCanvasScale={scale?.Value}");
+            Console.WriteLine($"media={source?.Text.Replace(Environment.NewLine, " | ")}; frame={preview?.Frame is not null}; fullCanvasScale={scale?.Value}; applyEnabled={apply?.Enabled}");
             form.Close();
             if (!result) Environment.ExitCode = 2;
             return;
@@ -139,6 +140,17 @@ internal static class Program
             var set = MonsterAnimationIndexService.Find(args[1], args[2]);
             Console.WriteLine($"card={set.CardId}; complete={set.IsComplete}; {set.CountSummary}");
             foreach (var asset in set.Assets) Console.WriteLine($"{asset.Kind}; {asset.Name}; PathID={asset.PathId}; {asset.RelativeBundlePath}");
+            return;
+        }
+        if (args.Length == 3 && args[0] == "--test-animation-resolution")
+        {
+            var set = MonsterAnimationIndexService.Find(args[1], args[2]);
+            var template = new MonsterAnimationService().ReadTemplate(args[1], set);
+            var page = MonsterAnimationService.ReplaceAtlasPageName($"P{args[2]}.png\nsize: 1,1\n", set.Textures[0].Name + ".png")
+                .Split('\n')[0].TrimEnd('\r');
+            var uniqueBundles = set.Assets.Select(x => x.BundlePath).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            Console.WriteLine($"complete={set.IsComplete}; assets={set.Assets.Count}; bundles={uniqueBundles}; page={page}; animations={string.Join('/', template.EffectiveAnimationNames)}");
+            if (!set.IsComplete || set.Assets.Count != 6 || uniqueBundles != 6 || page != set.Textures[0].Name + ".png") Environment.ExitCode = 2;
             return;
         }
         if (args.Length == 4 && args[0] == "--dump-animation-card")
@@ -265,6 +277,50 @@ internal static class Program
             });
             var texts = set.Atlases.Concat(set.Skeletons).Select(x => engine.ReadTextAsset(x).Data.Length);
             Console.WriteLine($"complete={set.IsComplete}; textures={string.Join(',', dimensions)}; textBytes={string.Join(',', texts)}");
+            return;
+        }
+        if (args.Length == 4 && args[0] == "--test-animation-apply-copy")
+        {
+            var sourceSet = MonsterAnimationIndexService.Find(args[1], args[2]);
+            var service = new MonsterAnimationService();
+            var template = service.ReadTemplate(args[1], sourceSet);
+            var root = Path.GetFullPath(args[3]);
+            Directory.CreateDirectory(root);
+            var copiedAssets = new List<MonsterAnimationAssetRef>();
+            foreach (var asset in sourceSet.Assets)
+            {
+                var destination = Path.Combine(root, asset.RelativeBundlePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Copy(asset.BundlePath, destination, true);
+                copiedAssets.Add(new MonsterAnimationAssetRef
+                {
+                    BundlePath = destination,
+                    RelativeBundlePath = asset.RelativeBundlePath,
+                    AssetFileName = asset.AssetFileName,
+                    PathId = asset.PathId,
+                    Name = asset.Name,
+                    CardId = asset.CardId,
+                    Kind = asset.Kind,
+                    StorageKind = asset.StorageKind,
+                    ProfileTier = asset.ProfileTier,
+                    ProfileRegion = asset.ProfileRegion,
+                    ProfileScale = asset.ProfileScale
+                });
+            }
+            var copySet = new MonsterAnimationSet { CardId = sourceSet.CardId, Assets = copiedAssets };
+            var framePath = Path.Combine(root, "test-frame.png");
+            using (var frame = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(64, 64, SixLabors.ImageSharp.Color.Cyan)) frame.SaveAsPng(framePath);
+            using var built = MonsterAnimationBuilder.Build([framePath, framePath], args[2], 12, 100, template, 2048);
+            service.Apply(root, copySet, built);
+            var engine = new ModEngine();
+            var pages = copySet.Atlases.Select(x => System.Text.Encoding.UTF8.GetString(engine.ReadTextAsset(x).Data).TrimEnd('\0').Split('\n')[0].TrimEnd('\r')).ToArray();
+            var dimensions = copySet.Textures.Select(x =>
+            {
+                using var decoded = SixLabors.ImageSharp.Image.Load(engine.DecodePng(x.AsTexture()));
+                return $"{decoded.Width}x{decoded.Height}";
+            }).ToArray();
+            Console.WriteLine($"complete={copySet.IsComplete}; pages={string.Join(',', pages)}; textures={string.Join(',', dimensions)}");
+            if (!copySet.IsComplete || pages.Any(x => x != copySet.Textures[0].Name + ".png") || dimensions.Any(x => x != $"{built.AtlasWidth}x{built.AtlasHeight}")) Environment.ExitCode = 2;
             return;
         }
         if (args.Length == 4 && args[0] == "--test-animation-build-profile")

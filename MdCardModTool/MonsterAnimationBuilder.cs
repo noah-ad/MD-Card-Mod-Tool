@@ -427,7 +427,9 @@ public sealed class MonsterAnimationService
             {
                 var encodedAtlas = _engine.EncodeAnimationAtlas(animation.AtlasImage);
                 foreach (var texture in set.Textures) _engine.ReplaceAnimationAtlas(texture, encodedAtlas, Path.Combine(gameRoot, "_MD卡图备份", texture.ModSourceKind));
-                var atlasData = Encoding.UTF8.GetBytes(animation.AtlasText);
+                var primaryTextureName = set.Textures[0].Name;
+                var atlasText = ReplaceAtlasPageName(animation.AtlasText, primaryTextureName + ".png");
+                var atlasData = Encoding.UTF8.GetBytes(atlasText);
                 foreach (var atlas in set.Atlases) _engine.ReplaceTextAsset(_engine.ReadTextAsset(atlas), atlasData, Path.Combine(gameRoot, "_MD卡图备份", atlas.ModSourceKind));
                 foreach (var skeleton in set.Skeletons) _engine.ReplaceTextAsset(_engine.ReadTextAsset(skeleton), animation.SkeletonJson, Path.Combine(gameRoot, "_MD卡图备份", skeleton.ModSourceKind));
             }
@@ -441,6 +443,14 @@ public sealed class MonsterAnimationService
         {
             try { Directory.Delete(rollbackRoot, true); } catch { }
         }
+    }
+
+    internal static string ReplaceAtlasPageName(string atlasText, string pageName)
+    {
+        var newline = atlasText.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        var index = atlasText.IndexOf('\n');
+        if (index < 0) return pageName;
+        return pageName + newline + atlasText[(index + 1)..];
     }
 
     public int Restore(string gameRoot, MonsterAnimationSet set)

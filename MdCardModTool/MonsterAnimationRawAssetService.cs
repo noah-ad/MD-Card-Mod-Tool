@@ -36,6 +36,8 @@ public sealed class MonsterAnimationRawAssetService
 
     public MonsterAnimationAssetProfile ResolveProfile(MonsterAnimationAssetRef asset)
     {
+        if (asset.ProfileTier.Length > 0)
+            return new MonsterAnimationAssetProfile(asset.ProfileTier, asset.ProfileRegion, asset.ProfileScale);
         var relative = Normalize(asset.RelativeBundlePath);
         foreach (var region in new[] { "tcg", "ocg" })
         {
