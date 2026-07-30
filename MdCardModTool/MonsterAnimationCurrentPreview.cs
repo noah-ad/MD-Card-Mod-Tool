@@ -24,6 +24,18 @@ public sealed class CurrentMonsterAnimationPreview : IDisposable
 /// </summary>
 public static class MonsterAnimationCurrentPreview
 {
+    public static CurrentMonsterAnimationPreview? TryLoad(
+        string gameRoot,
+        MonsterAnimationSet set,
+        int previewMaxEdge = 768,
+        int framesPerSecond = 30,
+        int maximumFrames = 180,
+        string? animationName = null)
+    {
+        return TryLoad(set, previewMaxEdge) ??
+               MonsterAnimationSpineRenderer.TryRender(gameRoot, set, framesPerSecond, maximumFrames, previewMaxEdge, animationName);
+    }
+
     public static CurrentMonsterAnimationPreview? TryLoad(MonsterAnimationSet set, int previewMaxEdge = 768)
     {
         if (!set.IsComplete) return null;

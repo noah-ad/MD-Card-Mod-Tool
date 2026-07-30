@@ -67,8 +67,8 @@ internal static class Program
             form.Show();
             var label = (Label?)typeof(MonsterAnimationForm).GetField("_sourceStatus", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
             var preview = (AnimationPreviewCanvas?)typeof(MonsterAnimationForm).GetField("_preview", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
-            var deadline = DateTime.UtcNow.AddSeconds(30);
-            while (DateTime.UtcNow < deadline && preview?.Frame is null && label?.Text.Contains("原版多骨骼", StringComparison.Ordinal) != true)
+            var deadline = DateTime.UtcNow.AddSeconds(60);
+            while (DateTime.UtcNow < deadline && preview?.Frame is null && label?.Text.Contains("预览失败", StringComparison.Ordinal) != true)
             {
                 Application.DoEvents();
                 Thread.Sleep(25);
@@ -79,8 +79,33 @@ internal static class Program
             if (scale is not null) scale.Value = 35;
             Application.DoEvents();
             var realtimeScale = preview?.ScalePercent == 35 && Math.Abs(preview.AnimationScale - 0.35f) < 0.001f;
-            var result = currentSizeLoaded && realtimeScale && (preview?.Frame is not null || label?.Text.Contains("原版多骨骼", StringComparison.Ordinal) == true);
+            var result = currentSizeLoaded && realtimeScale && preview?.Frame is not null;
             Console.WriteLine($"status={label?.Text.Replace(Environment.NewLine, " | ")}; frame={preview?.Frame is not null}; initialScale={initialScale}; realtimeScale={preview?.ScalePercent}");
+            form.Close();
+            if (!result) Environment.ExitCode = 2;
+            return;
+        }
+        if (args.Length == 4 && args[0] == "--test-animation-form-copy-card")
+        {
+            using var form = new MonsterAnimationForm(args[1], args[2]) { Opacity = 0, ShowInTaskbar = false };
+            form.Show();
+            var preview = (AnimationPreviewCanvas?)typeof(MonsterAnimationForm).GetField("_preview", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            var source = (Label?)typeof(MonsterAnimationForm).GetField("_sourceStatus", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            var sourceCard = (TextBox?)typeof(MonsterAnimationForm).GetField("_sourceCardId", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            var frameEdge = (ComboBox?)typeof(MonsterAnimationForm).GetField("_frameEdge", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            var apply = (Button?)typeof(MonsterAnimationForm).GetField("_apply", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            var deadline = DateTime.UtcNow.AddSeconds(60);
+            while (DateTime.UtcNow < deadline && preview?.Frame is null) { Application.DoEvents(); Thread.Sleep(25); }
+            if (sourceCard is not null) sourceCard.Text = args[3];
+            if (frameEdge is not null) frameEdge.SelectedItem = "512";
+            var method = typeof(MonsterAnimationForm).GetMethod("LoadOtherCardAnimationAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic) ?? throw new MissingMethodException("LoadOtherCardAnimationAsync");
+            var task = (Task?)method.Invoke(form, null) ?? throw new InvalidOperationException("跨卡动画加载任务没有启动。");
+            deadline = DateTime.UtcNow.AddSeconds(120);
+            while (!task.IsCompleted && DateTime.UtcNow < deadline) { Application.DoEvents(); Thread.Sleep(25); }
+            task.GetAwaiter().GetResult();
+            var result = task.IsCompletedSuccessfully && preview?.Frame is not null && apply?.Enabled == true &&
+                         source?.Text.Contains($"源卡 {args[3]}", StringComparison.Ordinal) == true;
+            Console.WriteLine($"source={source?.Text.Replace(Environment.NewLine, " | ")}; frame={preview?.Frame is not null}; applyEnabled={apply?.Enabled}");
             form.Close();
             if (!result) Environment.ExitCode = 2;
             return;
@@ -169,9 +194,11 @@ internal static class Program
         if (args.Length == 4 && args[0] == "--test-current-animation-preview")
         {
             var set = MonsterAnimationIndexService.Find(args[1], args[2]);
-            using var preview = MonsterAnimationCurrentPreview.TryLoad(set) ?? throw new InvalidDataException("当前动画不是可逐帧还原的单槽序列动画。");
+            using var preview = MonsterAnimationCurrentPreview.TryLoad(args[1], set) ??
+                throw new InvalidDataException("当前 Spine 动画无法合成预览：" + MonsterAnimationSpineRenderer.LastDiagnostic);
             Directory.CreateDirectory(args[3]);
             preview.Frames[0].Save(Path.Combine(args[3], "frame-0001.png"));
+            preview.Frames[preview.Frames.Count / 2].Save(Path.Combine(args[3], "frame-middle.png"));
             Console.WriteLine($"frames={preview.Frames.Count}; fps={preview.FramesPerSecond}; animation={preview.AnimationName}");
             return;
         }
@@ -321,6 +348,57 @@ internal static class Program
             }).ToArray();
             Console.WriteLine($"complete={copySet.IsComplete}; pages={string.Join(',', pages)}; textures={string.Join(',', dimensions)}");
             if (!copySet.IsComplete || pages.Any(x => x != copySet.Textures[0].Name + ".png") || dimensions.Any(x => x != $"{built.AtlasWidth}x{built.AtlasHeight}")) Environment.ExitCode = 2;
+            return;
+        }
+        if (args.Length == 5 && args[0] == "--test-animation-cross-card-copy")
+        {
+            var targetSet = MonsterAnimationIndexService.Find(args[1], args[2]);
+            var sourceSet = MonsterAnimationIndexService.Find(args[1], args[3]);
+            using var rendered = MonsterAnimationCurrentPreview.TryLoad(args[1], sourceSet, 256, 12, 60) ??
+                throw new InvalidDataException("源卡 Spine 无法渲染：" + MonsterAnimationSpineRenderer.LastDiagnostic);
+            using var media = ExtractedAnimation.CreateFromFrames($"源卡 {args[3]}", rendered.Frames, rendered.FramesPerSecond);
+            var service = new MonsterAnimationService();
+            var template = service.ReadTemplate(args[1], targetSet);
+            var root = Path.GetFullPath(args[4]);
+            Directory.CreateDirectory(root);
+            var copiedAssets = new List<MonsterAnimationAssetRef>();
+            foreach (var asset in targetSet.Assets)
+            {
+                var destination = Path.Combine(root, asset.RelativeBundlePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Copy(asset.BundlePath, destination, true);
+                copiedAssets.Add(new MonsterAnimationAssetRef
+                {
+                    BundlePath = destination,
+                    RelativeBundlePath = asset.RelativeBundlePath,
+                    AssetFileName = asset.AssetFileName,
+                    PathId = asset.PathId,
+                    Name = asset.Name,
+                    CardId = asset.CardId,
+                    Kind = asset.Kind,
+                    StorageKind = asset.StorageKind,
+                    ProfileTier = asset.ProfileTier,
+                    ProfileRegion = asset.ProfileRegion,
+                    ProfileScale = asset.ProfileScale
+                });
+            }
+            var copySet = new MonsterAnimationSet { CardId = targetSet.CardId, Assets = copiedAssets };
+            using var built = MonsterAnimationBuilder.Build(media.FramePaths, args[2], rendered.FramesPerSecond, 100, template, 4096);
+            service.Apply(root, copySet, built);
+            var engine = new ModEngine();
+            var dimensions = copySet.Textures.Select(x =>
+            {
+                using var decoded = SixLabors.ImageSharp.Image.Load(engine.DecodePng(x.AsTexture()));
+                return $"{decoded.Width}x{decoded.Height}";
+            }).ToArray();
+            var generatedAnimations = copySet.Skeletons.Select(x =>
+            {
+                using var document = JsonDocument.Parse(engine.ReadTextAsset(x).Data);
+                return string.Join('/', document.RootElement.GetProperty("animations").EnumerateObject().Select(a => a.Name));
+            }).ToArray();
+            Console.WriteLine($"source={args[3]}; target={args[2]}; frames={rendered.Frames.Count}; textures={string.Join(',', dimensions)}; animations={string.Join(',', generatedAnimations)}");
+            if (!copySet.IsComplete || dimensions.Any(x => x != $"{built.AtlasWidth}x{built.AtlasHeight}") ||
+                generatedAnimations.Any(x => x != string.Join('/', template.EffectiveAnimationNames))) Environment.ExitCode = 2;
             return;
         }
         if (args.Length == 4 && args[0] == "--test-animation-build-profile")

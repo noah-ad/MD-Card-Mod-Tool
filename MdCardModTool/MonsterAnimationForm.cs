@@ -6,6 +6,7 @@ public sealed class MonsterAnimationForm : Form
     readonly string _gameRoot;
     readonly MonsterAnimationService _service = new();
     readonly TextBox _cardId = new() { Width = 130, PlaceholderText = "例如 4007" };
+    readonly TextBox _sourceCardId = new() { Width = 82, PlaceholderText = "源卡号" };
     readonly Label _resourceStatus = new() { Dock = DockStyle.Fill, ForeColor = UiTheme.Muted, TextAlign = ContentAlignment.MiddleLeft };
     readonly Label _sourceStatus = new() { Dock = DockStyle.Top, Height = 62, ForeColor = UiTheme.Text, Padding = new Padding(0, 7, 0, 7) };
     readonly AnimationPreviewCanvas _preview = new() { Dock = DockStyle.Fill };
@@ -20,6 +21,7 @@ public sealed class MonsterAnimationForm : Form
     readonly Label _frameLabel = new() { AutoSize = true, ForeColor = UiTheme.Muted, Padding = new Padding(8, 8, 0, 0) };
     readonly Button _play;
     readonly Button _apply;
+    readonly Button _copyOther;
     readonly System.Windows.Forms.Timer _timer = new();
     readonly List<Bitmap> _previewFrames = [];
     ExtractedAnimation? _media;
@@ -47,12 +49,14 @@ public sealed class MonsterAnimationForm : Form
         KeyPreview = true;
         AllowDrop = true;
         UiTheme.StyleTextBox(_cardId);
+        UiTheme.StyleTextBox(_sourceCardId);
         UiTheme.StyleComboBox(_frameEdge);
         UiTheme.StyleComboBox(_atlasEdge);
         _frameEdge.Items.AddRange([AutomaticQuality, "512", "768", "1024", "1280", "1600", "1920", "2048"]); _frameEdge.SelectedItem = AutomaticQuality;
         _atlasEdge.Items.AddRange(["4096", "8192", "16384"]); _atlasEdge.SelectedItem = "8192";
         _cardId.Text = initialCardId?.All(char.IsAsciiDigit) == true ? initialCardId : "";
         _cardId.KeyDown += async (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await LocateAsync(); } };
+        _sourceCardId.KeyDown += async (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await LoadOtherCardAnimationAsync(); } };
         _timeline.ValueChanged += (_, _) => { if (!_busy) ShowFrame(_timeline.Value); };
         _fps.ValueChanged += (_, _) => { if (_media is not null) SetPreviewRate((int)_fps.Value); UpdateSourceStatus(); };
         _scale.ValueChanged += (_, _) => { _preview.AnimationScale = (float)_scale.Value / 100f; _preview.ScalePercent = (int)_scale.Value; _preview.Invalidate(); };
@@ -77,7 +81,11 @@ public sealed class MonsterAnimationForm : Form
         foreach (var button in new[] { choose, _play, _apply, restore }) { button.AutoSize = false; button.Dock = DockStyle.Fill; button.Margin = new Padding(3); }
         buttons.Controls.Add(choose, 0, 0); buttons.Controls.Add(_play, 1, 0); buttons.Controls.Add(_apply, 0, 1); buttons.Controls.Add(restore, 1, 1);
 
-        var options = new TableLayoutPanel { Dock = DockStyle.Top, Height = 244, ColumnCount = 2, RowCount = 7, Padding = new Padding(0, 4, 0, 4), BackColor = UiTheme.Surface };
+        _copyOther = UiTheme.Button("载入源卡动画", async (_, _) => await LoadOtherCardAnimationAsync(), ButtonTone.Primary);
+        _copyOther.AutoSize = false; _copyOther.Width = 118; _copyOther.Height = 28;
+        var copyRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0), Padding = new Padding(0) };
+        _sourceCardId.Height = 28; copyRow.Controls.Add(_sourceCardId); copyRow.Controls.Add(_copyOther);
+        var options = new TableLayoutPanel { Dock = DockStyle.Top, Height = 277, ColumnCount = 2, RowCount = 8, Padding = new Padding(0, 4, 0, 4), BackColor = UiTheme.Surface };
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58)); options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
         AddOption(options, 0, "帧率 / 游戏速度", _fps);
         AddOption(options, 1, "视频起始秒", _startSeconds);
@@ -86,12 +94,13 @@ public sealed class MonsterAnimationForm : Form
         AddOption(options, 4, "单张图集上限", _atlasEdge);
         AddOption(options, 5, "全游戏画面占比（实时）%", _scale);
         AddOption(options, 6, "绿幕背景透明化", _removeGreenScreen);
+        AddOption(options, 7, "复制其他卡动画", copyRow);
 
         var note = new Label
         {
             Dock = DockStyle.Fill,
             ForeColor = UiTheme.Muted,
-            Text = "100% 对应 Master Duel 完整 16:9 游戏画布（4800×2700），不再受原怪兽骨骼范围限制；调整占比会立即在左侧按全画布比例预览。\n\n“自动高清”会先快速探测实际帧数，再选择图集能容纳的最高画质。勾选“自动去绿幕”后，纯绿色背景会变为透明并柔化边缘。\n\n工具会写入原卡的全部动画名，兼容 animation_USP。仅能替换原本已有召唤动画的卡。",
+            Text = "100% 对应 Master Duel 完整 16:9 游戏画布（4800×2700）；调整占比会立即在左侧预览。\n\n原版 Spine 会按骨骼、mesh、deform 与多页 Atlas 合成预览。“复制其他卡动画”会先把源卡动画烘焙成透明帧，再安全写入当前目标卡。\n\n工具会写入目标卡原有的全部动画名，兼容 animation_USP。目标卡必须原本已有召唤动画。",
             Padding = new Padding(0, 10, 0, 0)
         };
         var side = new BorderPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Surface, Padding = new Padding(18) };
@@ -253,20 +262,21 @@ public sealed class MonsterAnimationForm : Form
         if (_media is null) { _sourceStatus.Text = "拖入或选择 GIF / 视频后在左侧预览"; return; }
         var quality = _automaticQuality ? $"自动高清，上限 {_resolvedFrameEdge} px" : $"固定上限 {_resolvedFrameEdge} px";
         var transparency = _media.GreenScreenRemoved ? " · 绿幕已透明" : "";
-        _sourceStatus.Text = $"{Path.GetFileName(_media.SourcePath)}\n{_media.FramePaths.Count:N0} 帧 · 当前 {(int)_fps.Value} FPS · {_media.FramePaths.Count / (double)_fps.Value:0.00} 秒 · {_mediaWidth}×{_mediaHeight}（{quality}）{transparency}";
+        var name = string.IsNullOrWhiteSpace(_media.DisplayName) ? Path.GetFileName(_media.SourcePath) : _media.DisplayName;
+        _sourceStatus.Text = $"{name}\n{_media.FramePaths.Count:N0} 帧 · 当前 {(int)_fps.Value} FPS · {_media.FramePaths.Count / (double)_fps.Value:0.00} 秒 · {_mediaWidth}×{_mediaHeight}（{quality}）{transparency}";
     }
 
     async Task LoadCurrentAnimationPreviewAsync(MonsterAnimationSet set)
     {
         _resourceStatus.Text += "  · 正在读取当前动画预览…";
-        var current = await Task.Run(() => MonsterAnimationCurrentPreview.TryLoad(set));
+        var current = await Task.Run(() => MonsterAnimationCurrentPreview.TryLoad(_gameRoot, set));
         if (current is null)
         {
             DisposeMedia();
-            _sourceStatus.Text = "当前为原版多骨骼 / 网格 Spine 动画\n不会把拆散的关节图集冒充预览；导入 GIF / 视频后可实时查看替换效果";
-            _preview.StatusText = "CURRENT SPINE ANIMATION\n\n原版复杂骨骼动画已定位\n拖入 GIF / 视频查看待替换效果";
+            _sourceStatus.Text = "当前 Spine 资源已定位，但无法合成预览\n" + MonsterAnimationSpineRenderer.LastDiagnostic;
+            _preview.StatusText = "SPINE PREVIEW UNAVAILABLE\n\n" + MonsterAnimationSpineRenderer.LastDiagnostic;
             _preview.Invalidate();
-            _resourceStatus.Text = _resourceStatus.Text.Replace("  · 正在读取当前动画预览…", "  · 原版骨骼动画");
+            _resourceStatus.Text = _resourceStatus.Text.Replace("  · 正在读取当前动画预览…", "  · 预览失败");
             return;
         }
         var frames = current.Frames.ToList(); current.Frames.Clear();
@@ -282,6 +292,76 @@ public sealed class MonsterAnimationForm : Form
         _sourceStatus.Text = $"当前游戏动画 · {animationName}\n{_previewFrames.Count:N0} 帧 · {fps} FPS · {_previewFrames.Count / (double)fps:0.00} 秒 · 全画布 {scalePercent}%";
         _resourceStatus.Text = _resourceStatus.Text.Replace("  · 正在读取当前动画预览…", "  · 正在预览当前动画");
         if (!_playing) TogglePlay();
+    }
+
+    async Task LoadOtherCardAnimationAsync()
+    {
+        var sourceCardId = _sourceCardId.Text.Trim();
+        if (!sourceCardId.All(char.IsAsciiDigit) || sourceCardId.Length == 0)
+        {
+            MessageBox.Show(this, "请输入要复制动画的纯数字源卡号。", Text);
+            return;
+        }
+        CurrentMonsterAnimationPreview? rendered = null;
+        ExtractedAnimation? loadedMedia = null;
+        try
+        {
+            SetBusy(true, $"正在定位源卡 {sourceCardId} 的 Spine 与多页图集…");
+            var sourceSet = await Task.Run(() => MonsterAnimationIndexService.Find(_gameRoot, sourceCardId));
+            if (!sourceSet.IsComplete) throw new InvalidDataException($"源卡 {sourceCardId} 的动画资源不完整：{sourceSet.CountSummary}");
+            var requestedFps = (int)_fps.Value;
+            var maximumFrames = (int)_maxFrames.Value;
+            var automatic = _frameEdge.Text == AutomaticQuality;
+            var edge = automatic ? 256 : int.Parse(_frameEdge.Text);
+            if (automatic)
+            {
+                using var probe = await Task.Run(() => MonsterAnimationCurrentPreview.TryLoad(_gameRoot, sourceSet, 256, requestedFps, maximumFrames));
+                if (probe is null) throw new InvalidDataException(MonsterAnimationSpineRenderer.LastDiagnostic);
+                edge = Math.Min(1024, MonsterAnimationBuilder.ChooseAutomaticFrameEdge(
+                    probe.Frames.Count,
+                    probe.Frames[0].Width,
+                    probe.Frames[0].Height,
+                    int.Parse(_atlasEdge.Text)));
+                SetBusy(true, $"源卡 {sourceCardId} 已定位，正在按 {edge} px 合成真实 Spine 动画…");
+            }
+            rendered = await Task.Run(() => MonsterAnimationCurrentPreview.TryLoad(_gameRoot, sourceSet, edge, requestedFps, maximumFrames));
+            if (rendered is null) throw new InvalidDataException("无法合成源卡动画：" + MonsterAnimationSpineRenderer.LastDiagnostic);
+            loadedMedia = await Task.Run(() => ExtractedAnimation.CreateFromFrames(
+                $"源卡 {sourceCardId} · {rendered.AnimationName}",
+                rendered.Frames,
+                rendered.FramesPerSecond));
+            var frames = rendered.Frames.ToList();
+            rendered.Frames.Clear();
+            var fps = rendered.FramesPerSecond;
+            rendered.Dispose(); rendered = null;
+            DisposeMedia();
+            _media = loadedMedia; loadedMedia = null;
+            _previewFrames.AddRange(frames);
+            _automaticQuality = automatic;
+            _resolvedFrameEdge = edge;
+            _mediaWidth = frames[0].Width;
+            _mediaHeight = frames[0].Height;
+            _fps.Value = Math.Clamp(fps, (int)_fps.Minimum, (int)_fps.Maximum);
+            _scale.Value = 100;
+            SetPreviewRate(fps);
+            _timeline.Maximum = Math.Max(0, _previewFrames.Count - 1);
+            _timeline.Value = 0;
+            _timeline.Enabled = _previewFrames.Count > 1;
+            _preview.StatusText = "";
+            ShowFrame(0);
+            UpdateSourceStatus();
+            _apply.Enabled = _set?.IsComplete == true;
+            _resourceStatus.ForeColor = UiTheme.Primary;
+            _resourceStatus.Text = $"已载入源卡 {sourceCardId} 的真实 Spine 动画 · {_previewFrames.Count} 帧 · {fps} FPS";
+            if (!_playing) TogglePlay();
+        }
+        catch (Exception ex)
+        {
+            rendered?.Dispose();
+            loadedMedia?.Dispose();
+            MessageBox.Show(this, ex.Message, "无法复制源卡动画", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally { SetBusy(false); }
     }
 
     void SetPreviewRate(int framesPerSecond)
@@ -351,6 +431,8 @@ public sealed class MonsterAnimationForm : Form
         UseWaitCursor = busy;
         if (message is not null) _resourceStatus.Text = message;
         _cardId.Enabled = !busy;
+        _sourceCardId.Enabled = !busy;
+        _copyOther.Enabled = !busy;
         _apply.Enabled = !busy && _set?.IsComplete == true && _media is not null;
     }
 

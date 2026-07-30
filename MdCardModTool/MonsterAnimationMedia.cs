@@ -6,11 +6,42 @@ namespace MdCardModTool;
 public sealed class ExtractedAnimation : IDisposable
 {
     public required string SourcePath { get; init; }
+    public string? DisplayName { get; init; }
     public required string WorkingDirectory { get; init; }
     public required List<string> FramePaths { get; init; }
     public required int FramesPerSecond { get; init; }
     public bool GreenScreenRemoved { get; init; }
     public double DurationSeconds => FramePaths.Count / (double)FramesPerSecond;
+
+    public static ExtractedAnimation CreateFromFrames(string displayName, IReadOnlyList<Bitmap> frames, int framesPerSecond)
+    {
+        if (frames.Count == 0) throw new ArgumentException("没有可保存的动画帧。", nameof(frames));
+        var directory = Path.Combine(Path.GetTempPath(), "MDCardModTool", "spine_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var paths = new List<string>(frames.Count);
+            for (var i = 0; i < frames.Count; i++)
+            {
+                var path = Path.Combine(directory, $"frame_{i:D5}.png");
+                frames[i].Save(path, System.Drawing.Imaging.ImageFormat.Png);
+                paths.Add(path);
+            }
+            return new ExtractedAnimation
+            {
+                SourcePath = displayName,
+                DisplayName = displayName,
+                WorkingDirectory = directory,
+                FramePaths = paths,
+                FramesPerSecond = framesPerSecond
+            };
+        }
+        catch
+        {
+            try { Directory.Delete(directory, true); } catch { }
+            throw;
+        }
+    }
 
     public Bitmap LoadFrame(int index, int maxPreviewEdge = 0)
     {
