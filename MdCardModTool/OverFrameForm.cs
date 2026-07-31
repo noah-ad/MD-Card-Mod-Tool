@@ -28,7 +28,7 @@ public sealed class OverFrameForm : Form
         top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         top.Controls.Add(Label("显示卡号"), 0, 0); top.Controls.Add(_cardId, 1, 0); top.Controls.Add(Label("高图卡号"), 2, 0); top.Controls.Add(_artId, 3, 0); top.Controls.Add(enable, 4, 0);
         var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill }; actions.Controls.Add(disable); actions.Controls.Add(refresh); actions.Controls.Add(repair); actions.Controls.Add(restore); top.Controls.Add(actions, 0, 1); top.SetColumnSpan(actions, 5);
-        var help = new Label { Text = "超框登记是：显示卡号 → 高图卡号。实际高图须为 704×1024。工具会自动适配新版 data.unity3d 与旧版 LocalData；游戏更新重置后可点“恢复已保存超框”。写入前请完全退出游戏。", AutoSize = true, ForeColor = Color.FromArgb(160, 195, 255) };
+        var help = new Label { Text = "超框登记是：显示卡号 → 高图卡号。实际高图须为 704×1024。工具会定位游戏实际读取的 LocalData 小型登记表；游戏更新重置后可点“恢复已保存超框”。写入前请完全退出游戏。", AutoSize = true, ForeColor = Color.FromArgb(160, 195, 255) };
         top.Controls.Add(help, 0, 2); top.SetColumnSpan(help, 5);
         Controls.Add(_mappings); Controls.Add(_status); Controls.Add(top);
         Shown += async (_, _) => await LoadAsync();

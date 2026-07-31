@@ -16,37 +16,43 @@ public sealed class OverFrameService
     readonly ModEngine _engine = new();
     public const string GateName = "of_card_asset";
     public const string LegacyBackupKind = "超框开关";
+    // v1.6.13 曾误把 data.unity3d 内的同名内置模板当成运行时表。
+    // 保留该名称只用于识别并修复那一版留下的备份，不再把它当作 Mod 来源。
     public const string CoreBackupKind = "超框开关-游戏内";
+    public const string CoreRepairBackupKind = "超框开关-核心误写安全备份";
     static readonly string CoreGateRelativePath = Path.Combine("masterduel_Data", "data.unity3d");
     static readonly string LegacyGateRelativePath = Path.Combine("a5", "a589d3b5");
+    static readonly IReadOnlyDictionary<string, string> KnownRuntimeGatePaths = new Dictionary<string, string>
+    {
+        ["24462996"] = Path.Combine("22", "22817d01")
+    };
+    const long RuntimeGateSearchMaxBytes = 64 * 1024;
 
     public TextAssetRef FindGate(string gameRoot, Action<int, int>? progress = null)
     {
         gameRoot = Path.GetFullPath(gameRoot);
-        var localRoot = IndexService.FindLocalRoot(gameRoot);
-        var candidates = new List<(string Path, string Root)>();
+        var localRoot = IndexService.FindLocalRoot(gameRoot)
+            ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000，无法定位游戏实际读取的超框登记。");
+        var candidates = new List<string>();
 
-        // 2026-07-30 版本起，of_card_asset 被移进主程序的 data.unity3d。
-        // 固定路径必须优先，避免再遍历数万个 LocalData Bundle。
-        candidates.Add((Path.Combine(gameRoot, CoreGateRelativePath), gameRoot));
+        // 运行时表始终从 LocalData 加载。data.unity3d 也有一个同名 TextAsset，
+        // 但它只是随程序附带的默认模板，修改它不会启用游戏内超框。
         AddCachedCandidate(candidates, GateCachePath(gameRoot), gameRoot, localRoot);
-        if (localRoot is not null)
-        {
-            // 兼容旧版程序写下的、以 LocalData 路径计算名称的缓存。
-            AddCachedCandidate(candidates, LegacyGateCachePath(localRoot), gameRoot, localRoot);
-            candidates.Add((Path.Combine(localRoot, LegacyGateRelativePath), localRoot));
-        }
+        AddCachedCandidate(candidates, LegacyGateCachePath(localRoot), gameRoot, localRoot);
+        var buildId = PortableIndexService.GetGameBuildId(gameRoot);
+        if (KnownRuntimeGatePaths.TryGetValue(buildId, out var knownPath)) candidates.Add(Path.Combine(localRoot, knownPath));
+        candidates.Add(Path.Combine(localRoot, LegacyGateRelativePath));
 
         var unique = candidates
-            .Where(x => File.Exists(x.Path))
-            .DistinctBy(x => Path.GetFullPath(x.Path), StringComparer.OrdinalIgnoreCase)
+            .Where(File.Exists)
+            .DistinctBy(Path.GetFullPath, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         for (var i = 0; i < unique.Length; i++)
         {
             progress?.Invoke(i + 1, unique.Length);
             try
             {
-                var found = _engine.FindTextAssetFast(unique[i].Path, unique[i].Root, GateName);
+                var found = _engine.FindTextAssetFast(unique[i], localRoot, GateName);
                 if (found is not null)
                 {
                     WriteGateCache(gameRoot, found.BundlePath);
@@ -56,8 +62,34 @@ public sealed class OverFrameService
             catch { }
         }
 
+        // 更新会改变哈希路径。of_card_asset Bundle 本身极小，按文件大小升序时通常
+        // 前几项即可命中；只检查 <=64 KiB 的小 Bundle，不再解析 13 GB 全量资源。
+        var smallBundles = Directory.EnumerateFiles(localRoot, "*", SearchOption.AllDirectories)
+            .Select(path =>
+            {
+                try { return (Path: path, Length: new FileInfo(path).Length); }
+                catch { return (Path: path, Length: long.MaxValue); }
+            })
+            .Where(x => x.Length <= RuntimeGateSearchMaxBytes)
+            .OrderBy(x => x.Length)
+            .ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.Path)
+            .ToArray();
+        for (var i = 0; i < smallBundles.Length; i++)
+        {
+            progress?.Invoke(i + 1, smallBundles.Length);
+            try
+            {
+                var found = _engine.FindTextAssetFast(smallBundles[i], localRoot, GateName);
+                if (found is null) continue;
+                WriteGateCache(gameRoot, found.BundlePath);
+                return found;
+            }
+            catch { }
+        }
+
         throw new FileNotFoundException(
-            $"没有在当前版本固定位置找到 {GateName}。已检查 {CoreGateRelativePath} 与旧版 {LegacyGateRelativePath}，不会再扫描整个 LocalData。请先验证游戏文件完整性后重试。");
+            $"没有在 LocalData 的小型 Bundle 中找到 {GateName}。请先进入游戏完成资源下载，再重试。");
     }
 
     public TextAssetRef? FindCachedGate(string gameRoot)
@@ -82,6 +114,7 @@ public sealed class OverFrameService
     public void EnableOrUpdate(string gameRoot, ushort cardId, ushort artId)
     {
         EnsureGameStopped(gameRoot);
+        RepairObsoleteCoreGateModification(gameRoot);
         var gate = FindGate(gameRoot);
         var mappings = Parse(gate.Data);
         SetMapping(mappings, cardId, artId);
@@ -91,6 +124,7 @@ public sealed class OverFrameService
     public void Disable(string gameRoot, ushort cardId)
     {
         EnsureGameStopped(gameRoot);
+        RepairObsoleteCoreGateModification(gameRoot);
         var gate = FindGate(gameRoot);
         var mappings = Parse(gate.Data);
         mappings.RemoveAll(x => x.CardId == cardId);
@@ -100,6 +134,7 @@ public sealed class OverFrameService
     public OverFrameRepairResult ReapplySavedCards(string gameRoot)
     {
         EnsureGameStopped(gameRoot);
+        RepairObsoleteCoreGateModification(gameRoot);
         var saved = OverFrameArtStore.SavedCardIds(gameRoot);
         var gate = FindGate(gameRoot);
         var mappings = Parse(gate.Data);
@@ -141,6 +176,42 @@ public sealed class OverFrameService
 
     public string GateLocation(string gameRoot) => FindGate(gameRoot).RelativeBundlePath;
 
+    /// <summary>
+    /// 修复 v1.6.13 把超框卡号写进 data.unity3d 同名模板的问题。
+    /// 仅当当前表是原始模板加上本工具保存卡号的严格超集时才回写，避免覆盖其他修改。
+    /// </summary>
+    public bool RepairObsoleteCoreGateModification(string gameRoot)
+    {
+        gameRoot = Path.GetFullPath(gameRoot);
+        var livePath = Path.Combine(gameRoot, CoreGateRelativePath);
+        var templatePath = Path.Combine(gameRoot, "_MD卡图备份", CoreBackupKind, CoreGateRelativePath);
+        if (!File.Exists(livePath) || !File.Exists(templatePath)) return false;
+
+        try
+        {
+            var live = _engine.FindTextAssetFast(livePath, gameRoot, GateName);
+            var template = _engine.FindTextAssetFast(templatePath, gameRoot, GateName);
+            if (live is null || template is null || live.Data.AsSpan().SequenceEqual(template.Data)) return false;
+
+            var liveMappings = Parse(live.Data);
+            var templateMappings = Parse(template.Data);
+            var templatePairs = templateMappings.Select(x => (x.CardId, x.ArtId)).ToHashSet();
+            if (!templatePairs.All(pair => liveMappings.Any(x => x.CardId == pair.CardId && x.ArtId == pair.ArtId))) return false;
+
+            var saved = OverFrameArtStore.SavedCardIds(gameRoot).ToHashSet();
+            var extras = liveMappings.Where(x => !templatePairs.Contains((x.CardId, x.ArtId))).ToArray();
+            if (extras.Length == 0 || extras.Any(x => x.CardId != x.ArtId || !saved.Contains(x.CardId))) return false;
+
+            _engine.ReplaceTextAsset(live, template.Data, Path.Combine(gameRoot, "_MD卡图备份", CoreRepairBackupKind));
+            return true;
+        }
+        catch
+        {
+            // 这是旧版迁移清理；失败不应阻止写入真正的 LocalData 超框表。
+            return false;
+        }
+    }
+
     public List<OverFrameMapping> ReadCached(string gameRoot)
     {
         var gate = FindCachedGate(gameRoot); return gate is null ? [] : Parse(gate.Data).OrderBy(x => x.CardId).ThenBy(x => x.ArtId).ToList();
@@ -157,7 +228,7 @@ public sealed class OverFrameService
         mappings = mappings.OrderBy(x => x.CardId).ThenBy(x => x.ArtId).ToList();
         var data = new byte[mappings.Count * 4];
         for (var i = 0; i < mappings.Count; i++) { BitConverter.TryWriteBytes(data.AsSpan(i * 4, 2), mappings[i].CardId); BitConverter.TryWriteBytes(data.AsSpan(i * 4 + 2, 2), mappings[i].ArtId); }
-        _engine.ReplaceTextAsset(gate, data, Path.Combine(gameRoot, "_MD卡图备份", BackupKindFor(gameRoot, gate)));
+        _engine.ReplaceTextAsset(gate, data, Path.Combine(gameRoot, "_MD卡图备份", LegacyBackupKind));
         WriteGateCache(gameRoot, gate.BundlePath);
     }
     static void SetMapping(List<OverFrameMapping> mappings, ushort cardId, ushort artId)
@@ -165,11 +236,7 @@ public sealed class OverFrameService
         mappings.RemoveAll(x => x.CardId == cardId);
         mappings.Add(new OverFrameMapping(cardId, artId));
     }
-    static string BackupPath(string gameRoot, TextAssetRef gate) => Path.Combine(gameRoot, "_MD卡图备份", BackupKindFor(gameRoot, gate), gate.RelativeBundlePath);
-    static string BackupKindFor(string gameRoot, TextAssetRef gate) =>
-        Path.GetFullPath(gate.BundlePath).Equals(Path.GetFullPath(Path.Combine(gameRoot, CoreGateRelativePath)), StringComparison.OrdinalIgnoreCase)
-            ? CoreBackupKind
-            : LegacyBackupKind;
+    static string BackupPath(string gameRoot, TextAssetRef gate) => Path.Combine(gameRoot, "_MD卡图备份", LegacyBackupKind, gate.RelativeBundlePath);
     static string GateCachePath(string gameRoot) => CachePathFor(gameRoot);
     static string LegacyGateCachePath(string localRoot) => CachePathFor(localRoot);
     static string CachePathFor(string scope)
@@ -181,17 +248,20 @@ public sealed class OverFrameService
     {
         var cache = GateCachePath(gameRoot);
         Directory.CreateDirectory(Path.GetDirectoryName(cache)!);
-        File.WriteAllText(cache, bundlePath);
+        File.WriteAllLines(cache, [bundlePath, PortableIndexService.GetGameBuildId(gameRoot)]);
     }
-    static void AddCachedCandidate(List<(string Path, string Root)> candidates, string cachePath, string gameRoot, string? localRoot)
+    static void AddCachedCandidate(List<string> candidates, string cachePath, string gameRoot, string localRoot)
     {
         if (!File.Exists(cachePath)) return;
         try
         {
-            var path = File.ReadAllText(cachePath).Trim();
+            var lines = File.ReadAllLines(cachePath);
+            var path = lines.FirstOrDefault()?.Trim() ?? "";
             if (!File.Exists(path)) return;
-            if (IsInside(gameRoot, path)) candidates.Add((path, gameRoot));
-            else if (localRoot is not null && IsInside(localRoot, path)) candidates.Add((path, localRoot));
+            var cachedBuild = lines.Skip(1).FirstOrDefault()?.Trim() ?? "";
+            var currentBuild = PortableIndexService.GetGameBuildId(gameRoot);
+            if (cachedBuild.Length > 0 && currentBuild.Length > 0 && !cachedBuild.Equals(currentBuild, StringComparison.Ordinal)) return;
+            if (IsInside(localRoot, path)) candidates.Add(path);
         }
         catch { }
     }

@@ -558,8 +558,49 @@ internal static class Program
             var gate = service.FindGate(args[1], (done, total) => Console.WriteLine($"scan={done}/{total}"));
             var mappings = service.Read(args[1]);
             Console.WriteLine($"gate={gate.RelativeBundlePath}; bytes={gate.Data.Length}; PathID={gate.PathId}; file={gate.AssetFileName}; mappings={mappings.Count}");
-            foreach (var item in mappings.Where(x => x.CardId is 13670 or 22747))
+            foreach (var item in mappings)
                 Console.WriteLine($"{item.CardId}->{item.ArtId}");
+            return;
+        }
+        if (args.Length == 3 && args[0] == "--inspect-overframe-file")
+        {
+            var bundle = Path.GetFullPath(args[1]);
+            var root = Path.GetFullPath(args[2]);
+            var gate = new ModEngine().FindTextAssetFast(bundle, root, OverFrameService.GateName)
+                ?? throw new FileNotFoundException($"Bundle 中没有 {OverFrameService.GateName}。", bundle);
+            var mappings = OverFrameService.Read(gate);
+            Console.WriteLine($"gate={gate.RelativeBundlePath}; bytes={gate.Data.Length}; PathID={gate.PathId}; file={gate.AssetFileName}; mappings={mappings.Count}");
+            foreach (var item in mappings) Console.WriteLine($"{item.CardId}->{item.ArtId}");
+            return;
+        }
+        if (args.Length == 4 && args[0] == "--scan-text-asset")
+        {
+            var root = Path.GetFullPath(args[1]);
+            var name = args[2];
+            if (!long.TryParse(args[3], out var maxBytes) || maxBytes <= 0) throw new ArgumentException("最大文件字节数无效。");
+            var files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                .Where(x =>
+                {
+                    try { return new FileInfo(x).Length <= maxBytes; }
+                    catch { return false; }
+                })
+                .ToArray();
+            var found = new System.Collections.Concurrent.ConcurrentBag<TextAssetRef>();
+            var done = 0;
+            Parallel.ForEach(files, new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, Math.Min(Environment.ProcessorCount, 8)) }, file =>
+            {
+                try
+                {
+                    var asset = new ModEngine().FindTextAssetFast(file, root, name);
+                    if (asset is not null) found.Add(asset);
+                }
+                catch { }
+                var current = Interlocked.Increment(ref done);
+                if (current % 500 == 0 || current == files.Length) Console.WriteLine($"scan={current}/{files.Length}");
+            });
+            foreach (var asset in found.OrderBy(x => x.RelativeBundlePath, StringComparer.OrdinalIgnoreCase))
+                Console.WriteLine($"FOUND gate={asset.RelativeBundlePath}; bytes={asset.Data.Length}; PathID={asset.PathId}; file={asset.AssetFileName}");
+            Console.WriteLine($"matches={found.Count}");
             return;
         }
         if (args.Length == 2 && args[0] == "--repair-overframe")
@@ -583,8 +624,8 @@ internal static class Program
                 Thread.Sleep(25);
             }
             var hasTarget = list?.Items.Cast<ListViewItem>().Any(x => x.Text == "22747" && x.SubItems.Count > 1 && x.SubItems[1].Text == "22747") == true;
-            var locationOk = status?.Text.Contains(Path.Combine("masterduel_Data", "data.unity3d"), StringComparison.OrdinalIgnoreCase) == true;
-            Console.WriteLine($"items={list?.Items.Count}; target22747={hasTarget}; coreLocation={locationOk}; status={status?.Text}");
+            var locationOk = status?.Text.Contains(Path.Combine("22", "22817d01"), StringComparison.OrdinalIgnoreCase) == true;
+            Console.WriteLine($"items={list?.Items.Count}; target22747={hasTarget}; localDataLocation={locationOk}; status={status?.Text}");
             form.Close();
             if (!hasTarget || !locationOk) Environment.ExitCode = 2;
             return;

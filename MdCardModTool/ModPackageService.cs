@@ -33,7 +33,7 @@ public sealed record ModChangeSummary(int BundleCount, int AnimationBundleCount,
 public sealed class ModPackageService
 {
     const string ManifestName = "manifest.json";
-    static readonly string[] SourceKinds = ["本地卡图", "游戏内图片", "超框开关-游戏内", "卡框资源", "超框开关", "召唤动画", "召唤动画-游戏内"];
+    static readonly string[] SourceKinds = ["本地卡图", "游戏内图片", "卡框资源", "超框开关", "召唤动画", "召唤动画-游戏内"];
 
     public int RefreshFlags(string gameRoot, IEnumerable<TexRef> textures)
     {
@@ -42,10 +42,7 @@ public sealed class ModPackageService
         var changed = EnumerateChangedBundles(gameRoot, list).ToArray();
         foreach (var texture in list)
         {
-            // 新版超框表与 17 张 card_frame 共用 data.unity3d；只改登记表时不能把全部卡框误标成 Mod。
-            texture.IsModded = changed.Any(x =>
-                x.LivePath.Equals(texture.BundlePath, StringComparison.OrdinalIgnoreCase) &&
-                !x.SourceKind.Equals(OverFrameService.CoreBackupKind, StringComparison.Ordinal));
+            texture.IsModded = changed.Any(x => x.LivePath.Equals(texture.BundlePath, StringComparison.OrdinalIgnoreCase));
         }
         return list.Count(x => x.IsModded);
     }
@@ -56,7 +53,7 @@ public sealed class ModPackageService
         return new ModChangeSummary(
             changed.Length,
             changed.Count(x => x.SourceKind.StartsWith("召唤动画", StringComparison.Ordinal)),
-            changed.Count(x => x.SourceKind.Equals(OverFrameService.CoreBackupKind, StringComparison.Ordinal)));
+            changed.Count(x => x.SourceKind.Equals(OverFrameService.LegacyBackupKind, StringComparison.Ordinal)));
     }
 
     public ModPackageInfo Export(string gameRoot, IEnumerable<TexRef> textures, string outputPath)
@@ -180,7 +177,6 @@ public sealed class ModPackageService
                 var relative = Path.GetRelativePath(sourceBackup, backup);
                 var live = ResolveInside(targetRoot, relative);
                 if (!File.Exists(live) || FilesEqual(backup, live)) continue;
-                // data.unity3d 同时承载 card_frame 与新版超框登记；一个 Mod 包只收录一次同一目标 Bundle。
                 if (!emittedLivePaths.Add(live)) continue;
                 var names = textures.Where(x => x.BundlePath.Equals(live, StringComparison.OrdinalIgnoreCase)).Select(x => x.CardKey.Length > 0 ? x.CardKey : x.Name).Distinct().Take(4).ToArray();
                 var display = names.Length > 0 ? string.Join("、", names) : Path.GetFileName(relative);
@@ -204,7 +200,6 @@ public sealed class ModPackageService
     static string TargetKindFor(string sourceKind) => sourceKind switch
     {
         "本地卡图" or "超框开关" or "召唤动画" => "LocalData",
-        "超框开关-游戏内" => "GameRoot",
         "召唤动画-游戏内" => "StreamingAssets",
         "游戏内图片" => "StreamingAssets",
         "卡框资源" => "GameRoot",
