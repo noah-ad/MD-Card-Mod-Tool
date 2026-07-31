@@ -25,7 +25,7 @@ public sealed class ModPackageEntry
 
 public sealed record ModPackageInfo(string Name, DateTimeOffset CreatedAt, int BundleCount, long TotalSize);
 public sealed record ModImportResult(int BundleCount, IReadOnlyList<string> ChangedBundlePaths);
-public sealed record ModChangeSummary(int BundleCount, int AnimationBundleCount);
+public sealed record ModChangeSummary(int BundleCount, int AnimationBundleCount, int OverFrameGateBundleCount);
 
 /// <summary>
 /// 用 _MD卡图备份 作为轻量 Mod 台账。只比较实际改过的 Bundle，不扫描整个游戏目录。
@@ -39,15 +39,21 @@ public sealed class ModPackageService
     {
         var list = textures.ToList();
         foreach (var texture in list) texture.IsModded = false;
-        var changed = EnumerateChangedBundles(gameRoot, list).Select(x => x.LivePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var texture in list.Where(x => changed.Contains(x.BundlePath))) texture.IsModded = true;
+        var changed = EnumerateChangedBundles(gameRoot, list).ToArray();
+        foreach (var texture in list)
+        {
+            texture.IsModded = changed.Any(x => x.LivePath.Equals(texture.BundlePath, StringComparison.OrdinalIgnoreCase));
+        }
         return list.Count(x => x.IsModded);
     }
 
     public ModChangeSummary GetChangeSummary(string gameRoot, IEnumerable<TexRef> textures)
     {
         var changed = EnumerateChangedBundles(gameRoot, textures.ToList()).ToArray();
-        return new ModChangeSummary(changed.Length, changed.Count(x => x.SourceKind.StartsWith("召唤动画", StringComparison.Ordinal)));
+        return new ModChangeSummary(
+            changed.Length,
+            changed.Count(x => x.SourceKind.StartsWith("召唤动画", StringComparison.Ordinal)),
+            changed.Count(x => x.SourceKind.Equals(OverFrameService.LegacyBackupKind, StringComparison.Ordinal)));
     }
 
     public ModPackageInfo Export(string gameRoot, IEnumerable<TexRef> textures, string outputPath)
@@ -159,6 +165,7 @@ public sealed class ModPackageService
         var localRoot = IndexService.FindLocalRoot(gameRoot);
         if (localRoot is null) yield break;
         var backupRoot = Path.Combine(gameRoot, "_MD卡图备份");
+        var emittedLivePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var sourceKind in SourceKinds)
         {
             var sourceBackup = Path.Combine(backupRoot, sourceKind);
@@ -170,6 +177,7 @@ public sealed class ModPackageService
                 var relative = Path.GetRelativePath(sourceBackup, backup);
                 var live = ResolveInside(targetRoot, relative);
                 if (!File.Exists(live) || FilesEqual(backup, live)) continue;
+                if (!emittedLivePaths.Add(live)) continue;
                 var names = textures.Where(x => x.BundlePath.Equals(live, StringComparison.OrdinalIgnoreCase)).Select(x => x.CardKey.Length > 0 ? x.CardKey : x.Name).Distinct().Take(4).ToArray();
                 var display = names.Length > 0 ? string.Join("、", names) : Path.GetFileName(relative);
                 yield return new ChangedBundle(live, relative, targetKind, sourceKind, display);

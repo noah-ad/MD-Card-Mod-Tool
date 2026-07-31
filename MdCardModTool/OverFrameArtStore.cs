@@ -16,6 +16,24 @@ public static class OverFrameArtStore
     static string SettingsPath(string gameRoot, ushort cardId) => Path.Combine(CardFolder(gameRoot, cardId), "卡框设置.json");
     public static bool HasSettings(string gameRoot, ushort cardId) => File.Exists(SettingsPath(gameRoot, cardId));
 
+    /// <summary>
+    /// 返回已经完成过“透明原画 + 卡框设置”保存的卡号。
+    /// 这些文件是游戏更新重置 of_card_asset 后恢复超框登记的本地依据。
+    /// </summary>
+    public static IReadOnlyList<ushort> SavedCardIds(string gameRoot)
+    {
+        var root = Path.Combine(gameRoot, "_MD卡图素材", "超框");
+        if (!Directory.Exists(root)) return [];
+        var result = new List<ushort>();
+        foreach (var folder in Directory.EnumerateDirectories(root))
+        {
+            if (!ushort.TryParse(Path.GetFileName(folder), out var cardId)) continue;
+            if (!File.Exists(Path.Combine(folder, "透明原画.png")) || !File.Exists(Path.Combine(folder, "卡框设置.json"))) continue;
+            result.Add(cardId);
+        }
+        return result.Distinct().OrderBy(x => x).ToArray();
+    }
+
     public static void SaveArt(string gameRoot, ushort cardId, string imagePath)
     {
         using var image = SharpImage.Load<Rgba32>(imagePath);

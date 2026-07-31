@@ -45,6 +45,8 @@ public static class PortableIndexService
         var streamingRoot = IndexService.StreamingRoot(gameRoot);
         index = new GameIndex
         {
+            // 随包索引可能来自上一版游戏；启动时必须用当前 data.unity3d 刷新卡框 PathID。
+            CardFrameDataStamp = "",
             AlternateArtIndexVersion = portable.AlternateArtIndexVersion,
             Textures = portable.Textures.Select(x => new TexRef
             {

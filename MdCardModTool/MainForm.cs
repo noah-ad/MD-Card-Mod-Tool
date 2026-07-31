@@ -32,6 +32,7 @@ public sealed class MainForm : Form
     GameIndex? _index;
     int _changedModBundleCount;
     int _changedAnimationBundleCount;
+    int _changedOverFrameGateBundleCount;
     int _previewGeneration;
 
     public MainForm()
@@ -197,6 +198,19 @@ public sealed class MainForm : Form
                 await Task.Run(() => IndexService.BuildAndSave(_gameRoot!, (done, total, found) => BeginInvoke(() => _status.Text = $"正在重建索引：{done:N0}/{total:N0} Bundle，已索引 {found:N0} 张图片…")));
                 cached = JsonSerializer.Deserialize<GameIndex>(await File.ReadAllTextAsync(cache)) ?? new GameIndex();
             }
+            var refreshedCardFrames = false;
+            string? cardFrameRefreshWarning = null;
+            try
+            {
+                _status.Text = "正在核对当前游戏版本的卡框映射…";
+                refreshedCardFrames = await Task.Run(() => IndexService.RefreshCardFramesIfChanged(_gameRoot!, cached));
+                if (refreshedCardFrames) await Task.Run(() => IndexService.Save(_gameRoot!, cached));
+            }
+            catch (Exception ex)
+            {
+                // 卡框损坏不应阻断卡图索引；普通卡图仍能以原图方式预览、导出和还原。
+                cardFrameRefreshWarning = ex.Message;
+            }
             // 480×700 是另一套界面用小卡框，不属于游戏超框预览。
             cached.Textures.RemoveAll(x => x.SourceKind == "卡框资源" && (x.Width != 704 || x.Height != 1024));
             // v1.3.1 曾误把 P数字 Spine 图集部件归为卡图原画；迁移旧缓存时一并移除。
@@ -210,6 +224,8 @@ public sealed class MainForm : Form
             _status.Text = loadedFromPrebuilt
                 ? $"已用随包预绑定瞬时建立本机索引：{_textures.Count:N0} 张图片，无需首次扫描{buildNote}。"
                 : forceRebuild ? $"索引已重建：{_textures.Count:N0} 张图片。" : $"已载入本地索引：{_textures.Count:N0} 张图片。";
+            if (refreshedCardFrames) _status.Text += " 已按当前 data.unity3d 自动更新 704×1024 卡框 PathID。";
+            else if (cardFrameRefreshWarning is not null) _status.Text += " 卡框映射暂不可用：" + cardFrameRefreshWarning;
             if (cached is not null && cached.AlternateArtIndexVersion < YgoCdbCardCatalog.ClassificationVersion)
             {
                 _status.Text = "正在建立本地异画卡名单（仅首次，需要下载一次百鸽卡片库）…";
@@ -238,7 +254,7 @@ public sealed class MainForm : Form
     {
         var old = _category.Text; _category.Items.Clear(); _category.Items.Add("全部"); _groups.Nodes.Clear();
         var modCount = _textures.Count(x => x.IsModded);
-        var modNode = _groups.Nodes.Add($"我的 Mod（{modCount + _changedAnimationBundleCount}）"); modNode.Tag = ModGroupKey; modNode.ForeColor = UiTheme.Gold;
+        var modNode = _groups.Nodes.Add($"我的 Mod（{modCount + _changedAnimationBundleCount + _changedOverFrameGateBundleCount}）"); modNode.Tag = ModGroupKey; modNode.ForeColor = UiTheme.Gold;
         foreach (var source in _textures.GroupBy(x => x.SourceKind).OrderBy(x => x.Key))
         {
             var sourceNode = _groups.Nodes.Add($"{source.Key}（{source.Count()}）");
@@ -362,7 +378,7 @@ public sealed class MainForm : Form
         var textures = _textures.Where(x => x.IsModded).ToArray();
         _modSummary.Text = _changedModBundleCount == 0
             ? "暂无改动；替换后的卡图与动画会自动纳入 Mod 管理"
-            : $"已管理 {textures.Length:N0} 个图片资源 · {_changedModBundleCount:N0} 个已修改 Bundle{(_changedAnimationBundleCount > 0 ? $" · 动画 {_changedAnimationBundleCount:N0}" : "")}";
+            : $"已管理 {textures.Length:N0} 个图片资源 · {_changedModBundleCount:N0} 个已修改 Bundle{(_changedAnimationBundleCount > 0 ? $" · 动画 {_changedAnimationBundleCount:N0}" : "")}{(_changedOverFrameGateBundleCount > 0 ? " · 超框登记 1" : "")}";
     }
 
     async Task RefreshModFlagsAsync()
@@ -375,6 +391,7 @@ public sealed class MainForm : Form
         });
         _changedModBundleCount = summary.BundleCount;
         _changedAnimationBundleCount = summary.AnimationBundleCount;
+        _changedOverFrameGateBundleCount = summary.OverFrameGateBundleCount;
         UpdateModSummary();
     }
     TexRef? Selected() => _list.SelectedItems.Count == 1 ? _list.SelectedItems[0].Tag as TexRef : null;
@@ -390,11 +407,28 @@ public sealed class MainForm : Form
         {
             var data = await DecodeWithReferenceRepairAsync(x);
             Bitmap display;
+            TexRef? appliedPreviewFrame = null;
+            string? previewWarning = null;
             if (x.Width == FrameComposer.Width && x.Height == FrameComposer.Height) display = FrameComposer.PreviewBitmap(data);
             else if (PreviewFrameFor(x) is { } previewFrame)
             {
-                var frameData = await Task.Run(() => _engine.DecodePng(previewFrame));
-                display = FrameComposer.BitmapFrom(CardFrameRenderer.ComposeStoredArtPreview(data, frameData));
+                try
+                {
+                    var oldPathId = previewFrame.PathId;
+                    var frameData = await Task.Run(() => CardFrameResource.DecodeVerified(_engine, previewFrame));
+                    display = FrameComposer.BitmapFrom(CardFrameRenderer.ComposeStoredArtPreview(data, frameData));
+                    appliedPreviewFrame = previewFrame;
+                    if (oldPathId != previewFrame.PathId && _gameRoot is not null && _index is not null)
+                        await Task.Run(() => IndexService.Save(_gameRoot, _index));
+                }
+                catch (Exception frameError)
+                {
+                    // 卡框只是实装效果叠加层，不能因为它失效就让卡图本身也无法查看。
+                    using var stream = new MemoryStream(data);
+                    using var image = Image.FromStream(stream);
+                    display = new Bitmap(image);
+                    previewWarning = $"卡图已正常读取；卡框预览已跳过：{frameError.Message}";
+                }
             }
             else { using var s = new MemoryStream(data); using var im = Image.FromStream(s); display = new Bitmap(im); }
             if (generation != _previewGeneration || !ReferenceEquals(Selected(), x)) { display.Dispose(); return; }
@@ -410,13 +444,15 @@ public sealed class MainForm : Form
                 }
                 else frameLine = "\n卡框：尚未单独合成  ·  点击右下角“卡框选择／编辑”修复白框或选择卡框";
             }
-            else if (PreviewFrameFor(x) is { } normalFrame)
+            else if (appliedPreviewFrame is { } normalFrame)
             {
                 var window = x.Height == 1024 ? $"灵摆显示区 512×{CardFrameCatalog.PendulumVisibleStorageHeight} → 完整 512×1024 纹理" : "标准插图区 → 512×512 存储";
                 frameLine = $"\n实装预览：{normalFrame.Name} · {CardFrameCatalog.FriendlyName(normalFrame.Name)}  ·  {window}";
             }
+            else if (previewWarning is not null) frameLine = "\n实装卡框：暂不可用，当前显示原始卡图";
             if (x.HasMonsterAnimation) frameLine += "\n怪兽动画：双击动画分类中的卡图，或点击“原始动画资源”，查看 PNG / Atlas / JSON";
             _info.Text = $"{x.Name}  ·  {x.Category}\n{x.Width} × {x.Height}   PathID {x.PathId}\n{x.RelativeBundlePath}{frameLine}";
+            if (previewWarning is not null) _status.Text = previewWarning;
         }
         catch (Exception ex)
         {
@@ -496,6 +532,7 @@ public sealed class MainForm : Form
             UseWaitCursor = true;
             await Task.Run(() =>
             {
+                if (isOverFrame) OverFrameService.EnsureGameStopped(_gameRoot);
                 File.Copy(backup, x.BundlePath, true);
                 if (isOverFrame) _overFrames.Disable(_gameRoot, cardId);
                 var reloaded = _engine.ScanBundle(x.BundlePath, _assetRoot!, x.SourceKind, includeDependencies: false).Textures
@@ -555,12 +592,17 @@ public sealed class MainForm : Form
         try
         {
             var mappings = await Task.Run(() => _overFrames.ReadCached(_gameRoot));
-            var ids = mappings.Select(x => x.CardId.ToString()).ToHashSet(StringComparer.Ordinal);
+            var registeredIds = mappings.Select(x => x.CardId).ToHashSet();
+            var savedIds = OverFrameArtStore.SavedCardIds(_gameRoot);
+            var ids = registeredIds.Concat(savedIds).Select(x => x.ToString()).ToHashSet(StringComparer.Ordinal);
             foreach (var x in _textures.Where(x => x.SourceKind == "本地卡图" && x.CardKey.Length > 0))
             {
                 if (ids.Contains(x.CardKey)) x.Category = "超框卡图";
                 else if (x.Category == "超框卡图") IndexService.NormalizeLocalCardCategory(x);
             }
+            var missing = savedIds.Where(x => !registeredIds.Contains(x)).ToArray();
+            if (missing.Length > 0)
+                _status.Text += $" 检测到游戏更新重置了 {missing.Length} 张超框登记（{string.Join("、", missing)}）；请退出游戏后打开“超框表”并点“恢复已保存超框”。";
         }
         catch { }
     }

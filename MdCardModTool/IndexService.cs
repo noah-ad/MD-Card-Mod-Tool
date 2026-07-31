@@ -63,7 +63,11 @@ public static class IndexService
             if (count % 100 == 0 || count == files.Count) progress?.Invoke(count, files.Count, bag.Count);
         });
         foreach (var frame in GetCardFrames(gameRoot)) bag.Add(frame);
-        return new GameIndex { Textures = bag.OrderBy(x => x.SourceKind).ThenBy(x => x.Category).ThenBy(x => x.Name).ToList() };
+        return new GameIndex
+        {
+            CardFrameDataStamp = CardFrameDataStamp(gameRoot),
+            Textures = bag.OrderBy(x => x.SourceKind).ThenBy(x => x.Category).ThenBy(x => x.Name).ToList()
+        };
     }
 
     public static void BuildAndSave(string gameRoot, Action<int, int, int>? progress = null)
@@ -81,6 +85,7 @@ public static class IndexService
         Save(gameRoot, new GameIndex
         {
             Textures = textures.ToList(),
+            CardFrameDataStamp = existing?.CardFrameDataStamp ?? "",
             AlternateArtIndexVersion = existing?.AlternateArtIndexVersion ?? 0,
             CheckedLocalBundlePaths = existing?.CheckedLocalBundlePaths ?? []
         });
@@ -108,8 +113,39 @@ public static class IndexService
         }
         index.Textures.RemoveAll(x => x.SourceKind == "卡框资源");
         index.Textures.AddRange(GetCardFrames(gameRoot));
+        index.CardFrameDataStamp = CardFrameDataStamp(gameRoot);
         index.Textures.Sort((a, b) => string.Compare($"{a.SourceKind}\0{a.Category}\0{a.Name}\0{a.Width:D8}", $"{b.SourceKind}\0{b.Category}\0{b.Name}\0{b.Width:D8}", StringComparison.Ordinal));
         File.WriteAllText(cache, JsonSerializer.Serialize(index));
+    }
+
+    /// <summary>
+    /// 游戏更新会重排 data.unity3d 中的 Texture2D PathID。只在文件指纹变化时
+    /// 重读这一只 Bundle，避免重扫 LocalData，也避免旧 PathID 命中无关的 128×128 贴图。
+    /// </summary>
+    public static bool RefreshCardFramesIfChanged(string gameRoot, GameIndex index, bool force = false)
+    {
+        var stamp = CardFrameDataStamp(gameRoot);
+        var existing = index.Textures
+            .Where(x => x.SourceKind == "卡框资源" && x.Name.StartsWith("card_frame", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (!force && stamp.Length > 0 && index.CardFrameDataStamp == stamp &&
+            existing.Any(x => x.Name == "card_frame01" && x.Width == 704 && x.Height == 1024))
+            return false;
+
+        var current = GetCardFrames(gameRoot).ToArray();
+        if (current.Length == 0) throw new InvalidDataException("当前 data.unity3d 中没有找到 704×1024 card_frame。");
+        index.Textures.RemoveAll(x => x.SourceKind == "卡框资源");
+        index.Textures.AddRange(current);
+        index.CardFrameDataStamp = stamp;
+        return true;
+    }
+
+    public static string CardFrameDataStamp(string gameRoot)
+    {
+        var path = Path.Combine(gameRoot, "masterduel_Data", "data.unity3d");
+        if (!File.Exists(path)) return "";
+        var file = new FileInfo(path);
+        return $"{file.Length:X}-{file.LastWriteTimeUtc.Ticks:X}";
     }
 
     static IEnumerable<TexRef> GetCardFrames(string gameRoot)
