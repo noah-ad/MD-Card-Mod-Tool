@@ -137,7 +137,7 @@ public sealed class ImageCropForm : Form
         var generation = ++_frameGeneration; _mapping.Text = "正在读取卡框与实际插图区…";
         try
         {
-            var bytes = await Task.Run(() => _engine.DecodePng(choice.Texture));
+            var bytes = await Task.Run(() => CardFrameResource.DecodeVerified(_engine, choice.Texture));
             var frame = FrameComposer.BitmapFrom(bytes);
             if (generation != _frameGeneration) { frame.Dispose(); return; }
             _canvas.SetFrame(frame);
@@ -177,10 +177,21 @@ public readonly record struct ImageRenderSpec(float VisualWidth, float VisualHei
 
 public static class ImageCropService
 {
+    const int SafeDrawingPreviewEdge = 4096;
+
     public static Bitmap LoadPreview(string sourcePath)
     {
         using var image = SharpImage.Load<Rgba32>(sourcePath);
         image.Mutate(context => context.AutoOrient());
+        // GDI+ 对超大手机照片执行 DrawImage 时会直接抛 OverflowException。
+        // 裁剪输出最大只有 704×1024，4096 边长足以保留预览与最终输出细节。
+        if (image.Width > SafeDrawingPreviewEdge || image.Height > SafeDrawingPreviewEdge)
+            image.Mutate(context => context.Resize(new ResizeOptions
+            {
+                Size = new SharpSize(SafeDrawingPreviewEdge, SafeDrawingPreviewEdge),
+                Mode = ResizeMode.Max,
+                Sampler = KnownResamplers.Lanczos3
+            }));
         using var stream = new MemoryStream(); image.Save(stream, new PngEncoder()); stream.Position = 0;
         using var drawingImage = System.Drawing.Image.FromStream(stream);
         return new Bitmap(drawingImage);
@@ -189,7 +200,10 @@ public static class ImageCropService
     /// <summary>按用户看到的卡框插图区布局作图，再非等比映射为游戏要求的存储纹理。</summary>
     public static byte[] RenderToTarget(string sourcePath, ImageRenderSpec spec, int targetWidth, int targetHeight, int? visibleTargetHeight = null)
     {
-        if (spec.VisualWidth <= 0 || spec.VisualHeight <= 0 || spec.ImageScale <= 0) throw new ArgumentException("裁剪布局无效。", nameof(spec));
+        if (!float.IsFinite(spec.VisualWidth) || !float.IsFinite(spec.VisualHeight) || !float.IsFinite(spec.ImageScale) ||
+            !float.IsFinite(spec.OffsetX) || !float.IsFinite(spec.OffsetY) ||
+            spec.VisualWidth <= 0 || spec.VisualHeight <= 0 || spec.ImageScale <= 0)
+            throw new ArgumentException("裁剪布局包含无效尺寸或坐标。", nameof(spec));
         var mappedHeight = visibleTargetHeight ?? targetHeight;
         if (mappedHeight <= 0 || mappedHeight > targetHeight) throw new ArgumentOutOfRangeException(nameof(visibleTargetHeight), "显示区高度必须位于输出纹理范围内。");
         using var source = LoadPreview(sourcePath);
@@ -207,6 +221,7 @@ public static class ImageCropService
             var left = spec.VisualWidth / 2f + spec.OffsetX - visualWidth / 2f;
             var top = spec.VisualHeight / 2f + spec.OffsetY - visualHeight / 2f;
             var destination = new RectangleF(left * scaleX, top * scaleY, visualWidth * scaleX, visualHeight * scaleY);
+            if (!IsFinitePositive(destination)) throw new ArgumentException("裁剪后的绘制区域无效，请双击画面恢复铺满后重试。", nameof(spec));
             graphics.DrawImage(source, destination);
         }
         using var stream = new MemoryStream(); output.Save(stream, ImageFormat.Png); return stream.ToArray();
@@ -234,6 +249,11 @@ public static class ImageCropService
             .Resize(new ResizeOptions { Size = new SharpSize(targetWidth, targetHeight), Mode = ResizeMode.Stretch, Sampler = KnownResamplers.Lanczos3 }));
         using var output = new MemoryStream(); image.Save(output, new PngEncoder()); return output.ToArray();
     }
+
+    static bool IsFinitePositive(RectangleF rectangle) =>
+        float.IsFinite(rectangle.X) && float.IsFinite(rectangle.Y) &&
+        float.IsFinite(rectangle.Width) && float.IsFinite(rectangle.Height) &&
+        rectangle.Width > 0 && rectangle.Height > 0;
 }
 
 public sealed class CropCanvas : Control
@@ -332,7 +352,13 @@ public sealed class CropCanvas : Control
 
     public void SetFrame(Bitmap frame)
     {
-        _frame?.Dispose(); _frame = frame; _artWindow = CardFrameRenderer.FindArtWindow(frame); ResetView(); Invalidate();
+        var artWindow = CardFrameRenderer.FindArtWindow(frame);
+        var previous = _frame;
+        _frame = frame;
+        _artWindow = artWindow;
+        previous?.Dispose();
+        ResetView();
+        Invalidate();
     }
 
     public void DisposeFrame() { _frame?.Dispose(); _frame = null; }
@@ -395,46 +421,72 @@ public sealed class CropCanvas : Control
 
     protected override void OnPaint(PaintEventArgs e)
     {
-        base.OnPaint(e); var graphics = e.Graphics; CardFrameRenderer.Configure(graphics);
-        var work = WorkRectangle;
-        if (_frame is not null)
+        base.OnPaint(e);
+        try
         {
-            var card = CardRectangle;
-            using (var shadow = new SolidBrush(Color.FromArgb(90, 0, 0, 0))) graphics.FillRectangle(shadow, card.Left + 9, card.Top + 10, card.Width, card.Height);
-            if (_fullCardOverlay)
+            var graphics = e.Graphics; CardFrameRenderer.Configure(graphics);
+            var work = WorkRectangle;
+            if (_frame is not null)
             {
-                graphics.FillRectangle(Brushes.White, card);
-                graphics.DrawImage(_frame, card);
-                var state = graphics.Save(); graphics.SetClip(card);
-                if (_source is not null) graphics.DrawImage(_source, ImageRectangle);
-                graphics.Restore(state);
+                var card = CardRectangle;
+                using (var shadow = new SolidBrush(Color.FromArgb(90, 0, 0, 0))) graphics.FillRectangle(shadow, card.Left + 9, card.Top + 10, card.Width, card.Height);
+                if (_fullCardOverlay)
+                {
+                    graphics.FillRectangle(Brushes.White, card);
+                    DrawImageSafe(graphics, _frame, card);
+                    var state = graphics.Save();
+                    try
+                    {
+                        graphics.SetClip(card);
+                        if (_source is not null) DrawImageSafe(graphics, _source, ImageRectangle);
+                    }
+                    finally { graphics.Restore(state); }
+                }
+                else
+                {
+                    graphics.FillRectangle(Brushes.White, card);
+                    var state = graphics.Save();
+                    try
+                    {
+                        graphics.SetClip(work); graphics.FillRectangle(Brushes.White, work);
+                        if (_source is not null) DrawImageSafe(graphics, _source, ImageRectangle);
+                    }
+                    finally { graphics.Restore(state); }
+                    DrawImageSafe(graphics, _frame, card);
+                }
             }
             else
             {
-                graphics.FillRectangle(Brushes.White, card);
-                var state = graphics.Save(); graphics.SetClip(work); graphics.FillRectangle(Brushes.White, work);
-                if (_source is not null) graphics.DrawImage(_source, ImageRectangle);
-                graphics.Restore(state);
-                graphics.DrawImage(_frame, card);
+                DrawCheckerboard(graphics, work);
+                if (_source is not null) DrawImageSafe(graphics, _source, ImageRectangle);
+                using var shade = new SolidBrush(Color.FromArgb(185, 3, 7, 14));
+                graphics.FillRectangle(shade, 0, 0, Width, Math.Max(0, work.Top));
+                graphics.FillRectangle(shade, 0, work.Bottom, Width, Math.Max(0, Height - work.Bottom));
+                graphics.FillRectangle(shade, 0, work.Top, Math.Max(0, work.Left), work.Height);
+                graphics.FillRectangle(shade, work.Right, work.Top, Math.Max(0, Width - work.Right), work.Height);
             }
+            using var grid = new Pen(Color.FromArgb(80, 235, 244, 255), 1f);
+            graphics.DrawLine(grid, work.Left + work.Width / 3f, work.Top, work.Left + work.Width / 3f, work.Bottom);
+            graphics.DrawLine(grid, work.Left + work.Width * 2f / 3f, work.Top, work.Left + work.Width * 2f / 3f, work.Bottom);
+            graphics.DrawLine(grid, work.Left, work.Top + work.Height / 3f, work.Right, work.Top + work.Height / 3f);
+            graphics.DrawLine(grid, work.Left, work.Top + work.Height * 2f / 3f, work.Right, work.Top + work.Height * 2f / 3f);
+            using var border = new Pen(UiTheme.Primary, 2f); graphics.DrawRectangle(border, work.X, work.Y, work.Width, work.Height);
+            DrawCorners(graphics, work);
         }
-        else
+        catch (Exception ex) when (ex is OverflowException or ArgumentException or System.Runtime.InteropServices.ExternalException)
         {
-            DrawCheckerboard(graphics, work);
-            if (_source is not null) graphics.DrawImage(_source, ImageRectangle);
-            using var shade = new SolidBrush(Color.FromArgb(185, 3, 7, 14));
-            graphics.FillRectangle(shade, 0, 0, Width, Math.Max(0, work.Top));
-            graphics.FillRectangle(shade, 0, work.Bottom, Width, Math.Max(0, Height - work.Bottom));
-            graphics.FillRectangle(shade, 0, work.Top, Math.Max(0, work.Left), work.Height);
-            graphics.FillRectangle(shade, work.Right, work.Top, Math.Max(0, Width - work.Right), work.Height);
+            e.Graphics.Clear(BackColor);
+            using var brush = new SolidBrush(UiTheme.Danger);
+            e.Graphics.DrawString("预览绘制失败，请双击恢复画面或换一张图片。\n" + ex.Message, Font, brush, new RectangleF(24, 24, Math.Max(1, Width - 48), Math.Max(1, Height - 48)));
         }
-        using var grid = new Pen(Color.FromArgb(80, 235, 244, 255), 1f);
-        graphics.DrawLine(grid, work.Left + work.Width / 3f, work.Top, work.Left + work.Width / 3f, work.Bottom);
-        graphics.DrawLine(grid, work.Left + work.Width * 2f / 3f, work.Top, work.Left + work.Width * 2f / 3f, work.Bottom);
-        graphics.DrawLine(grid, work.Left, work.Top + work.Height / 3f, work.Right, work.Top + work.Height / 3f);
-        graphics.DrawLine(grid, work.Left, work.Top + work.Height * 2f / 3f, work.Right, work.Top + work.Height * 2f / 3f);
-        using var border = new Pen(UiTheme.Primary, 2f); graphics.DrawRectangle(border, work.X, work.Y, work.Width, work.Height);
-        DrawCorners(graphics, work);
+    }
+
+    static void DrawImageSafe(Graphics graphics, Bitmap image, RectangleF destination)
+    {
+        if (!float.IsFinite(destination.X) || !float.IsFinite(destination.Y) ||
+            !float.IsFinite(destination.Width) || !float.IsFinite(destination.Height) ||
+            destination.Width <= 0 || destination.Height <= 0) return;
+        graphics.DrawImage(image, destination);
     }
 
     static void DrawCheckerboard(Graphics graphics, RectangleF area)

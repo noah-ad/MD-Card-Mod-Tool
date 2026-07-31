@@ -511,6 +511,17 @@ internal static class Program
             Console.WriteLine($"{info.Name}; {info.BundleCount} bundles; {info.TotalSize} bytes");
             return;
         }
+        if (args.Length == 2 && args[0] == "--inspect-mod-state")
+        {
+            var local = IndexService.FindLocalRoot(args[1]) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");
+            var cache = IndexService.CachePath(local, IndexService.StreamingRoot(args[1]));
+            var index = File.Exists(cache) ? JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(cache)) ?? new GameIndex() : new GameIndex();
+            var service = new ModPackageService();
+            service.RefreshFlags(args[1], index.Textures);
+            var summary = service.GetChangeSummary(args[1], index.Textures);
+            Console.WriteLine($"bundles={summary.BundleCount}; animation={summary.AnimationBundleCount}; overframeGate={summary.OverFrameGateBundleCount}; imageResources={index.Textures.Count(x => x.IsModded)}; cardFramesMarked={index.Textures.Count(x => x.IsModded && x.SourceKind == "卡框资源")}");
+            return;
+        }
         if (args.Length == 3 && args[0] == "--import-mods")
         {
             var result = new ModPackageService().Import(args[1], args[2]);
@@ -533,6 +544,69 @@ internal static class Program
             var root = Path.GetFullPath(args[2]);
             foreach (var texture in new ModEngine().ScanBundle(bundle, root, "诊断", includeDependencies: false).Textures)
                 Console.WriteLine($"{texture.Name}; {texture.Width}x{texture.Height}; PathID={texture.PathId}; file={texture.AssetFileName}; {texture.RelativeBundlePath}");
+            return;
+        }
+        if (args.Length == 2 && args[0] == "--inspect-text-assets")
+        {
+            foreach (var asset in new ModEngine().ReadTextAssets(Path.GetFullPath(args[1])))
+                Console.WriteLine($"{asset.Name}; bytes={asset.Data.Length}; PathID={asset.PathId}; file={asset.AssetFileName}; path={asset.PathName}");
+            return;
+        }
+        if (args.Length == 2 && args[0] == "--inspect-overframe")
+        {
+            var service = new OverFrameService();
+            var gate = service.FindGate(args[1], (done, total) => Console.WriteLine($"scan={done}/{total}"));
+            var mappings = service.Read(args[1]);
+            Console.WriteLine($"gate={gate.RelativeBundlePath}; bytes={gate.Data.Length}; PathID={gate.PathId}; file={gate.AssetFileName}; mappings={mappings.Count}");
+            foreach (var item in mappings.Where(x => x.CardId is 13670 or 22747))
+                Console.WriteLine($"{item.CardId}->{item.ArtId}");
+            return;
+        }
+        if (args.Length == 2 && args[0] == "--repair-overframe")
+        {
+            var service = new OverFrameService();
+            var result = service.ReapplySavedCards(args[1]);
+            Console.WriteLine($"gate={result.GateLocation}; saved={result.SavedCardCount}; changed={result.ChangedMappingCount}; total={result.TotalMappingCount}");
+            return;
+        }
+        if (args.Length == 2 && args[0] == "--test-overframe-form")
+        {
+            ApplicationConfiguration.Initialize();
+            using var form = new OverFrameForm(args[1], "22747") { Opacity = 0, ShowInTaskbar = false };
+            form.Show();
+            var list = (ListView?)typeof(OverFrameForm).GetField("_mappings", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            var status = (Label?)typeof(OverFrameForm).GetField("_status", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            var deadline = DateTime.UtcNow.AddSeconds(20);
+            while (DateTime.UtcNow < deadline && (list?.Items.Count ?? 0) == 0 && status?.Text.Contains("失败", StringComparison.Ordinal) != true)
+            {
+                Application.DoEvents();
+                Thread.Sleep(25);
+            }
+            var hasTarget = list?.Items.Cast<ListViewItem>().Any(x => x.Text == "22747" && x.SubItems.Count > 1 && x.SubItems[1].Text == "22747") == true;
+            var locationOk = status?.Text.Contains(Path.Combine("masterduel_Data", "data.unity3d"), StringComparison.OrdinalIgnoreCase) == true;
+            Console.WriteLine($"items={list?.Items.Count}; target22747={hasTarget}; coreLocation={locationOk}; status={status?.Text}");
+            form.Close();
+            if (!hasTarget || !locationOk) Environment.ExitCode = 2;
+            return;
+        }
+        if (args.Length == 2 && args[0] == "--test-overframe-repair")
+        {
+            var gameRoot = Path.GetFullPath(args[1]);
+            var service = new OverFrameService();
+            var beforeGate = service.FindGate(gameRoot);
+            var beforeHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(beforeGate.BundlePath)));
+            var before = service.Read(gameRoot);
+            var saved = OverFrameArtStore.SavedCardIds(gameRoot);
+            var repaired = service.ReapplySavedCards(gameRoot);
+            var after = service.Read(gameRoot);
+            var active = after.Where(x => x.UsesOwnArt).Select(x => x.CardId).ToHashSet();
+            var allRestored = saved.All(active.Contains);
+            var backupFound = service.HasBackup(gameRoot);
+            service.RestoreBackup(gameRoot);
+            var restoredGate = service.FindGate(gameRoot);
+            var restoredHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(restoredGate.BundlePath)));
+            Console.WriteLine($"gate={beforeGate.RelativeBundlePath}; before={before.Count}; saved={saved.Count}; changed={repaired.ChangedMappingCount}; after={after.Count}; allRestored={allRestored}; backup={backupFound}; restoredHash={restoredHash == beforeHash}");
+            if (!allRestored || !backupFound || restoredHash != beforeHash) Environment.ExitCode = 2;
             return;
         }
         if (args.Length == 3 && args[0] == "--export-portable-index")
@@ -624,6 +698,60 @@ internal static class Program
             var png = engine.DecodePng(texture, 512);
             Console.WriteLine($"card={args[2]}; expectedPathId={expectedPathId}; resolvedPathId={resolved.PathId}; assetFile={resolved.AssetFileName}; pngBytes={png.Length}");
             if (resolved.PathId != expectedPathId || png.Length < 100) Environment.ExitCode = 2;
+            return;
+        }
+        if (args.Length == 3 && args[0] == "--test-card-frame-recovery")
+        {
+            var gameRoot = args[1];
+            var local = IndexService.FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");
+            var cache = IndexService.CachePath(local, IndexService.StreamingRoot(gameRoot));
+            var index = File.Exists(cache)
+                ? JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(cache)) ?? new GameIndex()
+                : throw new FileNotFoundException("缺少本地索引。", cache);
+            index.CardFrameDataStamp = "stale-game-build";
+            var refreshed = IndexService.RefreshCardFramesIfChanged(gameRoot, index);
+            var frame = index.Textures.First(x => x.SourceKind == "卡框资源" && x.Name == "card_frame01" && x.Width == 704 && x.Height == 1024);
+            var card = index.Textures.First(x => x.SourceKind == "本地卡图" && x.CardKey == args[2]);
+            var engine = new ModEngine();
+            var dataBundle = Path.Combine(gameRoot, "masterduel_Data", "data.unity3d");
+            var wrong = engine.ScanBundle(dataBundle, gameRoot, "卡框资源", includeDependencies: false).Textures
+                .First(x => x.Width == 128 && x.Height == 128);
+            frame.PathId = wrong.PathId;
+            frame.AssetFileName = wrong.AssetFileName;
+            var wrongPng = engine.DecodePng(frame);
+            var wrongInfo = SixLabors.ImageSharp.Image.Identify(wrongPng) ?? throw new InvalidDataException("串位贴图无法识别。");
+            var recoveredFrame = CardFrameResource.DecodeVerified(engine, frame);
+            var recoveredInfo = SixLabors.ImageSharp.Image.Identify(recoveredFrame) ?? throw new InvalidDataException("恢复后的卡框无法识别。");
+            var cardPng = engine.DecodePng(card);
+            var composed = CardFrameRenderer.ComposeStoredArtPreview(cardPng, recoveredFrame);
+            var composedInfo = SixLabors.ImageSharp.Image.Identify(composed) ?? throw new InvalidDataException("合成预览无法识别。");
+            Console.WriteLine($"indexRefreshed={refreshed}; wrong={wrong.Name}:{wrongInfo.Width}x{wrongInfo.Height}; recovered={frame.Name}:PathID={frame.PathId}:{recoveredInfo.Width}x{recoveredInfo.Height}; card={args[2]}; preview={composedInfo.Width}x{composedInfo.Height}");
+            if (!refreshed || wrongInfo.Width != 128 || recoveredInfo.Width != 704 || recoveredInfo.Height != 1024 || composedInfo.Width != 704 || composedInfo.Height != 1024)
+                Environment.ExitCode = 2;
+            return;
+        }
+        if (args.Length == 2 && args[0] == "--test-safe-large-crop")
+        {
+            var temporary = Path.Combine(Path.GetTempPath(), "MDCardModTool", "wide-source-" + Guid.NewGuid().ToString("N") + ".png");
+            Directory.CreateDirectory(Path.GetDirectoryName(temporary)!);
+            try
+            {
+                using (var source = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(33_000, 100))
+                {
+                    source.Mutate(x => x.BackgroundColor(SixLabors.ImageSharp.Color.CornflowerBlue));
+                    source.SaveAsPng(temporary);
+                }
+                using var preview = ImageCropService.LoadPreview(temporary);
+                var output = ImageCropService.RenderToTarget(temporary, new ImageRenderSpec(512, 512, 1, 0, 0), 512, 512);
+                File.WriteAllBytes(args[1], output);
+                var result = SixLabors.ImageSharp.Image.Identify(output) ?? throw new InvalidDataException("安全裁剪输出无法识别。");
+                Console.WriteLine($"source=33000x100; safePreview={preview.Width}x{preview.Height}; output={result.Width}x{result.Height}; bytes={output.Length}");
+                if (preview.Width > 4096 || preview.Height > 4096 || result.Width != 512 || result.Height != 512) Environment.ExitCode = 2;
+            }
+            finally
+            {
+                try { File.Delete(temporary); } catch { }
+            }
             return;
         }
         if (args.Length == 4 && args[0] == "--test-texture-write-repair")

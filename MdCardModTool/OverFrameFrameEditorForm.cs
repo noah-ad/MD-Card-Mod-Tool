@@ -130,7 +130,7 @@ public sealed class OverFrameFrameEditorForm : Form
     async Task<byte[]> GetFrameBytesAsync(FrameChoice choice)
     {
         if (_frameCache.TryGetValue(choice.Key, out var cached)) return cached;
-        var bytes = choice.IsCustom ? await File.ReadAllBytesAsync(choice.FilePath!) : await Task.Run(() => _engine.DecodePng(choice.Texture!));
+        var bytes = choice.IsCustom ? await File.ReadAllBytesAsync(choice.FilePath!) : await Task.Run(() => CardFrameResource.DecodeVerified(_engine, choice.Texture!));
         _frameCache[choice.Key] = bytes;
         return bytes;
     }
@@ -205,7 +205,8 @@ public sealed class OverFrameFrameEditorForm : Form
         if (MessageBox.Show(this, $"把“{choice.DisplayName}”合成进卡号 {_cardId} 的高图并写入游戏？\n\n只修改这张卡的 Bundle，不会改全局 card_frame；原 Bundle 与透明原画均已保留。", "确认应用卡框", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
         try
         {
-            UseWaitCursor = true; _status.Text = "正在定位 LocalData 超框表…";
+            UseWaitCursor = true; _status.Text = "正在定位当前版本超框登记表…";
+            OverFrameService.EnsureGameStopped(_gameRoot);
             await Task.Run(() => _overFrames.FindGate(_gameRoot, (done, total) => BeginInvoke(() => _status.Text = $"首次定位超框表：{done:N0}/{total:N0} Bundle…")));
             _status.Text = "正在写入单卡卡框合成图…";
             await Task.Run(() => _engine.Replace(_art, _previewBytes, Path.Combine(_gameRoot, "_MD卡图备份", _art.SourceKind)));

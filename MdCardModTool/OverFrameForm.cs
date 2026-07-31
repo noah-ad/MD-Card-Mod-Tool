@@ -22,12 +22,13 @@ public sealed class OverFrameForm : Form
         var enable = Button("启用／更新", async (_, _) => await EnableAsync(), true);
         var disable = Button("关闭所选", async (_, _) => await DisableAsync());
         var refresh = Button("刷新列表", async (_, _) => await LoadAsync());
+        var repair = Button("恢复已保存超框", async (_, _) => await RepairAsync(), true);
         var restore = Button("还原超框表", async (_, _) => await RestoreAsync());
         var top = new TableLayoutPanel { Dock = DockStyle.Top, Height = 105, Padding = new Padding(12, 10, 12, 8), ColumnCount = 5, RowCount = 3, BackColor = Color.FromArgb(20, 28, 45) };
         top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         top.Controls.Add(Label("显示卡号"), 0, 0); top.Controls.Add(_cardId, 1, 0); top.Controls.Add(Label("高图卡号"), 2, 0); top.Controls.Add(_artId, 3, 0); top.Controls.Add(enable, 4, 0);
-        var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill }; actions.Controls.Add(disable); actions.Controls.Add(refresh); actions.Controls.Add(restore); top.Controls.Add(actions, 0, 1); top.SetColumnSpan(actions, 5);
-        var help = new Label { Text = "超框登记是：显示卡号 → 高图卡号。普通替换时两者填同一个卡号。实际高图须为 704×1024；修改会备份 LocalData 中真正的 of_card_asset，完成后请重启游戏。", AutoSize = true, ForeColor = Color.FromArgb(160, 195, 255) };
+        var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill }; actions.Controls.Add(disable); actions.Controls.Add(refresh); actions.Controls.Add(repair); actions.Controls.Add(restore); top.Controls.Add(actions, 0, 1); top.SetColumnSpan(actions, 5);
+        var help = new Label { Text = "超框登记是：显示卡号 → 高图卡号。实际高图须为 704×1024。工具会自动适配新版 data.unity3d 与旧版 LocalData；游戏更新重置后可点“恢复已保存超框”。写入前请完全退出游戏。", AutoSize = true, ForeColor = Color.FromArgb(160, 195, 255) };
         top.Controls.Add(help, 0, 2); top.SetColumnSpan(help, 5);
         Controls.Add(_mappings); Controls.Add(_status); Controls.Add(top);
         Shown += async (_, _) => await LoadAsync();
@@ -47,11 +48,11 @@ public sealed class OverFrameForm : Form
         {
             var progress = new Action<int, int>((done, total) => BeginInvoke(() => _status.Text = $"首次定位超框表：{done:N0}/{total:N0} Bundle…"));
             var gate = await Task.Run(() => _service.FindGate(_gameRoot, progress));
-            var mappings = await Task.Run(() => _service.Read(_gameRoot));
+            var mappings = OverFrameService.Read(gate);
             _mappings.BeginUpdate(); _mappings.Items.Clear();
             foreach (var x in mappings) _mappings.Items.Add(new ListViewItem([x.CardId.ToString(), x.ArtId.ToString(), x.UsesOwnArt ? "使用本卡高图" : "复用其他卡高图"]) { Tag = x });
             _mappings.EndUpdate();
-            _status.Text = $"已读取 {mappings.Count} 条超框映射  ·  {gate.RelativeBundlePath}  ·  {(await Task.Run(() => _service.HasBackup(_gameRoot)) ? "已有备份" : "首次写入时自动备份")}";
+            _status.Text = $"已读取 {mappings.Count} 条超框映射  ·  {gate.RelativeBundlePath}  ·  {(OverFrameService.HasBackup(_gameRoot, gate) ? "已有备份" : "首次写入时自动备份")}";
         }
         catch (Exception ex) { _status.Text = "读取失败：" + ex.Message; }
         finally { UseWaitCursor = false; }
@@ -88,6 +89,32 @@ public sealed class OverFrameForm : Form
         if (MessageBox.Show(this, "将恢复本工具第一次修改前备份的完整超框表，并覆盖当前超框登记。继续？", "确认还原超框表", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
         try { UseWaitCursor = true; await Task.Run(() => _service.RestoreBackup(_gameRoot)); await LoadAsync(); }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "还原失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        finally { UseWaitCursor = false; }
+    }
+
+    async Task RepairAsync()
+    {
+        var saved = OverFrameArtStore.SavedCardIds(_gameRoot);
+        if (saved.Count == 0)
+        {
+            MessageBox.Show(this, "没有找到已完成保存的超框卡素材。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (MessageBox.Show(this,
+            $"将把本地保存的 {saved.Count} 张超框卡重新登记到当前游戏版本：\n{string.Join("、", saved)}\n\n这用于修复游戏更新后超框失效；不会重新压缩或改动卡图。继续？",
+            "恢复已保存超框", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
+        try
+        {
+            UseWaitCursor = true;
+            var result = await Task.Run(() => _service.ReapplySavedCards(_gameRoot));
+            await LoadAsync();
+            MessageBox.Show(this,
+                result.ChangedMappingCount > 0
+                    ? $"已恢复 {result.ChangedMappingCount} 张超框卡登记。请重新启动 Master Duel。\n\n登记表：{result.GateLocation}"
+                    : $"本地保存的 {result.SavedCardCount} 张超框卡均已登记，无需修改。",
+                "恢复完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "恢复失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         finally { UseWaitCursor = false; }
     }
 }

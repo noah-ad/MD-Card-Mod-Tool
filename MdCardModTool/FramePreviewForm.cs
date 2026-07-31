@@ -54,7 +54,7 @@ public sealed class FramePreviewForm : Form
         var generation = ++_generation; UseWaitCursor = true; _status.Text = "正在合成卡框预览…";
         try
         {
-            var sources = await Task.WhenAll(Task.Run(() => _engine.DecodePng(_art)), Task.Run(() => _engine.DecodePng(choice.Texture)));
+            var sources = await Task.WhenAll(Task.Run(() => _engine.DecodePng(_art)), Task.Run(() => CardFrameResource.DecodeVerified(_engine, choice.Texture)));
             if (generation != _generation) return;
             var composed = await Task.Run(() => _art.Width == FrameComposer.Width && _art.Height == FrameComposer.Height
                 ? FrameComposer.Compose(sources[0], sources[1])

@@ -488,8 +488,14 @@ public sealed class ModEngine
                 assets.file.Write(writer, 0, replacements);
                 serialized = stream.ToArray();
             }
-            using var bundleWriter = new AssetsFileWriter(temporary);
-            bundle.file.Write(bundleWriter, [new BundleReplacerFromMemory(assets.name, assets.name, true, serialized, -1)]);
+            WriteCompressedBundle(bundle.file,
+                [new BundleReplacerFromMemory(assets.name, assets.name, true, serialized, -1)],
+                temporary);
+        }
+        catch
+        {
+            try { if (File.Exists(temporary)) File.Delete(temporary); } catch { }
+            throw;
         }
         finally { manager.UnloadAll(); }
         File.Move(temporary, asset.BundlePath, true);
@@ -537,9 +543,28 @@ public sealed class ModEngine
         var candidates = ScanBundle(texture.ActiveBundlePath, root, texture.SourceKind, includeDependencies: false).Textures;
         if (candidates.Count == 0) return null;
 
-        var resolved = candidates.FirstOrDefault(x => x.PathId == texture.PathId && string.Equals(x.AssetFileName, texture.AssetFileName, StringComparison.Ordinal))
-            ?? candidates.FirstOrDefault(x => string.Equals(x.Name, texture.Name, StringComparison.OrdinalIgnoreCase))
-            ?? candidates.FirstOrDefault(x => texture.CardKey.Length > 0 && x.CardKey == texture.CardKey);
+        // 名称和卡号比 PathID 稳定。游戏更新会整体重排 data.unity3d 的 PathID；
+        // 旧 PathID 仍可能合法，却已经指向 ProfileFrame 等完全无关的贴图。
+        var sameName = candidates.Where(x => texture.Name.Length > 0 && string.Equals(x.Name, texture.Name, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (sameName.Length > 0)
+            return sameName.FirstOrDefault(x => x.Width == texture.Width && x.Height == texture.Height && string.Equals(x.AssetFileName, texture.AssetFileName, StringComparison.Ordinal))
+                ?? sameName.FirstOrDefault(x => x.Width == texture.Width && x.Height == texture.Height)
+                ?? sameName.FirstOrDefault(x => x.PathId == texture.PathId && string.Equals(x.AssetFileName, texture.AssetFileName, StringComparison.Ordinal))
+                ?? (sameName.Length == 1 ? sameName[0] : null);
+
+        var sameCard = candidates.Where(x => texture.CardKey.Length > 0 && x.CardKey == texture.CardKey).ToArray();
+        if (sameCard.Length > 0)
+            return sameCard.FirstOrDefault(x => x.Width == texture.Width && x.Height == texture.Height)
+                ?? (sameCard.Length == 1 ? sameCard[0] : null);
+
+        // card_frame 必须按名称匹配，绝不能因为旧 PathID 碰巧存在就写到别的 UI 贴图。
+        if (texture.SourceKind == "卡框资源" || texture.Name.StartsWith("card_frame", StringComparison.OrdinalIgnoreCase)) return null;
+
+        var resolved = candidates.FirstOrDefault(x =>
+            x.PathId == texture.PathId &&
+            string.Equals(x.AssetFileName, texture.AssetFileName, StringComparison.Ordinal) &&
+            x.Width == texture.Width &&
+            x.Height == texture.Height);
         if (resolved is not null) return resolved;
         var sameSize = candidates.Where(x => x.Width == texture.Width && x.Height == texture.Height).Take(2).ToArray();
         if (sameSize.Length == 1) return sameSize[0];
@@ -663,11 +688,9 @@ public sealed class ModEngine
                 assets.file.Write(writer, 0, replacements);
                 serialized = stream.ToArray();
             }
-            using var bundleWriter = new AssetsFileWriter(temporary);
-            bundle.file.Write(bundleWriter, new List<BundleReplacer>
-            {
-                new BundleReplacerFromMemory(assets.name, assets.name, true, serialized, -1)
-            });
+            WriteCompressedBundle(bundle.file,
+                [new BundleReplacerFromMemory(assets.name, assets.name, true, serialized, -1)],
+                temporary);
         }
         catch
         {
@@ -679,6 +702,29 @@ public sealed class ModEngine
         texture.Width = width;
         texture.Height = height;
         texture.Category = CategoryFor(texture.Name, width, height);
+    }
+
+    /// <summary>
+    /// bundle.Write 会生成未压缩 UnityFS；对 data.unity3d 这类核心包会让文件膨胀一倍以上。
+    /// 先生成可替换的临时包，再按 Unity 常用的 LZ4 重新打包，保持启动与分享体积正常。
+    /// </summary>
+    static void WriteCompressedBundle(AssetBundleFile bundle, List<BundleReplacer> replacements, string outputPath)
+    {
+        var unpacked = outputPath + ".unpacked";
+        try
+        {
+            using (var unpackedWriter = new AssetsFileWriter(unpacked))
+                bundle.Write(unpackedWriter, replacements);
+            using var unpackedReader = new AssetsFileReader(unpacked);
+            var rewrittenBundle = new AssetBundleFile();
+            rewrittenBundle.Read(unpackedReader);
+            using var outputWriter = new AssetsFileWriter(outputPath);
+            rewrittenBundle.Pack(unpackedReader, outputWriter, AssetBundleCompressionType.LZ4);
+        }
+        finally
+        {
+            try { if (File.Exists(unpacked)) File.Delete(unpacked); } catch { }
+        }
     }
 
     public (int Width, int Height) ImageDimensions(string imagePath)
