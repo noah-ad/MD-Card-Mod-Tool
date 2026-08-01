@@ -17,7 +17,7 @@ public sealed class MonsterAnimationForm : Form
     readonly NumericUpDown _scale = new() { Minimum = 10, Maximum = 500, Value = 100, Increment = 5, Width = 88 };
     readonly ComboBox _frameEdge = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110 };
     readonly ComboBox _atlasEdge = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110 };
-    readonly CheckBox _removeGreenScreen = new() { Text = "自动去绿幕", AutoSize = true, ForeColor = UiTheme.Text, BackColor = Color.Transparent };
+    readonly CheckBox _removeGreenScreen = new() { Text = $"自动去绿幕（{MonsterAnimationMedia.GreenScreenKeyHex}）", AutoSize = true, ForeColor = UiTheme.Text, BackColor = Color.Transparent };
     readonly Label _frameLabel = new() { AutoSize = true, ForeColor = UiTheme.Muted, Padding = new Padding(8, 8, 0, 0) };
     readonly Button _play;
     readonly Button _apply;
