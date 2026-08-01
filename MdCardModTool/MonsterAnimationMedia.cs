@@ -66,6 +66,10 @@ public sealed class ExtractedAnimation : IDisposable
 public static class MonsterAnimationMedia
 {
     public const int DefaultMaxFrames = 180;
+    public const string GreenScreenKeyHex = "#00FF00";
+    public const double GreenScreenSimilarity = 0.25;
+    public const double GreenScreenEdgeBlend = 0.08;
+    public const double GreenScreenDespillMix = 0.5;
 
     public static string? FindFfmpeg()
     {
@@ -113,8 +117,8 @@ public static class MonsterAnimationMedia
         };
         if (removeGreenScreen)
         {
-            filters.Add("colorkey=color=0x00FF00:similarity=0.25:blend=0.08");
-            filters.Add("despill=type=green:mix=0.5");
+            filters.Add($"colorkey=color=0x{GreenScreenKeyHex[1..]}:similarity={GreenScreenSimilarity.ToString(CultureInfo.InvariantCulture)}:blend={GreenScreenEdgeBlend.ToString(CultureInfo.InvariantCulture)}");
+            filters.Add($"despill=type=green:mix={GreenScreenDespillMix.ToString(CultureInfo.InvariantCulture)}");
         }
         filters.Add("format=rgba");
         var filter = string.Join(',', filters);
