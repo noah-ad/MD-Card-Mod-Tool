@@ -64,7 +64,7 @@ public sealed class ImageCropForm : Form
         }
 
         UiTheme.ApplyDarkTitleBar(this);
-        Text = $"卡片实装裁剪 · {purpose}"; StartPosition = FormStartPosition.CenterParent; Size = new Size(1180, 850); MinimumSize = new Size(900, 660);
+        Text = $"卡片实装裁剪 · {purpose}"; StartPosition = FormStartPosition.CenterParent; Size = new Size(1080, 780); MinimumSize = new Size(720, 540);
         BackColor = UiTheme.Window; ForeColor = UiTheme.Text; Font = new Font("Microsoft YaHei UI", 9F); KeyPreview = true;
 
         var title = new Label { Text = fullCardOverlay ? "超框实装构图" : choices.Length > 0 ? "卡片实装构图" : "固定比例裁剪", Dock = DockStyle.Top, Height = 30, ForeColor = UiTheme.Text, Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Bold) };
@@ -100,8 +100,14 @@ public sealed class ImageCropForm : Form
         actionRow.Controls.Add(apply); actionRow.Controls.Add(cancel);
         var resetRow = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 48, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Padding = new Padding(0, 4, 0, 4), BackColor = UiTheme.Surface };
         resetRow.Controls.Add(fill); resetRow.Controls.Add(whole);
-        var side = new Panel { Dock = DockStyle.Fill, BackColor = UiTheme.Surface, Padding = new Padding(18) };
-        side.Controls.Add(actionRow); side.Controls.Add(help); side.Controls.Add(resetRow); side.Controls.Add(_zoomValue); side.Controls.Add(_zoom); side.Controls.Add(zoomTitle); side.Controls.Add(_mapping); side.Controls.Add(_frames); side.Controls.Add(frameTitle);
+        var sideContent = new Panel { Dock = DockStyle.Top, AutoSize = true, BackColor = UiTheme.Surface, Padding = new Padding(16, 12, 16, 8) };
+        sideContent.Controls.Add(help); sideContent.Controls.Add(resetRow); sideContent.Controls.Add(_zoomValue); sideContent.Controls.Add(_zoom); sideContent.Controls.Add(zoomTitle); sideContent.Controls.Add(_mapping); sideContent.Controls.Add(_frames); sideContent.Controls.Add(frameTitle);
+        var sideScroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = UiTheme.Surface };
+        sideScroll.Controls.Add(sideContent);
+        sideScroll.Resize += (_, _) => sideContent.Width = Math.Max(240, sideScroll.ClientSize.Width - (sideScroll.VerticalScroll.Visible ? SystemInformation.VerticalScrollBarWidth : 0));
+        var side = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Surface, RowCount = 2, ColumnCount = 1 };
+        side.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); side.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
+        side.Controls.Add(sideScroll, 0, 0); side.Controls.Add(actionRow, 0, 1);
 
         var canvasFrame = new BorderPanel { Dock = DockStyle.Fill, BackColor = UiTheme.SurfaceAlt, Padding = new Padding(1), Margin = new Padding(14, 14, 7, 14) };
         canvasFrame.Controls.Add(_canvas);

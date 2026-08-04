@@ -20,6 +20,7 @@ public static class UiTheme
 
     public static void ApplyDarkTitleBar(Form form)
     {
+        form.AutoScaleMode = AutoScaleMode.Dpi;
         form.HandleCreated += (_, _) =>
         {
             if (!OperatingSystem.IsWindows()) return;
@@ -27,6 +28,22 @@ public static class UiTheme
             if (DwmSetWindowAttribute(form.Handle, 20, ref enabled, sizeof(int)) != 0)
                 DwmSetWindowAttribute(form.Handle, 19, ref enabled, sizeof(int));
         };
+        form.Shown += (_, _) => KeepInsideWorkingArea(form);
+        form.DpiChanged += (_, _) => form.BeginInvoke(() => KeepInsideWorkingArea(form));
+    }
+
+    static void KeepInsideWorkingArea(Form form)
+    {
+        if (form.WindowState != FormWindowState.Normal) return;
+        var area = Screen.FromControl(form).WorkingArea;
+        var maximum = new Size(Math.Max(720, (int)(area.Width * 0.96)), Math.Max(540, (int)(area.Height * 0.94)));
+        if (form.MinimumSize.Width > maximum.Width || form.MinimumSize.Height > maximum.Height)
+            form.MinimumSize = new Size(Math.Min(form.MinimumSize.Width, maximum.Width), Math.Min(form.MinimumSize.Height, maximum.Height));
+        var width = Math.Min(form.Width, maximum.Width);
+        var height = Math.Min(form.Height, maximum.Height);
+        if (form.Width != width || form.Height != height) form.Size = new Size(width, height);
+        if (form.Right > area.Right || form.Bottom > area.Bottom || form.Left < area.Left || form.Top < area.Top)
+            form.Location = new Point(area.Left + Math.Max(0, (area.Width - form.Width) / 2), area.Top + Math.Max(0, (area.Height - form.Height) / 2));
     }
 
     [DllImport("dwmapi.dll")]

@@ -38,7 +38,7 @@ public sealed class MainForm : Form
     public MainForm()
     {
         UiTheme.ApplyDarkTitleBar(this);
-        Text = "MD 卡图查看替换器"; StartPosition = FormStartPosition.CenterScreen; MinimumSize = new Size(1180, 760); Size = new Size(1480, 900);
+        Text = "MD 卡图查看替换器"; StartPosition = FormStartPosition.CenterScreen; MinimumSize = new Size(900, 640); Size = new Size(1400, 860);
         BackColor = UiTheme.Window; ForeColor = UiTheme.Text; Font = new Font("Microsoft YaHei UI", 9F); AutoScaleMode = AutoScaleMode.Dpi; KeyPreview = true;
         UiTheme.StyleTextBox(_gameFolder); UiTheme.StyleTextBox(_search); UiTheme.StyleComboBox(_category); UiTheme.StyleTree(_groups); UiTheme.StyleList(_list);
         _list.Columns.Add("资源名称", 205); _list.Columns.Add("来源 / 分类", 190); _list.Columns.Add("尺寸", 100); _list.Columns.Add("Bundle 路径", 360);
@@ -55,25 +55,39 @@ public sealed class MainForm : Form
         _category.Items.Add("全部"); _category.SelectedIndex = 0; _category.SelectedIndexChanged += (_, _) => RenderList();
         _groups.AfterSelect += (_, e) => SelectGroup(e.Node?.Tag as string);
         var choose = Button("选择目录", async (_, _) => await ChooseGameAsync()); var scan = Button("重建索引", async (_, _) => await RebuildIndexAsync());
-        var replace = Button("替换所选", async (_, _) => await ReplaceSelectedAsync(), ButtonTone.Primary); var export = Button("导出 PNG", async (_, _) => await ExportSelectedAsync());
-        var backup = Button("打开备份", (_, _) => OpenBackup()); var restore = Button("还原所选", async (_, _) => await RestoreSelectedAsync(), ButtonTone.Danger); var inspect = Button("检查 Bundle", async (_, _) => await InspectSelectedAsync());
-        var overFrameReplace = Button("超框替换", async (_, _) => await OverFrameReplaceAsync(), ButtonTone.Gold); var frameEditor = Button("卡框选择 / 编辑", async (_, _) => await OpenFrameEditorAsync()); var framePreview = Button("卡框预览", (_, _) => OpenFramePreview()); var overFrameTable = Button("超框表", (_, _) => OpenOverFrameTable()); var monsterAnimation = Button("怪兽动画", (_, _) => OpenMonsterAnimation(), ButtonTone.Gold); var rawAnimationAssets = Button("原始动画资源", (_, _) => OpenRawAnimationAssets());
+        var replace = Button("替换卡图", async (_, _) => await ReplaceSelectedAsync(), ButtonTone.Primary); var export = Button("导出 PNG", async (_, _) => await ExportSelectedAsync());
+        var restore = Button("还原所选", async (_, _) => await RestoreSelectedAsync(), ButtonTone.Danger);
+        var overFrameReplace = Button("超框替换", async (_, _) => await OverFrameReplaceAsync(), ButtonTone.Gold);
+        var monsterAnimation = Button("动画替换", (_, _) => OpenMonsterAnimation(), ButtonTone.Gold);
         _modsOnlyButton = Button("只看我的 Mod", (_, _) => ToggleModsOnly(), ButtonTone.Gold);
         _scanMissingButton = Button("定位卡图", async (_, _) => await ScanMissingCardAsync(), ButtonTone.Neutral);
         var exportMods = Button("一键导出全部 Mod", async (_, _) => await ExportAllModsAsync(), ButtonTone.Primary);
         var importMods = Button("导入 Mod 包", async (_, _) => await ImportModsAsync());
+        var moreTools = Button("更多工具 ▾", (_, _) => { });
+        var toolMenu = new ContextMenuStrip { BackColor = UiTheme.Elevated, ForeColor = UiTheme.Text, Font = Font, ShowImageMargin = false };
+        toolMenu.Items.Add("卡框选择 / 编辑", null, async (_, _) => await OpenFrameEditorAsync());
+        toolMenu.Items.Add("卡框预览", null, (_, _) => OpenFramePreview());
+        toolMenu.Items.Add("超框登记表", null, (_, _) => OpenOverFrameTable());
+        toolMenu.Items.Add(new ToolStripSeparator());
+        toolMenu.Items.Add("原始动画资源", null, (_, _) => OpenRawAnimationAssets());
+        toolMenu.Items.Add("检查 Bundle", null, async (_, _) => await InspectSelectedAsync());
+        toolMenu.Items.Add("打开备份目录", null, (_, _) => OpenBackup());
+        moreTools.Click += (_, _) => toolMenu.Show(moreTools, new Point(0, moreTools.Height));
 
-        var brand = new GradientBanner { Dock = DockStyle.Fill, Padding = new Padding(22, 11, 22, 9) };
-        brand.Controls.Add(new Label { Text = "MD CARD STUDIO", Dock = DockStyle.Top, Height = 29, Font = new Font("Segoe UI Semibold", 17F), ForeColor = UiTheme.Text, BackColor = Color.Transparent });
-        brand.Controls.Add(new Label { Text = "MASTER DUEL  ·  卡图 / 超框 / 怪兽动画 Mod 工作台", Dock = DockStyle.Bottom, Height = 23, Font = new Font("Microsoft YaHei UI", 9F), ForeColor = UiTheme.Primary, BackColor = Color.Transparent });
+        var brand = new GradientBanner { Dock = DockStyle.Fill, Padding = new Padding(22, 7, 22, 6) };
+        brand.Controls.Add(new Label { Text = "MD CARD STUDIO", Dock = DockStyle.Top, Height = 28, Font = new Font("Segoe UI Semibold", 16F), ForeColor = UiTheme.Text, BackColor = Color.Transparent });
+        brand.Controls.Add(new Label { Text = "MASTER DUEL  ·  卡图 / 超框 / 怪兽动画 Mod 工作台", Dock = DockStyle.Bottom, Height = 21, Font = new Font("Microsoft YaHei UI", 9F), ForeColor = UiTheme.Primary, BackColor = Color.Transparent });
 
         var pathBar = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(18, 7, 18, 7), BackColor = UiTheme.Surface, ColumnCount = 4, RowCount = 1 };
         pathBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); pathBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); pathBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); pathBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         pathBar.Controls.Add(Caption("GAME ROOT"), 0, 0); pathBar.Controls.Add(_gameFolder, 1, 0); pathBar.Controls.Add(choose, 2, 0); pathBar.Controls.Add(scan, 3, 0);
 
-        var commands = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(13, 7, 18, 7), BackColor = UiTheme.SurfaceAlt, ColumnCount = 7, RowCount = 1 };
-        commands.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); commands.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 230)); for (var i = 0; i < 5; i++) commands.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        commands.Controls.Add(_search, 0, 0); commands.Controls.Add(_category, 1, 0); commands.Controls.Add(replace, 2, 0); commands.Controls.Add(export, 3, 0); commands.Controls.Add(restore, 4, 0); commands.Controls.Add(backup, 5, 0); commands.Controls.Add(_scanMissingButton, 6, 0);
+        var searchBar = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(18, 7, 18, 7), BackColor = UiTheme.SurfaceAlt, ColumnCount = 3, RowCount = 1 };
+        searchBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); searchBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220)); searchBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        searchBar.Controls.Add(_search, 0, 0); searchBar.Controls.Add(_category, 1, 0); searchBar.Controls.Add(_scanMissingButton, 2, 0);
+
+        var primaryBar = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(13, 4, 18, 4), BackColor = UiTheme.Surface, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoScroll = true };
+        primaryBar.Controls.Add(replace); primaryBar.Controls.Add(overFrameReplace); primaryBar.Controls.Add(monsterAnimation); primaryBar.Controls.Add(export); primaryBar.Controls.Add(restore); primaryBar.Controls.Add(moreTools);
 
         var modBar = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(18, 5, 18, 5), BackColor = Color.FromArgb(18, 31, 50), ColumnCount = 5, RowCount = 1 };
         modBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); modBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); modBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); modBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); modBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -89,11 +103,9 @@ public sealed class MainForm : Form
 
         var previewFrame = new BorderPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Surface, Padding = new Padding(18) };
         previewFrame.Controls.Add(_preview); previewFrame.Controls.Add(_previewHint); _previewHint.BringToFront();
-        var rightActions = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, AutoScroll = true, BackColor = UiTheme.Surface, Padding = new Padding(5, 4, 4, 4) };
-        rightActions.Controls.Add(overFrameReplace); rightActions.Controls.Add(monsterAnimation); rightActions.Controls.Add(rawAnimationAssets); rightActions.Controls.Add(frameEditor); rightActions.Controls.Add(framePreview); rightActions.Controls.Add(overFrameTable); rightActions.Controls.Add(inspect);
-        var previewLayout = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Window, RowCount = 4, ColumnCount = 1 };
-        previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46)); previewLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 104)); previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 92));
-        previewLayout.Controls.Add(SectionHeading("实时预览", "LIVE PREVIEW"), 0, 0); previewLayout.Controls.Add(previewFrame, 0, 1); previewLayout.Controls.Add(_info, 0, 2); previewLayout.Controls.Add(rightActions, 0, 3);
+        var previewLayout = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Window, RowCount = 3, ColumnCount = 1 };
+        previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46)); previewLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 116));
+        previewLayout.Controls.Add(SectionHeading("实时预览", "LIVE PREVIEW"), 0, 0); previewLayout.Controls.Add(previewFrame, 0, 1); previewLayout.Controls.Add(_info, 0, 2);
 
         var left = new Panel { Dock = DockStyle.Fill, Padding = new Padding(14, 14, 7, 14), BackColor = UiTheme.Window }; left.Controls.Add(resourceSplit);
         var right = new Panel { Dock = DockStyle.Fill, Padding = new Padding(7, 14, 14, 14), BackColor = UiTheme.Window }; right.Controls.Add(previewLayout);
@@ -101,9 +113,9 @@ public sealed class MainForm : Form
 
         _status.Spring = true; _status.TextAlign = ContentAlignment.MiddleLeft; _status.ForeColor = UiTheme.Muted; _status.Font = new Font("Microsoft YaHei UI", 8.5F);
         var status = new StatusStrip { Dock = DockStyle.Fill, BackColor = UiTheme.Surface, ForeColor = UiTheme.Muted, SizingGrip = false, Padding = new Padding(12, 0, 12, 0) }; status.Items.Add(_status);
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Window, RowCount = 6, ColumnCount = 1, Margin = Padding.Empty, Padding = Padding.Empty };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 70)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 55)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 58)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 50)); root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
-        root.Controls.Add(brand, 0, 0); root.Controls.Add(pathBar, 0, 1); root.Controls.Add(commands, 0, 2); root.Controls.Add(modBar, 0, 3); root.Controls.Add(workspace, 0, 4); root.Controls.Add(status, 0, 5); Controls.Add(root);
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Window, RowCount = 7, ColumnCount = 1, Margin = Padding.Empty, Padding = Padding.Empty };
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 70)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 52)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 52)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48)); root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+        root.Controls.Add(brand, 0, 0); root.Controls.Add(pathBar, 0, 1); root.Controls.Add(searchBar, 0, 2); root.Controls.Add(primaryBar, 0, 3); root.Controls.Add(modBar, 0, 4); root.Controls.Add(workspace, 0, 5); root.Controls.Add(status, 0, 6); Controls.Add(root);
         if (Directory.Exists(DefaultGame)) { _gameRoot = DefaultGame; _gameFolder.Text = DefaultGame; SetGameRoot(); }
         Shown += async (_, _) =>
         {
@@ -277,6 +289,7 @@ public sealed class MainForm : Form
             sourceNode.Expand();
         }
         _category.SelectedItem = _category.Items.Contains(old) ? old : "全部";
+        if (_groups.Nodes.Count > 0) _groups.TopNode = _groups.Nodes[0];
         UpdateModSummary();
     }
     void RenderList()
@@ -610,6 +623,8 @@ public sealed class MainForm : Form
     void ApplyMonsterAnimationTags()
     {
         var animationIds = MonsterAnimationIndexService.LoadBundledCardIds();
+        if (_gameRoot is not null)
+            foreach (var borrowed in new MonsterAnimationBorrowService().List(_gameRoot)) animationIds.Add(borrowed.TargetCardId);
         foreach (var texture in _textures)
             texture.HasMonsterAnimation = texture.SourceKind == "本地卡图" && animationIds.Contains(texture.CardKey);
         var count = _textures.Count(x => x.HasMonsterAnimation);
@@ -646,6 +661,7 @@ public sealed class MainForm : Form
         form.FormClosed += async (_, _) =>
         {
             await RefreshModFlagsAsync();
+            ApplyMonsterAnimationTags();
             RefreshCategories(); RenderList();
         };
         form.Show(this);
@@ -664,6 +680,7 @@ public sealed class MainForm : Form
         form.FormClosed += async (_, _) =>
         {
             await RefreshModFlagsAsync();
+            ApplyMonsterAnimationTags();
             RefreshCategories();
             RenderList();
         };

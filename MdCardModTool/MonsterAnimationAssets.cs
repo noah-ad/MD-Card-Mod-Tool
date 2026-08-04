@@ -236,25 +236,26 @@ public static class MonsterAnimationIndexService
                         !File.Exists(path)) continue;
                     try
                     {
-                        var tierNeedle = $"/p{cardId}/{tier.ToLowerInvariant()}/";
-                        var belongsToTier = engine.ReadAssetBundleContainerPaths(path)
-                            .Any(x => x.Replace('\\', '/').Contains(tierNeedle, StringComparison.OrdinalIgnoreCase));
-                        if (belongsToTier)
-                            foreach (var asset in engine.ScanAnimationDependencyAssets(path, root.Root, cardId))
-                                result.Add(new MonsterAnimationAssetRef
-                                {
-                                    BundlePath = asset.BundlePath,
-                                    RelativeBundlePath = asset.RelativeBundlePath,
-                                    AssetFileName = asset.AssetFileName,
-                                    PathId = asset.PathId,
-                                    Name = asset.Name,
-                                    CardId = asset.CardId,
-                                    Kind = asset.Kind,
-                                    StorageKind = root.Storage,
-                                    ProfileTier = tier,
-                                    ProfileRegion = region,
-                                    ProfileScale = "Prefab依赖"
-                                });
+                        // A borrowed cut-in keeps the donor's atlas/material dependency bundles.
+                        // Those containers still contain /p{donor}/ even though the entry prefab
+                        // is installed under /p{target}/.  Follow the actual dependency graph and
+                        // identify only the narrowly named animation assets instead of rejecting
+                        // them by container path.
+                        foreach (var asset in engine.ScanAnimationDependencyAssets(path, root.Root, cardId))
+                            result.Add(new MonsterAnimationAssetRef
+                            {
+                                BundlePath = asset.BundlePath,
+                                RelativeBundlePath = asset.RelativeBundlePath,
+                                AssetFileName = asset.AssetFileName,
+                                PathId = asset.PathId,
+                                Name = asset.Name,
+                                CardId = asset.CardId,
+                                Kind = asset.Kind,
+                                StorageKind = root.Storage,
+                                ProfileTier = tier,
+                                ProfileRegion = region,
+                                ProfileScale = "Prefab依赖"
+                            });
                         foreach (var dependency in engine.ReadBundleDependencies(path))
                             if (!visited.Contains(dependency)) queue.Enqueue(dependency);
                     }

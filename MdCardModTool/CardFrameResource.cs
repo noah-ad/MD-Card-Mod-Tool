@@ -22,20 +22,49 @@ public static class CardFrameResource
         }
 
         var resolved = engine.ResolveTextureReference(texture);
-        if (resolved is null ||
-            !string.Equals(resolved.Name, texture.Name, StringComparison.OrdinalIgnoreCase) ||
-            resolved.Width != FrameComposer.Width ||
-            resolved.Height != FrameComposer.Height)
+        if (!IsExpectedFrame(resolved, texture.Name))
+            resolved = ResolveFromCanonicalBundle(engine, texture);
+        if (!IsExpectedFrame(resolved, texture.Name))
             throw new InvalidDataException($"卡框 {texture.Name} 的旧索引已经失效，且无法在当前 data.unity3d 中按名称重新定位。", firstFailure);
 
-        texture.PathId = resolved.PathId;
-        texture.AssetFileName = resolved.AssetFileName;
-        texture.Width = resolved.Width;
-        texture.Height = resolved.Height;
+        var repairedReference = resolved!;
+        texture.PathId = repairedReference.PathId;
+        texture.AssetFileName = repairedReference.AssetFileName;
+        texture.Width = repairedReference.Width;
+        texture.Height = repairedReference.Height;
+        texture.OverrideBundlePath = repairedReference.BundlePath.Equals(texture.BundlePath, StringComparison.OrdinalIgnoreCase) ? null : repairedReference.BundlePath;
         var repaired = engine.DecodePng(texture);
         if (!HasExpectedDimensions(repaired))
             throw new InvalidDataException($"重新定位后的卡框 {texture.Name} 仍不是 {FrameComposer.Width}×{FrameComposer.Height}：{DescribeDimensions(repaired)}");
         return repaired;
+    }
+
+    static bool IsExpectedFrame(TexRef? texture, string name) =>
+        texture is not null &&
+        texture.Name.Equals(name, StringComparison.OrdinalIgnoreCase) &&
+        texture.Width == FrameComposer.Width &&
+        texture.Height == FrameComposer.Height;
+
+    static TexRef? ResolveFromCanonicalBundle(ModEngine engine, TexRef texture)
+    {
+        // OverrideBundlePath 可能来自旧 Mod／旧缓存。卡框永远以当前游戏的
+        // masterduel_Data\data.unity3d 为权威来源，再按名称和 704×1024 精确匹配。
+        var candidates = new[] { texture.BundlePath, texture.ActiveBundlePath }
+            .Where(File.Exists)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var bundle in candidates)
+        {
+            try
+            {
+                var root = Path.GetDirectoryName(bundle) ?? bundle;
+                var found = engine.ScanBundle(bundle, root, texture.SourceKind, includeDependencies: false).Textures
+                    .FirstOrDefault(x => x.Name.Equals(texture.Name, StringComparison.OrdinalIgnoreCase) &&
+                                         x.Width == FrameComposer.Width && x.Height == FrameComposer.Height);
+                if (found is not null) return found;
+            }
+            catch { }
+        }
+        return null;
     }
 
     public static bool HasExpectedDimensions(byte[] png)
