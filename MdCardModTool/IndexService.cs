@@ -9,6 +9,7 @@ namespace MdCardModTool;
 public static class IndexService
 {
     const string CacheVersion = "v6";
+    public const int CurrentCardFrameIndexVersion = 2;
     static readonly uint[] Crc32Table = Enumerable.Range(0, 256).Select(index =>
     {
         var value = (uint)index;
@@ -66,6 +67,7 @@ public static class IndexService
         return new GameIndex
         {
             CardFrameDataStamp = CardFrameDataStamp(gameRoot),
+            CardFrameIndexVersion = CurrentCardFrameIndexVersion,
             Textures = bag.OrderBy(x => x.SourceKind).ThenBy(x => x.Category).ThenBy(x => x.Name).ToList()
         };
     }
@@ -86,6 +88,7 @@ public static class IndexService
         {
             Textures = textures.ToList(),
             CardFrameDataStamp = existing?.CardFrameDataStamp ?? "",
+            CardFrameIndexVersion = existing?.CardFrameIndexVersion ?? 0,
             AlternateArtIndexVersion = existing?.AlternateArtIndexVersion ?? 0,
             CheckedLocalBundlePaths = existing?.CheckedLocalBundlePaths ?? []
         });
@@ -114,6 +117,7 @@ public static class IndexService
         index.Textures.RemoveAll(x => x.SourceKind == "卡框资源");
         index.Textures.AddRange(GetCardFrames(gameRoot));
         index.CardFrameDataStamp = CardFrameDataStamp(gameRoot);
+        index.CardFrameIndexVersion = CurrentCardFrameIndexVersion;
         index.Textures.Sort((a, b) => string.Compare($"{a.SourceKind}\0{a.Category}\0{a.Name}\0{a.Width:D8}", $"{b.SourceKind}\0{b.Category}\0{b.Name}\0{b.Width:D8}", StringComparison.Ordinal));
         File.WriteAllText(cache, JsonSerializer.Serialize(index));
     }
@@ -128,15 +132,22 @@ public static class IndexService
         var existing = index.Textures
             .Where(x => x.SourceKind == "卡框资源" && x.Name.StartsWith("card_frame", StringComparison.OrdinalIgnoreCase))
             .ToArray();
+        var expectedBundle = Path.GetFullPath(Path.Combine(gameRoot, "masterduel_Data", "data.unity3d"));
+        var mappingLooksCurrent = existing.Count(x => x.Width == 704 && x.Height == 1024) >= CardFrameCatalog.FrameCount &&
+            existing.Where(x => x.Width == 704 && x.Height == 1024)
+                .All(x => File.Exists(x.BundlePath) && Path.GetFullPath(x.BundlePath).Equals(expectedBundle, StringComparison.OrdinalIgnoreCase));
         if (!force && stamp.Length > 0 && index.CardFrameDataStamp == stamp &&
+            index.CardFrameIndexVersion >= CurrentCardFrameIndexVersion && mappingLooksCurrent &&
             existing.Any(x => x.Name == "card_frame01" && x.Width == 704 && x.Height == 1024))
             return false;
 
         var current = GetCardFrames(gameRoot).ToArray();
-        if (current.Length == 0) throw new InvalidDataException("当前 data.unity3d 中没有找到 704×1024 card_frame。");
+        if (current.Length < CardFrameCatalog.FrameCount)
+            throw new InvalidDataException($"当前 data.unity3d 只找到 {current.Length}/{CardFrameCatalog.FrameCount} 个 704×1024 card_frame，已保留旧映射，避免写入不完整索引。");
         index.Textures.RemoveAll(x => x.SourceKind == "卡框资源");
         index.Textures.AddRange(current);
         index.CardFrameDataStamp = stamp;
+        index.CardFrameIndexVersion = CurrentCardFrameIndexVersion;
         return true;
     }
 

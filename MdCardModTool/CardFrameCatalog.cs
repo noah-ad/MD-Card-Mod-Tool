@@ -28,6 +28,7 @@ public static class CardFrameCatalog
 
     static readonly HashSet<string> PendulumFrames = ["card_frame13", "card_frame14", "card_frame15", "card_frame16", "card_frame17", "card_frame19"];
 
+    public static int FrameCount => FriendlyNames.Count;
     public static string FriendlyName(string key) => FriendlyNames.TryGetValue(key, out var value) ? value : key;
     public static bool IsPendulum(string key) => PendulumFrames.Contains(key);
     public static string DefaultKey(int storedWidth, int storedHeight) => storedWidth == 512 && storedHeight == 1024 ? "card_frame14" : "card_frame01";

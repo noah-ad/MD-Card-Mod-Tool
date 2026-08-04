@@ -501,6 +501,222 @@ public sealed class ModEngine
         File.Move(temporary, asset.BundlePath, true);
     }
 
+    public IReadOnlyList<int> ReadMonsterCutinTable(string bundlePath)
+    {
+        var manager = NewManager();
+        try
+        {
+            var bundle = manager.LoadBundleFile(bundlePath);
+            foreach (var entry in bundle.file.GetAllFileNames())
+            {
+                try
+                {
+                    var assets = manager.LoadAssetsFileFromBundle(bundle, entry);
+                    EnsureDatabase(manager, assets);
+                    foreach (var info in assets.file.GetAssetsOfType(AssetClassID.MonoBehaviour))
+                    {
+                        var field = manager.GetBaseField(assets, info);
+                        if (!string.Equals(field["m_Name"].AsString, "CardIndividualData", StringComparison.Ordinal)) continue;
+                        var array = field["monsterCutinTable"]["Array"];
+                        if (array.IsDummy) throw new InvalidDataException("CardIndividualData 缺少 monsterCutinTable。游戏版本可能已更新。");
+                        return array.Children.Select(x => x["mrk"].AsInt).Distinct().ToArray();
+                    }
+                }
+                catch (InvalidDataException) { throw; }
+                catch { }
+            }
+            throw new InvalidDataException("Bundle 中没有找到 CardIndividualData。");
+        }
+        finally { manager.UnloadAll(); }
+    }
+
+    public bool SetMonsterCutinRegistration(string bundlePath, string root, int cardId, bool enabled, string backupRoot)
+    {
+        var relative = Path.GetRelativePath(root, bundlePath);
+        var backup = Path.Combine(backupRoot, relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
+        if (!File.Exists(backup)) File.Copy(bundlePath, backup);
+        var temporary = bundlePath + ".mdcardtool.cutin.tmp";
+        var manager = NewManager();
+        try
+        {
+            var bundle = manager.LoadBundleFile(bundlePath);
+            var bundleReplacers = new List<BundleReplacer>();
+            var found = false;
+            var changed = false;
+            foreach (var entry in bundle.file.GetAllFileNames())
+            {
+                try
+                {
+                    var assets = manager.LoadAssetsFileFromBundle(bundle, entry);
+                    EnsureDatabase(manager, assets);
+                    var assetReplacers = new List<AssetsReplacer>();
+                    foreach (var info in assets.file.GetAssetsOfType(AssetClassID.MonoBehaviour))
+                    {
+                        var field = manager.GetBaseField(assets, info);
+                        if (!string.Equals(field["m_Name"].AsString, "CardIndividualData", StringComparison.Ordinal)) continue;
+                        found = true;
+                        var array = field["monsterCutinTable"]["Array"];
+                        if (array.IsDummy) throw new InvalidDataException("CardIndividualData 缺少 monsterCutinTable。游戏版本可能已更新。");
+                        var existing = array.Children.Where(x => x["mrk"].AsInt == cardId).ToArray();
+                        if (enabled && existing.Length == 0)
+                        {
+                            var item = ValueBuilder.DefaultValueFieldFromArrayTemplate(array);
+                            item["mrk"].AsInt = cardId;
+                            array.Children.Add(item);
+                            changed = true;
+                        }
+                        else if (!enabled && existing.Length > 0)
+                        {
+                            array.Children.RemoveAll(x => x["mrk"].AsInt == cardId);
+                            changed = true;
+                        }
+                        if (!changed) return false;
+                        array.AsArray = new AssetTypeArrayInfo(array.Children.Count);
+                        assetReplacers.Add(new AssetsReplacerFromMemory(assets.file, info, field));
+                    }
+                    if (assetReplacers.Count == 0) continue;
+                    byte[] serialized;
+                    using (var stream = new MemoryStream())
+                    {
+                        using var writer = new AssetsFileWriter(stream);
+                        assets.file.Write(writer, 0, assetReplacers);
+                        serialized = stream.ToArray();
+                    }
+                    bundleReplacers.Add(new BundleReplacerFromMemory(assets.name, assets.name, true, serialized, -1));
+                }
+                catch (InvalidDataException) { throw; }
+                catch { }
+            }
+            if (!found) throw new InvalidDataException("Bundle 中没有找到 CardIndividualData。");
+            if (!changed) return false;
+            WriteCompressedBundle(bundle.file, bundleReplacers, temporary);
+        }
+        catch
+        {
+            try { if (File.Exists(temporary)) File.Delete(temporary); } catch { }
+            throw;
+        }
+        finally { manager.UnloadAll(); }
+        File.Move(temporary, bundlePath, true);
+        return true;
+    }
+
+    public void CloneAnimationEntryBundle(string sourcePath, string destinationPath, string destinationRoot, string donorCardId, string targetCardId)
+        => CloneAnimationBundle(sourcePath, destinationPath, destinationRoot, donorCardId, targetCardId,
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+
+    public void CloneAnimationBundle(
+        string sourcePath,
+        string destinationPath,
+        string destinationRoot,
+        string donorCardId,
+        string targetCardId,
+        IReadOnlyDictionary<string, string> dependencyMap)
+    {
+        if (!File.Exists(sourcePath)) throw new FileNotFoundException("供体动画 Bundle 不存在。", sourcePath);
+        if (File.Exists(destinationPath)) throw new IOException("目标动画 Bundle 已存在，已停止覆盖：" + destinationPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+        var destinationRelative = Path.GetRelativePath(destinationRoot, destinationPath).Replace('\\', '/');
+        var temporary = destinationPath + ".mdcardtool.clone.tmp";
+        var manager = NewManager();
+        try
+        {
+            var bundle = manager.LoadBundleFile(sourcePath);
+            var bundleReplacers = new List<BundleReplacer>();
+            foreach (var entry in bundle.file.GetAllFileNames())
+            {
+                if (entry.EndsWith(".resS", StringComparison.OrdinalIgnoreCase) ||
+                    entry.EndsWith(".resource", StringComparison.OrdinalIgnoreCase)) continue;
+                try
+                {
+                    var assets = manager.LoadAssetsFileFromBundle(bundle, entry);
+                    EnsureDatabase(manager, assets);
+                    var assetReplacers = new List<AssetsReplacer>();
+                    foreach (var info in assets.file.AssetInfos)
+                    {
+                        try
+                        {
+                            var field = manager.GetBaseField(assets, info);
+                            var changed = ReplaceCardToken(field, donorCardId, targetCardId);
+                            changed |= ReplaceDependencyPaths(field, dependencyMap);
+                            if ((AssetClassID)info.TypeId == AssetClassID.AssetBundle)
+                            {
+                                if (field["m_Name"] is { IsDummy: false } name && name.AsString != destinationRelative)
+                                {
+                                    name.AsString = destinationRelative;
+                                    changed = true;
+                                }
+                                if (field["m_AssetBundleName"] is { IsDummy: false } assetBundleName && assetBundleName.AsString != destinationRelative)
+                                {
+                                    assetBundleName.AsString = destinationRelative;
+                                    changed = true;
+                                }
+                            }
+                            if (changed) assetReplacers.Add(new AssetsReplacerFromMemory(assets.file, info, field));
+                        }
+                        catch { }
+                    }
+                    if (assetReplacers.Count == 0) continue;
+                    byte[] serialized;
+                    using (var stream = new MemoryStream())
+                    {
+                        using var writer = new AssetsFileWriter(stream);
+                        assets.file.Write(writer, 0, assetReplacers);
+                        serialized = stream.ToArray();
+                    }
+                    bundleReplacers.Add(new BundleReplacerFromMemory(assets.name, assets.name, true, serialized, -1));
+                }
+                catch { }
+            }
+            if (bundleReplacers.Count == 0) throw new InvalidDataException("供体 Bundle 没有可重命名的动画资源。");
+            WriteCompressedBundle(bundle.file, bundleReplacers, temporary);
+        }
+        catch
+        {
+            try { if (File.Exists(temporary)) File.Delete(temporary); } catch { }
+            throw;
+        }
+        finally { manager.UnloadAll(); }
+        File.Move(temporary, destinationPath, true);
+    }
+
+    static bool ReplaceCardToken(AssetTypeValueField field, string donorCardId, string targetCardId)
+    {
+        var changed = false;
+        if (!field.IsDummy && string.Equals(field.TypeName, "string", StringComparison.OrdinalIgnoreCase))
+        {
+            var before = field.AsString;
+            var after = before
+                .Replace("P" + donorCardId, "P" + targetCardId, StringComparison.Ordinal)
+                .Replace("p" + donorCardId, "p" + targetCardId, StringComparison.Ordinal);
+            if (!string.Equals(before, after, StringComparison.Ordinal))
+            {
+                field.AsString = after;
+                changed = true;
+            }
+        }
+        foreach (var child in field.Children) changed |= ReplaceCardToken(child, donorCardId, targetCardId);
+        return changed;
+    }
+
+    static bool ReplaceDependencyPaths(AssetTypeValueField field, IReadOnlyDictionary<string, string> dependencyMap)
+    {
+        var changed = false;
+        if (dependencyMap.Count > 0 && !field.IsDummy && string.Equals(field.TypeName, "string", StringComparison.OrdinalIgnoreCase))
+        {
+            var current = field.AsString;
+            var normalized = current.Replace('\\', '/');
+            if (dependencyMap.TryGetValue(normalized, out var replacement) && !normalized.Equals(replacement, StringComparison.OrdinalIgnoreCase))
+            {
+                field.AsString = current.Contains('\\') ? replacement.Replace('/', '\\') : replacement;
+                changed = true;
+            }
+        }
+        foreach (var child in field.Children) changed |= ReplaceDependencyPaths(child, dependencyMap);
+        return changed;
+    }
+
     public byte[] DecodePng(TexRef texture, int maxSize = 0)
     {
         var manager = NewManager();

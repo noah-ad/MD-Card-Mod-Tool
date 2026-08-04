@@ -107,6 +107,7 @@ public sealed class MonsterAnimationRawAssetService
 
     public void ReplaceOne(string gameRoot, MonsterAnimationAssetRef asset, string inputPath)
     {
+        EnsureNotBorrowed(gameRoot, asset.CardId);
         var rollback = TemporaryRollbackDirectory();
         Directory.CreateDirectory(rollback);
         var snapshot = Path.Combine(rollback, "000.bundle");
@@ -126,6 +127,7 @@ public sealed class MonsterAnimationRawAssetService
 
     public int ImportAll(string gameRoot, MonsterAnimationSet set, string directory)
     {
+        EnsureNotBorrowed(gameRoot, set.CardId);
         var manifestPath = Path.Combine(directory, ManifestFileName);
         if (!File.Exists(manifestPath)) throw new FileNotFoundException($"所选目录缺少 {ManifestFileName}，请先用本窗口“导出全部”建立可回导目录。", manifestPath);
         var manifest = JsonSerializer.Deserialize<RawAnimationManifest>(File.ReadAllText(manifestPath))
@@ -190,6 +192,12 @@ public sealed class MonsterAnimationRawAssetService
             var data = NormalizeTextData(File.ReadAllBytes(inputPath));
             _engine.ReplaceTextAsset(_engine.ReadTextAsset(asset), data, backupRoot);
         }
+    }
+
+    static void EnsureNotBorrowed(string gameRoot, string cardId)
+    {
+        if (new MonsterAnimationBorrowService().IsReadOnlyBorrowed(gameRoot, cardId))
+            throw new InvalidOperationException("该卡正在借用供体动画。PNG / Atlas 依赖与供体共用，为避免改坏供体卡，不能编辑原始动画资源。");
     }
 
     static void ValidateInput(MonsterAnimationAssetKind kind, string inputPath)

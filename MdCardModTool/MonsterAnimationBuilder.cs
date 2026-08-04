@@ -417,6 +417,8 @@ public sealed class MonsterAnimationService
     public void Apply(string gameRoot, MonsterAnimationSet set, MonsterAnimationBuildResult animation)
     {
         if (!set.IsComplete) throw new InvalidOperationException("该卡没有定位到教程要求的两套 Texture2D + Atlas + JS，不能进行不完整替换。");
+        if (new MonsterAnimationBorrowService().IsReadOnlyBorrowed(gameRoot, set.CardId))
+            throw new InvalidOperationException("该卡正在借用供体动画，图集依赖与供体共用。请先还原借用登记，不能直接写入共享资源。");
         var rollbackRoot = Path.Combine(Path.GetTempPath(), "MDCardModTool", "animation_rollback_" + Guid.NewGuid().ToString("N"));
         var bundles = set.Assets.Select(x => x.BundlePath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         Directory.CreateDirectory(rollbackRoot);

@@ -167,6 +167,139 @@ internal static class Program
             foreach (var asset in set.Assets) Console.WriteLine($"{asset.Kind}; {asset.Name}; PathID={asset.PathId}; {asset.RelativeBundlePath}");
             return;
         }
+        if (args.Length == 3 && args[0] == "--render-animation-ui")
+        {
+            ApplicationConfiguration.Initialize();
+            using var form = new MonsterAnimationForm(args[1]) { ShowInTaskbar = false };
+            form.Size = new System.Drawing.Size(940, 680);
+            form.Show();
+            Application.DoEvents();
+            using var bitmap = new Bitmap(form.Width, form.Height);
+            form.DrawToBitmap(bitmap, new System.Drawing.Rectangle(System.Drawing.Point.Empty, bitmap.Size));
+            bitmap.Save(args[2]);
+            form.Close();
+            Console.WriteLine(args[2]);
+            return;
+        }
+        if (args.Length == 2 && args[0] == "--render-main-ui")
+        {
+            ApplicationConfiguration.Initialize();
+            using var form = new MainForm { ShowInTaskbar = false };
+            form.Size = new System.Drawing.Size(1120, 720);
+            form.Show();
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while (DateTime.UtcNow < deadline)
+            {
+                Application.DoEvents();
+                var list = (ListView?)typeof(MainForm).GetField("_list", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+                if ((list?.Items.Count ?? 0) > 0) break;
+                Thread.Sleep(25);
+            }
+            using var bitmap = new Bitmap(form.Width, form.Height);
+            form.DrawToBitmap(bitmap, new System.Drawing.Rectangle(System.Drawing.Point.Empty, bitmap.Size));
+            bitmap.Save(args[1]);
+            form.Close();
+            Console.WriteLine(args[1]);
+            return;
+        }
+        if (args.Length == 4 && args[0] == "--render-crop-ui")
+        {
+            ApplicationConfiguration.Initialize();
+            var local = IndexService.FindLocalRoot(args[1]) ?? throw new DirectoryNotFoundException("未找到 LocalData。");
+            var cache = IndexService.CachePath(local, IndexService.StreamingRoot(args[1]));
+            var index = JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(cache)) ?? throw new InvalidDataException("本地索引无法读取。");
+            IndexService.RefreshCardFramesIfChanged(args[1], index);
+            var frames = index.Textures.Where(x => x.SourceKind == "卡框资源").ToArray();
+            using var form = new ImageCropForm(args[2], 512, 512, "界面缩放检查", frames, "card_frame01") { ShowInTaskbar = false };
+            form.Size = new System.Drawing.Size(820, 620);
+            form.Show();
+            var mapping = (Label?)typeof(ImageCropForm).GetField("_mapping", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(form);
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while (DateTime.UtcNow < deadline && mapping?.Text.StartsWith("正在", StringComparison.Ordinal) == true) { Application.DoEvents(); Thread.Sleep(25); }
+            using var bitmap = new Bitmap(form.Width, form.Height);
+            form.DrawToBitmap(bitmap, new System.Drawing.Rectangle(System.Drawing.Point.Empty, bitmap.Size));
+            bitmap.Save(args[3]);
+            form.Close();
+            Console.WriteLine(args[3]);
+            return;
+        }
+        if (args.Length == 4 && args[0] == "--test-borrow-animation")
+        {
+            var service = new MonsterAnimationBorrowService();
+            BorrowedMonsterAnimation? record = null;
+            try
+            {
+                record = service.Install(args[1], args[2], args[3]);
+                var set = MonsterAnimationIndexService.Find(args[1], args[2]);
+                using var preview = MonsterAnimationCurrentPreview.TryLoad(args[1], set, 256, 15, 30);
+                var registered = service.RegisteredCardIds(args[1]).Contains(int.Parse(args[2]));
+                Console.WriteLine($"installed={record.CreatedBundlePaths.Count}; complete={set.IsComplete}; preview={preview is not null}; registered={registered}; donor={record.DonorCardId}");
+                if (!set.IsComplete || preview is null || !registered) Environment.ExitCode = 2;
+            }
+            finally
+            {
+                if (record is not null)
+                {
+                    var removed = service.Remove(args[1], args[2]);
+                    var stillRegistered = service.RegisteredCardIds(args[1]).Contains(int.Parse(args[2]));
+                    var remaining = record.CreatedBundlePaths.Count(x => File.Exists(Path.Combine(IndexService.FindLocalRoot(args[1])!, x)));
+                    Console.WriteLine($"removed={removed}; stillRegistered={stillRegistered}; remaining={remaining}");
+                    if (!removed || stillRegistered || remaining != 0) Environment.ExitCode = 2;
+                }
+            }
+            return;
+        }
+        if (args.Length == 4 && args[0] == "--test-independent-animation")
+        {
+            var gameRoot = args[1];
+            var targetCardId = args[2];
+            var donorCardId = args[3];
+            var borrow = new MonsterAnimationBorrowService();
+            var animation = new MonsterAnimationService();
+            BorrowedMonsterAnimation? record = null;
+            var temporary = Path.Combine(Path.GetTempPath(), "MDCardModTool", "independent-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temporary);
+            var donorSet = MonsterAnimationIndexService.Find(gameRoot, donorCardId);
+            var donorHashes = donorSet.Assets.Select(x => x.BundlePath).Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(x => x, x => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(x))), StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                record = borrow.InstallIndependent(gameRoot, targetCardId, donorCardId);
+                var set = MonsterAnimationIndexService.Find(gameRoot, targetCardId);
+                using var previewBefore = MonsterAnimationCurrentPreview.TryLoad(gameRoot, set, 256, 15, 30);
+                var frames = new List<string>();
+                foreach (var (name, color) in new[] { ("frame-01.png", SixLabors.ImageSharp.Color.CornflowerBlue), ("frame-02.png", SixLabors.ImageSharp.Color.OrangeRed) })
+                {
+                    var path = Path.Combine(temporary, name);
+                    using var image = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(320, 180);
+                    image.Mutate(x => x.BackgroundColor(color));
+                    image.SaveAsPng(path);
+                    frames.Add(path);
+                }
+                var template = animation.ReadTemplate(gameRoot, set);
+                using (var built = MonsterAnimationBuilder.Build(frames, targetCardId, 15, 100, template, 4096))
+                    animation.Apply(gameRoot, set, built);
+                var written = MonsterAnimationIndexService.Find(gameRoot, targetCardId);
+                using var previewAfter = MonsterAnimationCurrentPreview.TryLoad(gameRoot, written, 256, 15, 30);
+                var donorUnchanged = donorHashes.All(x => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(x.Key))) == x.Value);
+                Console.WriteLine($"created={record.CreatedBundlePaths.Count}; independent={record.IsIndependent}; complete={written.IsComplete}; previewBefore={previewBefore is not null}; previewAfter={previewAfter is not null}; donorUnchanged={donorUnchanged}");
+                if (!record.IsIndependent || !written.IsComplete || previewBefore is null || previewAfter is null || !donorUnchanged) Environment.ExitCode = 2;
+            }
+            finally
+            {
+                if (record is not null)
+                {
+                    var removed = borrow.Remove(gameRoot, targetCardId);
+                    var stillRegistered = borrow.RegisteredCardIds(gameRoot).Contains(int.Parse(targetCardId));
+                    var localRoot = IndexService.FindLocalRoot(gameRoot)!;
+                    var remaining = record.CreatedBundlePaths.Count(x => File.Exists(Path.Combine(localRoot, x)));
+                    Console.WriteLine($"removed={removed}; stillRegistered={stillRegistered}; remaining={remaining}");
+                    if (!removed || stillRegistered || remaining != 0) Environment.ExitCode = 2;
+                }
+                try { Directory.Delete(temporary, true); } catch { }
+            }
+            return;
+        }
         if (args.Length == 3 && args[0] == "--test-animation-resolution")
         {
             var set = MonsterAnimationIndexService.Find(args[1], args[2]);
@@ -227,6 +360,17 @@ internal static class Program
         if (args.Length == 2 && args[0] == "--bundle-containers")
         {
             foreach (var path in new ModEngine().ReadAssetBundleContainerPaths(Path.GetFullPath(args[1]))) Console.WriteLine(path);
+            return;
+        }
+        if (args.Length == 2 && args[0] == "--bundle-dependencies")
+        {
+            foreach (var path in new ModEngine().ReadBundleDependencies(Path.GetFullPath(args[1]))) Console.WriteLine(path);
+            return;
+        }
+        if (args.Length == 4 && args[0] == "--inspect-animation-dependency")
+        {
+            foreach (var asset in new ModEngine().ScanAnimationDependencyAssets(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), args[3]))
+                Console.WriteLine($"{asset.Kind}; {asset.Name}; PathID={asset.PathId}; {asset.RelativeBundlePath}");
             return;
         }
         if (args.Length == 4 && args[0] == "--test-animation-media")
@@ -749,7 +893,10 @@ internal static class Program
             var index = File.Exists(cache)
                 ? JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(cache)) ?? new GameIndex()
                 : throw new FileNotFoundException("缺少本地索引。", cache);
-            index.CardFrameDataStamp = "stale-game-build";
+            // Simulate a cache produced by an older frame locator even when Steam preserved
+            // data.unity3d's timestamp. The locator version must still force a one-bundle refresh.
+            index.CardFrameDataStamp = IndexService.CardFrameDataStamp(gameRoot);
+            index.CardFrameIndexVersion = 0;
             var refreshed = IndexService.RefreshCardFramesIfChanged(gameRoot, index);
             var frame = index.Textures.First(x => x.SourceKind == "卡框资源" && x.Name == "card_frame01" && x.Width == 704 && x.Height == 1024);
             var card = index.Textures.First(x => x.SourceKind == "本地卡图" && x.CardKey == args[2]);
