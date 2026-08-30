@@ -1,29 +1,71 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
-    <UseWindowsForms>true</UseWindowsForms>
-    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <PlatformTarget>x64</PlatformTarget>
-    <Version>1.8.0</Version>
     <AssemblyName>MD卡图查看替换器</AssemblyName>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <OutputType>WinExe</OutputType>
+    <UseWindowsForms>True</UseWindowsForms>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <Nullable>enable</Nullable>
+    <Version>2.0.0</Version>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationIcon>Resources\app-icon.ico</ApplicationIcon>
+	<Win32Icon>Resources\app-icon.ico</Win32Icon>
   </PropertyGroup>
+  <PropertyGroup>
+    <LangVersion>12.0</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <PropertyGroup />
   <ItemGroup>
-    <Reference Include="AssetsTools.NET"><HintPath>Assets\lib\AssetsTools.NET.dll</HintPath><Private>true</Private></Reference>
-    <Reference Include="AssetsTools.NET.Texture"><HintPath>Assets\lib\AssetsTools.NET.Texture.dll</HintPath><Private>true</Private></Reference>
-    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
+    <Compile Remove="ApplicationConfiguration.cs" />
+    <Compile Remove="--z__ReadOnlySingleElementList.cs" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="Assets\classdata.tpk" Link="classdata.tpk" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="Assets\prebuilt-index-v1.json.br" Link="prebuilt-index-v1.json.br" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="Assets\monster-animation-cards-v1.txt" Link="monster-animation-cards-v1.txt" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="FFMPEG-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="DIRECTXTEX-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="Assets\tools\texconv.exe" Link="tools\texconv.exe" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="使用说明.txt" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\LICENSE" Link="LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\THIRD_PARTY_NOTICES.md" Link="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Resources\visual-assets-v1.tsv" LogicalName="MdCardModTool.visual-assets-v1.tsv" />
+	<Content Include="Resources\card-catalog-v1.json.br" Link="card-catalog-v1.json.br" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<Content Include="Resources\prebuilt-animation-index-v1.json.br" Link="prebuilt-animation-index-v1.json.br" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Resources\app-icon-rounded.png" Link="app-icon-rounded.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<Content Include="Resources\app-icon.ico" Link="app-icon.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<Content Include="Resources\CardFrames\*.png" Link="CardFrames\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<Content Include="Resources\FloowanFrames\*.png" Link="CardFrames\Floowan\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<Content Include="Resources\OverFrameTemplates\**\*.png" Link="OverFrameTemplates\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Resources\visual-assets-v1.tsv" Link="visual-assets-v1.tsv" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Assets\classdata.tpk" Link="classdata.tpk" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Assets\prebuilt-index-v1.json.br" Link="prebuilt-index-v1.json.br" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Assets\monster-animation-cards-v1.txt" Link="monster-animation-cards-v1.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Assets\tools\**\*" Link="tools\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Assets\lib\AssetRipper.TextureDecoder.dll" Link="AssetRipper.TextureDecoder.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="DIRECTXTEX-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="FFMPEG-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\README.md" Link="README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\RELEASE-NOTES-v2.0.0.md" Link="RELEASE-NOTES-v2.0.0.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\THIRD_PARTY_NOTICES.md" Link="THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\FLOOWAN-NOTICE.txt" Link="FLOOWAN-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\ASTELLAR-NOTICE.txt" Link="ASTELLAR-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\TEST-REPORT.md" Link="TEST-REPORT.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\LICENSE" Link="LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Update="使用说明-v2.0.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="启动 MD卡图查看替换器.bat" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="首次启动-解除下载封锁.bat" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
+    <PackageReference Include="SkiaSharp" Version="2.88.9" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="2.88.9" />
+  </ItemGroup>
+	<ItemGroup>
+		<Content Include="$(NuGetPackageRoot)\skiasharp\2.88.9\LICENSE.txt" Link="licenses\SkiaSharp-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('$(NuGetPackageRoot)\skiasharp\2.88.9\LICENSE.txt')" />
+		<Content Include="$(NuGetPackageRoot)\skiasharp\2.88.9\THIRD-PARTY-NOTICES.txt" Link="licenses\SkiaSharp-THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('$(NuGetPackageRoot)\skiasharp\2.88.9\THIRD-PARTY-NOTICES.txt')" />
+	</ItemGroup>
+  <ItemGroup>
+    <Reference Include="AssetsTools.NET">
+      <HintPath>Assets\lib\AssetsTools.NET.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="AssetsTools.NET.Texture">
+      <HintPath>Assets\lib\AssetsTools.NET.Texture.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 </Project>

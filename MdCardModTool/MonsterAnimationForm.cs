@@ -1,654 +1,1263 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+
 namespace MdCardModTool;
 
 public sealed class MonsterAnimationForm : Form
 {
-    const string AutomaticQuality = "自动高清（推荐）";
-    readonly string _gameRoot;
-    readonly MonsterAnimationService _service = new();
-    readonly MonsterAnimationBorrowService _borrowService = new();
-    readonly TextBox _cardId = new() { Width = 130, PlaceholderText = "例如 4007" };
-    readonly TextBox _sourceCardId = new() { Width = 82, PlaceholderText = "源卡号" };
-    readonly Label _resourceStatus = new() { Dock = DockStyle.Fill, ForeColor = UiTheme.Muted, TextAlign = ContentAlignment.MiddleLeft };
-    readonly Label _sourceStatus = new() { Dock = DockStyle.Top, Height = 62, ForeColor = UiTheme.Text, Padding = new Padding(0, 7, 0, 7) };
-    readonly AnimationPreviewCanvas _preview = new() { Dock = DockStyle.Fill };
-    readonly TrackBar _timeline = new() { Dock = DockStyle.Fill, Minimum = 0, Maximum = 0, TickStyle = TickStyle.None, Enabled = false };
-    readonly NumericUpDown _fps = new() { Minimum = 1, Maximum = 60, Value = 15, Width = 88 };
-    readonly NumericUpDown _maxFrames = new() { Minimum = 10, Maximum = 600, Value = MonsterAnimationMedia.DefaultMaxFrames, Increment = 10, Width = 88 };
-    readonly NumericUpDown _startSeconds = new() { Minimum = 0, Maximum = 3600, Value = 0, DecimalPlaces = 1, Increment = 0.5M, Width = 88 };
-    readonly NumericUpDown _scale = new() { Minimum = 10, Maximum = 500, Value = 100, Increment = 5, Width = 88 };
-    readonly ComboBox _frameEdge = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110 };
-    readonly ComboBox _atlasEdge = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110 };
-    readonly CheckBox _removeGreenScreen = new() { Text = $"启用（{MonsterAnimationMedia.GreenScreenKeyHex}）", AutoSize = true, ForeColor = UiTheme.Text, BackColor = Color.Transparent };
-    readonly Label _frameLabel = new() { AutoSize = true, ForeColor = UiTheme.Muted, Padding = new Padding(8, 8, 0, 0) };
-    readonly Button _play;
-    readonly Button _apply;
-    readonly Button _copyOther;
-    readonly Button _borrowOther;
-    readonly System.Windows.Forms.Timer _timer = new();
-    readonly List<Bitmap> _previewFrames = [];
-    ExtractedAnimation? _media;
-    MonsterAnimationSet? _set;
-    int _previewFramesPerSecond = 15;
-    bool _playing;
-    bool _busy;
-    bool _automaticQuality;
-    int _resolvedFrameEdge;
-    int _mediaWidth;
-    int _mediaHeight;
+	private readonly string _gameRoot;
 
-    public MonsterAnimationForm(string gameRoot, string? initialCardId = null)
-    {
-        _gameRoot = gameRoot;
-        UiTheme.ApplyDarkTitleBar(this);
-        Text = "怪兽召唤动画替换";
-        StartPosition = FormStartPosition.CenterParent;
-        Size = new Size(1120, 780);
-        MinimumSize = new Size(760, 580);
-        BackColor = UiTheme.Window;
-        ForeColor = UiTheme.Text;
-        Font = new Font("Microsoft YaHei UI", 9F);
-        AutoScaleMode = AutoScaleMode.Dpi;
-        KeyPreview = true;
-        AllowDrop = true;
-        UiTheme.StyleTextBox(_cardId);
-        UiTheme.StyleTextBox(_sourceCardId);
-        UiTheme.StyleComboBox(_frameEdge);
-        UiTheme.StyleComboBox(_atlasEdge);
-        _frameEdge.Items.AddRange([AutomaticQuality, "512", "768", "1024", "1280", "1600", "1920", "2048"]); _frameEdge.SelectedItem = AutomaticQuality;
-        _atlasEdge.Items.AddRange(["4096", "8192", "16384"]); _atlasEdge.SelectedItem = "8192";
-        _cardId.Text = initialCardId?.All(char.IsAsciiDigit) == true ? initialCardId : "";
-        _cardId.TextChanged += (_, _) => UpdateApplyState();
-        _cardId.KeyDown += async (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await LocateAsync(); } };
-        _sourceCardId.KeyDown += async (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await LoadOtherCardAnimationAsync(); } };
-        _timeline.ValueChanged += (_, _) => { if (!_busy) ShowFrame(_timeline.Value); };
-        _fps.ValueChanged += (_, _) => { if (_media is not null) SetPreviewRate((int)_fps.Value); UpdateSourceStatus(); };
-        _scale.ValueChanged += (_, _) => { _preview.AnimationScale = (float)_scale.Value / 100f; _preview.ScalePercent = (int)_scale.Value; _preview.Invalidate(); };
-        _timer.Interval = 1000 / (int)_fps.Value;
-        _timer.Tick += (_, _) => AdvanceFrame();
-        DragEnter += (_, e) => e.Effect = e.Data?.GetDataPresent(DataFormats.FileDrop) == true ? DragDropEffects.Copy : DragDropEffects.None;
-        DragDrop += async (_, e) => { if (e.Data?.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0) await LoadMediaAsync(files[0]); };
+	private readonly Dictionary<Control, string> _localizedControls = new();
 
-        var locate = UiTheme.Button("定位 6 个资源", async (_, _) => await LocateAsync(), ButtonTone.Primary);
-        var rebuild = UiTheme.Button("重建动画映射", async (_, _) => await RebuildIndexAsync());
-        var cardRow = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Surface, Padding = new Padding(18, 6, 18, 5), ColumnCount = 4, RowCount = 2 };
-        cardRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); cardRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); cardRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); cardRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        cardRow.RowStyles.Add(new RowStyle(SizeType.Absolute, 38)); cardRow.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        cardRow.Controls.Add(Label("目标卡号", UiTheme.Gold), 0, 0); cardRow.Controls.Add(_cardId, 1, 0); cardRow.Controls.Add(locate, 2, 0); cardRow.Controls.Add(rebuild, 3, 0);
-        cardRow.Controls.Add(_resourceStatus, 0, 1); cardRow.SetColumnSpan(_resourceStatus, 4);
+	private readonly MonsterAnimationService _service = new MonsterAnimationService();
 
-        var choose = UiTheme.Button("选择 GIF / 视频", async (_, _) => await ChooseMediaAsync(), ButtonTone.Primary);
-        _play = UiTheme.Button("播放", (_, _) => TogglePlay());
-        _apply = UiTheme.Button("写入动画", async (_, _) => await ApplyAsync(), ButtonTone.Gold); _apply.Enabled = false;
-        var restore = UiTheme.Button("还原该卡动画", async (_, _) => await RestoreAsync(), ButtonTone.Danger);
-        var buttons = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 92, ColumnCount = 2, RowCount = 2, Padding = new Padding(0, 6, 0, 4), BackColor = UiTheme.Surface };
-        buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        buttons.RowStyles.Add(new RowStyle(SizeType.Percent, 50)); buttons.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-        foreach (var button in new[] { choose, _play, _apply, restore }) { button.AutoSize = false; button.Dock = DockStyle.Fill; button.Margin = new Padding(3); }
-        buttons.Controls.Add(choose, 0, 0); buttons.Controls.Add(_play, 1, 0); buttons.Controls.Add(_apply, 0, 1); buttons.Controls.Add(restore, 1, 1);
+	private CardCatalogService _catalog = CardCatalogService.LoadBestAvailable();
 
-        _copyOther = UiTheme.Button("预览并使用", async (_, _) => await LoadOtherCardAnimationAsync(), ButtonTone.Primary);
-        _copyOther.AutoSize = false; _copyOther.Dock = DockStyle.Fill;
-        _borrowOther = UiTheme.Button("高级：只读借用", async (_, _) => await BorrowOtherCardAnimationAsync(), ButtonTone.Neutral);
-        _borrowOther.AutoSize = false; _borrowOther.Dock = DockStyle.Fill;
-        var sourceRow = new TableLayoutPanel { Dock = DockStyle.Top, Height = 42, ColumnCount = 3, Margin = Padding.Empty, Padding = Padding.Empty };
-        sourceRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); sourceRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 108)); sourceRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
-        _sourceCardId.Dock = DockStyle.Fill; sourceRow.Controls.Add(_sourceCardId, 0, 0); sourceRow.Controls.Add(_copyOther, 1, 0); sourceRow.Controls.Add(_borrowOther, 2, 0);
-        var sourceTitle = new Label { Text = "使用其他卡的原版动画（可选）", Dock = DockStyle.Top, Height = 28, ForeColor = UiTheme.Gold, TextAlign = ContentAlignment.BottomLeft };
-        var options = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, RowCount = 7, Padding = new Padding(0, 4, 0, 4), BackColor = UiTheme.Surface };
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58)); options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
-        AddOption(options, 0, "帧率 / 游戏速度", _fps);
-        AddOption(options, 1, "视频起始秒", _startSeconds);
-        AddOption(options, 2, "最多读取帧数", _maxFrames);
-        AddOption(options, 3, "画质 / 单帧最长边", _frameEdge);
-        AddOption(options, 4, "单张图集上限", _atlasEdge);
-        AddOption(options, 5, "全游戏画面占比（实时）%", _scale);
-        AddOption(options, 6, "绿幕背景透明化", _removeGreenScreen);
+	private CardCatalogEntry? _resolvedCard;
 
-        var note = new Label
-        {
-            Dock = DockStyle.Fill,
-            ForeColor = UiTheme.Muted,
-            AutoSize = true,
-            MaximumSize = new Size(330, 0),
-            Text = "直接拖入 GIF／视频即可。目标卡没有原动画时，“创建并写入动画”会自动复制一套独立模板，不需要先借用。\n\n100% 对应完整 16:9 游戏画布；调整占比会立即反映在左侧预览。高级只读借用仅用于原样复用其他卡演出。",
-            Padding = new Padding(0, 10, 0, 12)
-        };
-        var scrollContent = new Panel { Dock = DockStyle.Top, AutoSize = true, BackColor = UiTheme.Surface, Padding = new Padding(14, 10, 14, 10) };
-        scrollContent.Controls.Add(note); scrollContent.Controls.Add(sourceRow); scrollContent.Controls.Add(sourceTitle); scrollContent.Controls.Add(_sourceStatus); scrollContent.Controls.Add(options);
-        var scrollBody = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = UiTheme.Surface };
-        scrollBody.Controls.Add(scrollContent);
-        scrollContent.Width = 330;
-        scrollBody.Resize += (_, _) => scrollContent.Width = Math.Max(260, scrollBody.ClientSize.Width - (scrollBody.VerticalScroll.Visible ? SystemInformation.VerticalScrollBarWidth : 0));
-        var sideLayout = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Surface, RowCount = 2, ColumnCount = 1 };
-        sideLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); sideLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 98));
-        sideLayout.Controls.Add(scrollBody, 0, 0); sideLayout.Controls.Add(buttons, 0, 1);
-        var side = new BorderPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Surface, Padding = new Padding(1) };
-        side.Controls.Add(sideLayout);
+	private readonly ImeAwareTextBox _cardId = new ImeAwareTextBox
+	{
+		Width = 220
+	};
 
-        var timelineRow = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 48, ColumnCount = 2, Padding = new Padding(8, 5, 8, 5), BackColor = UiTheme.SurfaceAlt };
-        timelineRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); timelineRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        timelineRow.Controls.Add(_timeline, 0, 0); timelineRow.Controls.Add(_frameLabel, 1, 0);
-        var previewPanel = new BorderPanel { Dock = DockStyle.Fill, BackColor = UiTheme.Surface, Padding = new Padding(1) };
-        previewPanel.Controls.Add(_preview); previewPanel.Controls.Add(timelineRow);
+	private readonly Label _resourceStatus = new Label
+	{
+		Dock = DockStyle.Fill,
+		ForeColor = UiTheme.Muted,
+		TextAlign = ContentAlignment.MiddleLeft
+	};
 
-        var body = new SplitContainer { Dock = DockStyle.Fill, SplitterWidth = 8, FixedPanel = FixedPanel.Panel2, BackColor = UiTheme.Window };
-        body.Panel1.Padding = new Padding(14, 14, 7, 14); body.Panel2.Padding = new Padding(7, 14, 14, 14);
-        body.Panel1.Controls.Add(previewPanel); body.Panel2.Controls.Add(side);
+	private readonly Label _sourceStatus = new Label
+	{
+		Dock = DockStyle.Fill,
+		ForeColor = UiTheme.Text,
+		Padding = new Padding(3, 7, 3, 7),
+		TextAlign = ContentAlignment.MiddleLeft,
+		AutoEllipsis = true,
+		UseCompatibleTextRendering = false
+	};
 
-        var banner = new GradientBanner { Dock = DockStyle.Fill, Padding = new Padding(22, 7, 22, 6) };
-        banner.Controls.Add(new Label { Text = "MONSTER ANIMATION LAB", Dock = DockStyle.Top, Height = 28, Font = new Font("Segoe UI Semibold", 16F), ForeColor = UiTheme.Text, BackColor = Color.Transparent });
-        banner.Controls.Add(new Label { Text = "GIF / VIDEO  →  SPINE SEQUENCE  →  MASTER DUEL", Dock = DockStyle.Bottom, Height = 20, ForeColor = UiTheme.Primary, BackColor = Color.Transparent });
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1, BackColor = UiTheme.Window };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 68)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 84)); root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.Controls.Add(banner, 0, 0); root.Controls.Add(cardRow, 0, 1); root.Controls.Add(body, 0, 2); Controls.Add(root);
+	private readonly AnimationPreviewCanvas _preview = new AnimationPreviewCanvas
+	{
+		Dock = DockStyle.Fill
+	};
 
-        FormClosed += (_, _) => DisposeMedia();
-        Shown += async (_, _) =>
-        {
-            const int panel1Minimum = 500;
-            const int panel2Minimum = 350;
-            var maximum = body.Width - panel2Minimum - body.SplitterWidth;
-            if (maximum >= panel1Minimum)
-            {
-                body.SplitterDistance = Math.Clamp(body.Width - 380, panel1Minimum, maximum);
-                body.Panel1MinSize = panel1Minimum;
-                body.Panel2MinSize = panel2Minimum;
-            }
-            if (_cardId.Text.Length > 0) await LocateAsync();
-        };
-    }
+	private readonly TrackBar _timeline = new TrackBar
+	{
+		Dock = DockStyle.Fill,
+		Minimum = 0,
+		Maximum = 0,
+		TickStyle = TickStyle.None,
+		Enabled = false
+	};
 
-    static Label Label(string text, Color color) => new() { Text = text, AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = color, Padding = new Padding(0, 7, 8, 0) };
+	private readonly NumericUpDown _fps = new ModernNumericUpDown
+	{
+		Minimum = 1m,
+		Maximum = 60m,
+		Value = 12m,
+		Width = 88
+	};
 
-    static void AddOption(TableLayoutPanel panel, int row, string title, Control control)
-    {
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 33));
-        panel.Controls.Add(new Label { Text = title, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, ForeColor = UiTheme.Text }, 0, row);
-        control.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-        panel.Controls.Add(control, 1, row);
-    }
+	private readonly NumericUpDown _maxFrames = new ModernNumericUpDown
+	{
+		Minimum = 10m,
+		Maximum = 600m,
+		Value = 60m,
+		Increment = 10m,
+		Width = 88
+	};
 
-    async Task LocateAsync()
-    {
-        var cardId = _cardId.Text.Trim();
-        if (!cardId.All(char.IsAsciiDigit) || cardId.Length == 0) { MessageBox.Show(this, "请输入纯数字卡号。", Text); return; }
-        try
-        {
-            SetBusy(true, "正在按卡号计算 SD / highend_hd 路径并跟随 Prefab 依赖…");
-            _set = await Task.Run(() => MonsterAnimationIndexService.Find(_gameRoot, cardId));
-            var borrowed = _borrowService.Find(_gameRoot, cardId);
-            _resourceStatus.Text = _set.Assets.Count == 0 ? "本机没有定位到这张卡的召唤动画" : _set.CountSummary + (_set.IsComplete ? "  · 可替换" : "  · 资源不完整");
-            if (borrowed is { IsIndependent: true }) _resourceStatus.Text += $"  · 已自动创建独立模板（来源 {borrowed.DonorCardId}）";
-            else if (borrowed is not null) _resourceStatus.Text += $"  · 借用 {borrowed.DonorCardId}（只读）";
-            _resourceStatus.ForeColor = borrowed is not null ? UiTheme.Gold : _set.IsComplete ? UiTheme.Primary : Color.OrangeRed;
-            UpdateApplyState();
-            if (_set.IsComplete)
-            {
-                var template = await Task.Run(() => _service.ReadTemplate(_gameRoot, _set));
-                _resourceStatus.Text += $"  · 动画名 {string.Join(" / ", template.EffectiveAnimationNames)}";
-                if (_media is null) await LoadCurrentAnimationPreviewAsync(_set);
-            }
-            else if (_media is null)
-            {
-                DisposeMedia();
-                _sourceStatus.Text = "这张卡原本没有动画：直接拖入 GIF／视频，写入时会自动创建所需资源";
-                _preview.StatusText = "DROP GIF / VIDEO HERE\n\n无原动画也可直接拖入，工具会自动创建并写入";
-                _preview.Invalidate();
-            }
-        }
-        catch (Exception ex) { MessageBox.Show(this, ex.Message, "定位动画失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
-        finally { SetBusy(false); }
-    }
+	private readonly NumericUpDown _startSeconds = new ModernNumericUpDown
+	{
+		Minimum = 0m,
+		Maximum = 3600m,
+		Value = 0m,
+		DecimalPlaces = 1,
+		Increment = 0.5m,
+		Width = 88
+	};
 
-    async Task RebuildIndexAsync()
-    {
-        var cardId = _cardId.Text.Trim();
-        if (!cardId.All(char.IsAsciiDigit) || cardId.Length == 0) { MessageBox.Show(this, "先输入要修复的纯数字卡号。", Text); return; }
-        try
-        {
-            SetBusy(true, $"正在重算卡号 {cardId} 的资源路径与 Prefab 依赖…");
-            // 只修复当前卡。旧版会扫描 LocalData 的数万个文件，在尾部异常 Bundle
-            // 上可能长时间无响应；动画资源的哈希路径和依赖表本身已经足够定位。
-            await LocateAsync();
-        }
-        catch (Exception ex) { MessageBox.Show(this, ex.Message, "重建动画映射失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
-        finally { SetBusy(false); }
-    }
+	private readonly NumericUpDown _scale = new ModernNumericUpDown
+	{
+		Minimum = 10m,
+		Maximum = 500m,
+		Value = 100m,
+		Increment = 5m,
+		Width = 88
+	};
 
-    async Task ChooseMediaAsync()
-    {
-        using var dialog = new OpenFileDialog
-        {
-            Title = "选择 GIF 或视频",
-            Filter = "动画与视频|*.gif;*.mp4;*.webm;*.mov;*.avi;*.mkv;*.m4v;*.apng|所有文件|*.*"
-        };
-        if (dialog.ShowDialog(this) == DialogResult.OK) await LoadMediaAsync(dialog.FileName);
-    }
+	private readonly ModernComboBox _frameEdge = new ModernComboBox
+	{
+		DropDownStyle = ComboBoxStyle.DropDownList,
+		Width = 110
+	};
 
-    async Task LoadMediaAsync(string path)
-    {
-        ExtractedAnimation? loadedMedia = null;
-        List<Bitmap>? loadedFrames = null;
-        var resetToFullGameCanvas = _media is null;
-        var automaticQuality = _frameEdge.Text == AutomaticQuality;
-        var removeGreenScreen = _removeGreenScreen.Checked;
-        var resolvedFrameEdge = 0;
-        var mediaWidth = 0;
-        var mediaHeight = 0;
-        try
-        {
-            if (automaticQuality)
-            {
-                SetBusy(true, "正在低清探测实际帧数与画面比例…");
-                using var probe = await MonsterAnimationMedia.ExtractAsync(path, (int)_fps.Value, (int)_maxFrames.Value, 128, (double)_startSeconds.Value);
-                using var probeFrame = probe.LoadFrame(0);
-                resolvedFrameEdge = MonsterAnimationBuilder.ChooseAutomaticFrameEdge(probe.FramePaths.Count, probeFrame.Width, probeFrame.Height, int.Parse(_atlasEdge.Text));
-                SetBusy(true, $"检测到 {probe.FramePaths.Count:N0} 帧，正在按 {resolvedFrameEdge} px 自动高清抽帧…");
-            }
-            else
-            {
-                resolvedFrameEdge = int.Parse(_frameEdge.Text);
-                SetBusy(true, $"正在按 {resolvedFrameEdge} px 用 FFmpeg 抽取画面…");
-            }
+	private readonly ModernComboBox _atlasEdge = new ModernComboBox
+	{
+		DropDownStyle = ComboBoxStyle.DropDownList,
+		Width = 110
+	};
 
-            loadedMedia = await MonsterAnimationMedia.ExtractAsync(path, (int)_fps.Value, (int)_maxFrames.Value, resolvedFrameEdge, (double)_startSeconds.Value, removeGreenScreen);
-            using (var firstFrame = loadedMedia.LoadFrame(0)) { mediaWidth = firstFrame.Width; mediaHeight = firstFrame.Height; }
-            var previewEdge = Math.Min(512, resolvedFrameEdge);
-            var mediaForPreview = loadedMedia;
-            loadedFrames = await Task.Run(() => Enumerable.Range(0, mediaForPreview.FramePaths.Count).Select(i => mediaForPreview.LoadFrame(i, previewEdge)).ToList());
-            DisposeMedia();
-            _media = loadedMedia; loadedMedia = null;
-            _automaticQuality = automaticQuality;
-            _resolvedFrameEdge = resolvedFrameEdge;
-            _mediaWidth = mediaWidth;
-            _mediaHeight = mediaHeight;
-            _previewFrames.AddRange(loadedFrames); loadedFrames = null;
-            if (resetToFullGameCanvas) _scale.Value = 100;
-            SetPreviewRate((int)_fps.Value);
-            _timeline.Maximum = Math.Max(0, _previewFrames.Count - 1); _timeline.Value = 0; _timeline.Enabled = _previewFrames.Count > 1;
-            ShowFrame(0); UpdateSourceStatus();
-            var targetCardId = _cardId.Text.Trim();
-            if (targetCardId.Length > 0 && targetCardId.All(char.IsAsciiDigit) && (_set is null || _set.CardId != targetCardId))
-                _set = await Task.Run(() => MonsterAnimationIndexService.Find(_gameRoot, targetCardId));
-            UpdateApplyState();
-            if (!_playing) TogglePlay();
-        }
-        catch (Exception ex)
-        {
-            loadedMedia?.Dispose();
-            if (loadedFrames is not null) foreach (var frame in loadedFrames) frame.Dispose();
-            MessageBox.Show(this, ex.Message, "无法读取动画源", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
-        finally { SetBusy(false); }
-    }
+	private readonly ModernComboBox _animationSelector = new ModernComboBox
+	{
+		DropDownStyle = ComboBoxStyle.DropDownList,
+		Width = 150
+	};
 
-    void UpdateSourceStatus()
-    {
-        if (_media is null) { _sourceStatus.Text = "拖入或选择 GIF / 视频后在左侧预览"; return; }
-        var quality = _automaticQuality ? $"自动高清，上限 {_resolvedFrameEdge} px" : $"固定上限 {_resolvedFrameEdge} px";
-        var transparency = _media.GreenScreenRemoved ? " · 绿幕已透明" : "";
-        var name = string.IsNullOrWhiteSpace(_media.DisplayName) ? Path.GetFileName(_media.SourcePath) : _media.DisplayName;
-        _sourceStatus.Text = $"{name}\n{_media.FramePaths.Count:N0} 帧 · 当前 {(int)_fps.Value} FPS · {_media.FramePaths.Count / (double)_fps.Value:0.00} 秒 · {_mediaWidth}×{_mediaHeight}（{quality}）{transparency}";
-    }
+	private readonly CheckBox _removeGreenScreen = new CheckBox
+	{
+		AutoSize = true,
+		ForeColor = UiTheme.Text,
+		BackColor = Color.Transparent
+	};
 
-    async Task LoadCurrentAnimationPreviewAsync(MonsterAnimationSet set)
-    {
-        _resourceStatus.Text += "  · 正在读取当前动画预览…";
-        var current = await Task.Run(() => MonsterAnimationCurrentPreview.TryLoad(_gameRoot, set));
-        if (current is null)
-        {
-            DisposeMedia();
-            _sourceStatus.Text = "当前 Spine 资源已定位，但无法合成预览\n" + MonsterAnimationSpineRenderer.LastDiagnostic;
-            _preview.StatusText = "SPINE PREVIEW UNAVAILABLE\n\n" + MonsterAnimationSpineRenderer.LastDiagnostic;
-            _preview.Invalidate();
-            _resourceStatus.Text = _resourceStatus.Text.Replace("  · 正在读取当前动画预览…", "  · 预览失败");
-            return;
-        }
-        var frames = current.Frames.ToList(); current.Frames.Clear();
-        var fps = current.FramesPerSecond; var animationName = current.AnimationName; var scalePercent = current.ScalePercent;
-        current.Dispose();
-        DisposeMedia();
-        _previewFrames.AddRange(frames);
-        _scale.Value = scalePercent;
-        SetPreviewRate(fps);
-        _timeline.Maximum = Math.Max(0, _previewFrames.Count - 1); _timeline.Value = 0; _timeline.Enabled = _previewFrames.Count > 1;
-        _preview.StatusText = "";
-        ShowFrame(0);
-        _sourceStatus.Text = $"当前游戏动画 · {animationName}\n{_previewFrames.Count:N0} 帧 · {fps} FPS · {_previewFrames.Count / (double)fps:0.00} 秒 · 全画布 {scalePercent}%";
-        _resourceStatus.Text = _resourceStatus.Text.Replace("  · 正在读取当前动画预览…", "  · 正在预览当前动画");
-        if (!_playing) TogglePlay();
-    }
+	private readonly Label _frameLabel = new Label
+	{
+		AutoSize = true,
+		ForeColor = UiTheme.Muted,
+		Padding = new Padding(8, 8, 0, 0)
+	};
 
-    async Task LoadOtherCardAnimationAsync()
-    {
-        var sourceCardId = _sourceCardId.Text.Trim();
-        if (!sourceCardId.All(char.IsAsciiDigit) || sourceCardId.Length == 0)
-        {
-            MessageBox.Show(this, "请输入要复制动画的纯数字源卡号。", Text);
-            return;
-        }
-        CurrentMonsterAnimationPreview? rendered = null;
-        ExtractedAnimation? loadedMedia = null;
-        try
-        {
-            SetBusy(true, $"正在定位源卡 {sourceCardId} 的 Spine 与多页图集…");
-            var sourceSet = await Task.Run(() => MonsterAnimationIndexService.Find(_gameRoot, sourceCardId));
-            if (!sourceSet.IsComplete) throw new InvalidDataException($"源卡 {sourceCardId} 的动画资源不完整：{sourceSet.CountSummary}");
-            var requestedFps = (int)_fps.Value;
-            var maximumFrames = (int)_maxFrames.Value;
-            var automatic = _frameEdge.Text == AutomaticQuality;
-            var edge = automatic ? 256 : int.Parse(_frameEdge.Text);
-            if (automatic)
-            {
-                using var probe = await Task.Run(() => MonsterAnimationCurrentPreview.TryLoad(_gameRoot, sourceSet, 256, requestedFps, maximumFrames));
-                if (probe is null) throw new InvalidDataException(MonsterAnimationSpineRenderer.LastDiagnostic);
-                edge = Math.Min(1024, MonsterAnimationBuilder.ChooseAutomaticFrameEdge(
-                    probe.Frames.Count,
-                    probe.Frames[0].Width,
-                    probe.Frames[0].Height,
-                    int.Parse(_atlasEdge.Text)));
-                SetBusy(true, $"源卡 {sourceCardId} 已定位，正在按 {edge} px 合成真实 Spine 动画…");
-            }
-            rendered = await Task.Run(() => MonsterAnimationCurrentPreview.TryLoad(_gameRoot, sourceSet, edge, requestedFps, maximumFrames));
-            if (rendered is null) throw new InvalidDataException("无法合成源卡动画：" + MonsterAnimationSpineRenderer.LastDiagnostic);
-            loadedMedia = await Task.Run(() => ExtractedAnimation.CreateFromFrames(
-                $"源卡 {sourceCardId} · {rendered.AnimationName}",
-                rendered.Frames,
-                rendered.FramesPerSecond));
-            var frames = rendered.Frames.ToList();
-            rendered.Frames.Clear();
-            var fps = rendered.FramesPerSecond;
-            rendered.Dispose(); rendered = null;
-            DisposeMedia();
-            _media = loadedMedia; loadedMedia = null;
-            _previewFrames.AddRange(frames);
-            _automaticQuality = automatic;
-            _resolvedFrameEdge = edge;
-            _mediaWidth = frames[0].Width;
-            _mediaHeight = frames[0].Height;
-            _fps.Value = Math.Clamp(fps, (int)_fps.Minimum, (int)_fps.Maximum);
-            _scale.Value = 100;
-            SetPreviewRate(fps);
-            _timeline.Maximum = Math.Max(0, _previewFrames.Count - 1);
-            _timeline.Value = 0;
-            _timeline.Enabled = _previewFrames.Count > 1;
-            _preview.StatusText = "";
-            ShowFrame(0);
-            UpdateSourceStatus();
-            UpdateApplyState();
-            _resourceStatus.ForeColor = UiTheme.Primary;
-            _resourceStatus.Text = $"已载入源卡 {sourceCardId} 的真实 Spine 动画 · {_previewFrames.Count} 帧 · {fps} FPS";
-            if (!_playing) TogglePlay();
-        }
-        catch (Exception ex)
-        {
-            rendered?.Dispose();
-            loadedMedia?.Dispose();
-            MessageBox.Show(this, ex.Message, "无法复制源卡动画", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
-        finally { SetBusy(false); }
-    }
+	private readonly Button _play;
 
-    async Task BorrowOtherCardAnimationAsync()
-    {
-        var targetCardId = _cardId.Text.Trim();
-        var donorCardId = _sourceCardId.Text.Trim();
-        var installed = false;
-        if (!targetCardId.All(char.IsAsciiDigit) || targetCardId.Length == 0 ||
-            !donorCardId.All(char.IsAsciiDigit) || donorCardId.Length == 0)
-        {
-            MessageBox.Show(this, "请同时输入纯数字目标卡号和源卡号。", Text);
-            return;
-        }
-        if (!EnsureGameClosed()) return;
-        if (MessageBox.Show(this,
-                $"给原本没有召唤动画的卡号 {targetCardId} 登记动画，并借用卡号 {donorCardId} 的 SD / HighEnd_HD 演出？\n\n" +
-                "会新增 4 个入口 Bundle，并修改 CardIndividualData 与本地资源目录；全部自动备份，可用“还原该卡动画”撤销。",
-                "确认建立借用动画",
-                MessageBoxButtons.OKCancel,
-                MessageBoxIcon.Warning) != DialogResult.OK) return;
-        try
-        {
-            SetBusy(true, $"正在让卡号 {targetCardId} 借用 {donorCardId} 的召唤动画…");
-            var record = await Task.Run(() => _borrowService.Install(_gameRoot, targetCardId, donorCardId));
-            installed = true;
-            _set = await Task.Run(() => MonsterAnimationIndexService.Find(_gameRoot, targetCardId));
-            if (!_set.IsComplete) throw new InvalidDataException("借用登记已写入，但没有重新定位到完整动画资源，已停止后续写入。");
-            DisposeMedia();
-            _resourceStatus.ForeColor = UiTheme.Gold;
-            _resourceStatus.Text = $"借用完成 · 供体 {record.DonorCardId} · {_set.CountSummary} · 只读";
-            await LoadCurrentAnimationPreviewAsync(_set);
-            _apply.Enabled = false;
-            MessageBox.Show(this,
-                $"卡号 {targetCardId} 已借用卡号 {donorCardId} 的召唤动画。\n\n请完全退出并重新启动 Master Duel 后测试。借用资源为只读，避免修改供体卡图集。",
-                "借用动画完成",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
-        }
-        catch (Exception ex)
-        {
-            if (installed)
-            {
-                try { await Task.Run(() => _borrowService.Remove(_gameRoot, targetCardId)); }
-                catch (Exception rollbackEx)
-                {
-                    MessageBox.Show(this,
-                        $"{ex.Message}\n\n自动回滚也失败：{rollbackEx.Message}\n请先不要启动游戏，并再次点击“还原该卡动画”。",
-                        "建立借用动画失败",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Error);
-                    return;
-                }
-            }
-            MessageBox.Show(this, ex.Message, "建立借用动画失败（已回滚）", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
-        finally { SetBusy(false); }
-    }
+	private readonly Button _apply;
 
-    void SetPreviewRate(int framesPerSecond)
-    {
-        _previewFramesPerSecond = Math.Clamp(framesPerSecond, 1, 60);
-        _timer.Interval = Math.Max(15, 1000 / _previewFramesPerSecond);
-    }
+	private readonly Button _chooseMedia;
 
-    void TogglePlay()
-    {
-        if (_previewFrames.Count < 2) return;
-        _playing = !_playing; _play.Text = _playing ? "暂停" : "播放"; _timer.Enabled = _playing;
-    }
+	private readonly Button _restore;
 
-    void AdvanceFrame()
-    {
-        if (_previewFrames.Count == 0) return;
-        _busy = true; _timeline.Value = (_timeline.Value + 1) % _previewFrames.Count; _busy = false; ShowFrame(_timeline.Value);
-    }
+	private readonly System.Windows.Forms.Timer _timer = new System.Windows.Forms.Timer();
 
-    void ShowFrame(int index)
-    {
-        if (index < 0 || index >= _previewFrames.Count) return;
-        _preview.Frame = _previewFrames[index]; _preview.Invalidate();
-        _frameLabel.Text = $"{index + 1} / {_previewFrames.Count}";
-    }
+	private readonly System.Windows.Forms.Timer _cardLookupDebounce = new System.Windows.Forms.Timer
+	{
+		Interval = 380
+	};
 
-    async Task ApplyAsync()
-    {
-        var cardId = _cardId.Text.Trim();
-        if (cardId.Length == 0 || !cardId.All(char.IsAsciiDigit)) { MessageBox.Show(this, "先输入纯数字目标卡号。", Text); return; }
-        if (_media is null) { MessageBox.Show(this, "先拖入或选择 GIF／视频。", Text); return; }
-        _set ??= await Task.Run(() => MonsterAnimationIndexService.Find(_gameRoot, cardId));
-        if (_set.CardId != cardId) _set = await Task.Run(() => MonsterAnimationIndexService.Find(_gameRoot, cardId));
-        if (_borrowService.IsReadOnlyBorrowed(_gameRoot, cardId)) { MessageBox.Show(this, "这张卡处于旧版只读借用模式。请先点“还原该卡动画”，再直接拖入视频重新创建。", Text); return; }
-        if (!EnsureGameClosed()) return;
-        var needsCreation = !_set.IsComplete;
-        var confirm = needsCreation
-            ? $"卡号 {cardId} 原本没有完整召唤动画。\n\n工具将自动选择本机已有演出作为结构模板，复制成完全独立的一套资源，再写入当前 GIF／视频；不会修改供体卡。继续？"
-            : $"将修改卡号 {cardId} 的 SD／HighEnd_HD 两套动画资源。\n\n所有 Bundle 会先备份；任一步失败会自动回滚。继续？";
-        if (MessageBox.Show(this, confirm, needsCreation ? "创建并写入召唤动画" : "确认替换召唤动画", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
-        var autoCreated = false;
-        try
-        {
-            if (needsCreation)
-            {
-                SetBusy(true, "正在自动选择模板并复制独立动画资源…");
-                var record = await Task.Run(() => _borrowService.InstallIndependent(_gameRoot, cardId));
-                autoCreated = true;
-                _set = await Task.Run(() => MonsterAnimationIndexService.Find(_gameRoot, cardId));
-                if (!_set.IsComplete) throw new InvalidDataException("独立模板已经复制，但目标动画资源仍不完整，已停止写入。");
-                _resourceStatus.Text = $"已从卡号 {record.DonorCardId} 建立独立模板 · 正在生成动画图集…";
-            }
-            SetBusy(true, "正在生成单张 Spine 图集…");
-            var template = await Task.Run(() => _service.ReadTemplate(_gameRoot, _set));
-            using var built = await Task.Run(() => MonsterAnimationBuilder.Build(_media.FramePaths, _set.CardId, (int)_fps.Value, (int)_scale.Value, template, int.Parse(_atlasEdge.Text)));
-            _resourceStatus.Text = $"图集 {built.AtlasWidth}×{built.AtlasHeight} · 正在 DXT5 压缩并写入 6 个 Bundle…";
-            await Task.Run(() => _service.Apply(_gameRoot, _set, built));
-            _resourceStatus.ForeColor = UiTheme.Primary;
-            _resourceStatus.Text = $"替换完成 · {built.FrameCount} 帧 / {built.FramesPerSecond} FPS · 全画布 {(int)_scale.Value}% · 图集 {built.AtlasWidth}×{built.AtlasHeight}";
-            MessageBox.Show(this, needsCreation
-                ? "已为这张无原动画卡自动创建独立资源并写入动画。\n\n请完全退出并重新启动 Master Duel 后测试召唤演出与商店预览。"
-                : "两套召唤动画资源已经全部替换并备份。\n\n请完全退出并重新启动 Master Duel 后测试召唤演出与商店预览。", "动画替换完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        }
-        catch (Exception ex)
-        {
-            if (autoCreated)
-            {
-                try { await Task.Run(() => _borrowService.Remove(_gameRoot, cardId)); }
-                catch (Exception rollbackEx)
-                {
-                    MessageBox.Show(this, $"{ex.Message}\n\n自动清理失败：{rollbackEx.Message}\n请保持游戏关闭并点击“还原该卡动画”。", "动画写入失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
-                _set = await Task.Run(() => MonsterAnimationIndexService.Find(_gameRoot, cardId));
-            }
-            MessageBox.Show(this, ex.Message, "动画替换失败（已回滚）", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
-        finally { SetBusy(false); }
-    }
+	private readonly Stopwatch _playClock = new();
 
-    async Task RestoreAsync()
-    {
-        var cardId = _cardId.Text.Trim();
-        var borrowed = cardId.Length > 0 ? _borrowService.Find(_gameRoot, cardId) : null;
-        if (borrowed is null && (_set is null || _set.Assets.Count == 0)) { MessageBox.Show(this, "先输入卡号并定位动画资源。", Text); return; }
-        if (!EnsureGameClosed()) return;
-        if (borrowed is not null)
-        {
-            var description = borrowed.IsIndependent ? "本工具自动创建的整套独立动画资源" : $"对卡号 {borrowed.DonorCardId} 的只读动画借用";
-            if (MessageBox.Show(this, $"确认移除卡号 {cardId} 的{description}，并删除 {borrowed.CreatedBundlePaths.Count} 个已创建 Bundle？", "还原动画", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
-            try
-            {
-                SetBusy(true, "正在移除借用登记与入口 Bundle…");
-                var removed = await Task.Run(() => _borrowService.Remove(_gameRoot, cardId));
-                DisposeMedia();
-                _set = await Task.Run(() => MonsterAnimationIndexService.Find(_gameRoot, cardId));
-                _resourceStatus.ForeColor = UiTheme.Primary;
-                _resourceStatus.Text = removed ? "已移除自动创建的动画资源；该卡已回到原始无动画状态" : "没有找到自动创建记录";
-                MessageBox.Show(this, _resourceStatus.Text, "还原完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (Exception ex) { MessageBox.Show(this, ex.Message, "还原借用动画失败（已回滚）", MessageBoxButtons.OK, MessageBoxIcon.Error); }
-            finally { SetBusy(false); }
-            return;
-        }
-        var set = _set!;
-        if (MessageBox.Show(this, $"确认把卡号 {set.CardId} 的动画 Bundle 全部还原为首次替换前的版本？", "还原动画", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
-        try
-        {
-            SetBusy(true, "正在还原动画 Bundle…");
-            var count = await Task.Run(() => _service.Restore(_gameRoot, set));
-            _resourceStatus.Text = count == 0 ? "没有找到该卡的动画备份" : $"已还原 {count} 个动画 Bundle";
-            MessageBox.Show(this, count == 0 ? "该卡尚未由本工具替换，或备份目录不存在。" : $"已还原 {count} 个 Bundle。", "动画还原", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        }
-        catch (Exception ex) { MessageBox.Show(this, ex.Message, "还原失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
-        finally { SetBusy(false); }
-    }
+	private readonly List<Bitmap> _previewFrames = new List<Bitmap>();
 
-    void SetBusy(bool busy, string? message = null)
-    {
-        _busy = busy;
-        UseWaitCursor = busy;
-        if (message is not null) _resourceStatus.Text = message;
-        _cardId.Enabled = !busy;
-        _sourceCardId.Enabled = !busy;
-        _copyOther.Enabled = !busy;
-        _borrowOther.Enabled = !busy;
-        UpdateApplyState();
-    }
+	private ExtractedAnimation? _media;
 
-    void UpdateApplyState()
-    {
-        var cardId = _cardId.Text.Trim();
-        var validTarget = cardId.Length > 0 && cardId.All(char.IsAsciiDigit);
-        var readOnly = validTarget && _borrowService.IsReadOnlyBorrowed(_gameRoot, cardId);
-        _apply.Text = _set?.IsComplete == true ? "写入动画" : "创建并写入动画";
-        _apply.Enabled = !_busy && validTarget && _media is not null && !readOnly;
-    }
+	private MonsterAnimationSet? _set;
 
-    bool EnsureGameClosed()
-    {
-        try
-        {
-            if (System.Diagnostics.Process.GetProcessesByName("masterduel").Length == 0) return true;
-        }
-        catch { return true; }
-        MessageBox.Show(this, "Master Duel 仍在运行。请先完全退出游戏，再替换或还原动画 Bundle，避免文件占用或更新丢失。", "请先退出游戏", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        return false;
-    }
+	private MonsterAnimationSet? _previewSet;
 
-    void DisposeMedia()
-    {
-        _timer.Stop(); _playing = false; _play.Text = "播放"; _preview.Frame = null;
-        foreach (var frame in _previewFrames) frame.Dispose(); _previewFrames.Clear();
-        _media?.Dispose(); _media = null;
-        _timeline.Value = 0; _timeline.Maximum = 0; _timeline.Enabled = false; _frameLabel.Text = "";
-    }
-}
+	private int _previewFramesPerSecond = 15;
 
-public sealed class AnimationPreviewCanvas : Control
-{
-    public Bitmap? Frame { get; set; }
-    public float AnimationScale { get; set; } = 1f;
-    public int ScalePercent { get; set; } = 100;
-    public string StatusText { get; set; } = "DROP GIF / VIDEO HERE\n\n拖入 GIF 或视频开始预览";
+	private int _playStartFrame;
 
-    public AnimationPreviewCanvas()
-    {
-        DoubleBuffered = true;
-        BackColor = UiTheme.SurfaceAlt;
-        ResizeRedraw = true;
-    }
+	private bool _playing;
 
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        base.OnPaint(e);
-        var g = e.Graphics;
-        const int cell = 18;
-        using var dark = new SolidBrush(Color.FromArgb(24, 32, 46));
-        using var light = new SolidBrush(Color.FromArgb(36, 48, 66));
-        for (var y = 0; y < Height; y += cell)
-            for (var x = 0; x < Width; x += cell)
-                g.FillRectangle(((x / cell + y / cell) & 1) == 0 ? dark : light, x, y, cell, cell);
-        if (Frame is null)
-        {
-            TextRenderer.DrawText(g, StatusText, Font, ClientRectangle, UiTheme.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
-            return;
-        }
-        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-        g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
-        var available = new RectangleF(16, 16, Math.Max(1, ClientSize.Width - 32), Math.Max(1, ClientSize.Height - 32));
-        var gameAspect = (float)(MonsterAnimationBuilder.GameCanvasWidth / MonsterAnimationBuilder.GameCanvasHeight);
-        var viewportWidth = available.Width;
-        var viewportHeight = viewportWidth / gameAspect;
-        if (viewportHeight > available.Height) { viewportHeight = available.Height; viewportWidth = viewportHeight * gameAspect; }
-        var viewport = new RectangleF(available.X + (available.Width - viewportWidth) / 2f, available.Y + (available.Height - viewportHeight) / 2f, viewportWidth, viewportHeight);
-        var fit = Math.Min(viewport.Width / Frame.Width, viewport.Height / Frame.Height) * AnimationScale;
-        var width = Frame.Width * fit;
-        var height = Frame.Height * fit;
-        var target = new RectangleF(viewport.X + (viewport.Width - width) / 2f, viewport.Y + (viewport.Height - height) / 2f, width, height);
-        var state = g.Save();
-        g.SetClip(viewport);
-        g.DrawImage(Frame, target);
-        g.Restore(state);
-        using var border = new Pen(Color.FromArgb(130, UiTheme.Primary), 1f);
-        g.DrawRectangle(border, viewport.X, viewport.Y, viewport.Width, viewport.Height);
-        TextRenderer.DrawText(g, $"全游戏画布 16:9 · {ScalePercent}%", Font, Rectangle.Round(viewport), UiTheme.Primary, TextFormatFlags.Top | TextFormatFlags.Right | TextFormatFlags.NoPadding);
-    }
+	private bool _busy;
+
+	private bool _automaticQuality;
+
+	private int _resolvedFrameEdge;
+
+	private int _mediaWidth;
+
+	private int _mediaHeight;
+
+	private int _animationPreviewVersion;
+
+	private CancellationTokenSource? _animationPreviewCancellation;
+
+	private Func<string>? _resourceStatusFactory;
+
+	private Func<string>? _locatedResourceStatusFactory;
+
+	private Func<string>? _sourceStatusFactory;
+
+	private Func<string>? _previewStatusFactory;
+
+	private bool _updatingAnimationSelector;
+
+	private bool _updatingTimeline;
+
+	private bool _suppressCardLookup;
+
+	private bool _legacyCreation;
+
+	public MonsterAnimationForm(string gameRoot, string? initialCardId = null)
+	{
+		_gameRoot = gameRoot;
+		UiTheme.ApplyDarkTitleBar(this);
+		Text = Localizer.T("animation.title");
+		base.StartPosition = FormStartPosition.CenterParent;
+		base.Size = new Size(1160, 820);
+		MinimumSize = new Size(940, 680);
+		BackColor = UiTheme.Window;
+		ForeColor = UiTheme.Text;
+		Font = new Font("Microsoft YaHei UI", 9f);
+		base.AutoScaleMode = AutoScaleMode.Dpi;
+		base.KeyPreview = true;
+		AllowDrop = true;
+		UiTheme.StyleTextBox(_cardId);
+		UiTheme.StyleComboBox(_frameEdge);
+		UiTheme.StyleComboBox(_atlasEdge);
+		UiTheme.StyleComboBox(_animationSelector);
+		_frameEdge.Items.AddRange(new object[8] { Localizer.T("animation.quality.auto"), "512", "768", "1024", "1280", "1600", "1920", "2048" });
+		_frameEdge.SelectedIndex = 0;
+		_atlasEdge.Items.AddRange(new object[2] { "2048", "4096" });
+		_atlasEdge.SelectedItem = "4096";
+		_animationSelector.Items.Add("animation");
+		_animationSelector.SelectedIndex = 0;
+		_animationSelector.SelectedIndexChanged += async delegate
+		{
+			if (!_updatingAnimationSelector && !_busy && _media == null && _previewSet?.IsComplete == true)
+			{
+				await LoadCurrentAnimationPreviewAsync(_previewSet);
+			}
+		};
+		_preview.ViewChanged += delegate
+		{
+			decimal percent = Math.Clamp(_preview.ScalePercent, (int)_scale.Minimum, (int)_scale.Maximum);
+			if (_scale.Value != percent) _scale.Value = percent;
+		};
+		_cardId.Text = ((initialCardId != null && initialCardId.All(char.IsAsciiDigit)) ? initialCardId : "");
+		_cardLookupDebounce.Tick += async delegate
+		{
+			_cardLookupDebounce.Stop();
+			string query = _cardId.Text.Trim();
+			if (!_busy && !_cardId.IsImeComposing && query.Length > 0 && query.All(char.IsAsciiDigit))
+			{
+				await LocateAsync();
+			}
+		};
+		_cardId.TextChanged += delegate
+		{
+			if (_suppressCardLookup || _cardId.IsImeComposing)
+			{
+				return;
+			}
+			ScheduleAutomaticCardLookup();
+		};
+		_cardId.ImeCompositionStarted += delegate { _cardLookupDebounce.Stop(); };
+		_cardId.ImeCompositionEnded += delegate { ScheduleAutomaticCardLookup(); };
+		_cardId.KeyDown += async delegate(object? _, KeyEventArgs e)
+		{
+			if (e.KeyCode == Keys.Return)
+			{
+				_cardLookupDebounce.Stop();
+				e.SuppressKeyPress = true;
+				await LocateAsync();
+			}
+		};
+		_timeline.ValueChanged += delegate
+		{
+			if (!_updatingTimeline)
+			{
+				ShowFrame(_timeline.Value);
+			}
+		};
+		_fps.ValueChanged += delegate
+		{
+			if (_media != null)
+			{
+				SetPreviewRate((int)_fps.Value);
+			}
+			UpdateSourceStatus();
+		};
+		_scale.ValueChanged += delegate
+		{
+			_preview.AnimationScale = (float)_scale.Value / 100f;
+			_preview.ScalePercent = (int)_scale.Value;
+			_preview.Invalidate();
+		};
+		_timer.Interval = 1000 / (int)_fps.Value;
+		_timer.Tick += delegate
+		{
+			AdvanceFrame();
+		};
+		base.DragEnter += delegate(object? _, DragEventArgs e)
+		{
+			IDataObject? data = e.Data;
+			e.Effect = ((data != null && data.GetDataPresent(DataFormats.FileDrop)) ? DragDropEffects.Copy : DragDropEffects.None);
+		};
+		base.DragDrop += async delegate(object? _, DragEventArgs e)
+		{
+			if (e.Data?.GetData(DataFormats.FileDrop) is string[] files && files.Length != 0)
+			{
+				await LoadMediaAsync(files.All(IsImageFile) ? files : [files[0]]);
+			}
+		};
+		Button locate = Bind(UiTheme.Button("", async delegate
+		{
+			await LocateAsync();
+		}, ButtonTone.Primary), "animation.action.locate");
+		Button rebuild = Bind(UiTheme.Button("", async delegate
+		{
+			await RebuildIndexAsync();
+		}), "animation.action.rebuild");
+		TableLayoutPanel cardRow = new TableLayoutPanel
+		{
+			Dock = DockStyle.Fill,
+			BackColor = UiTheme.Surface,
+			Padding = new Padding(18, 8, 18, 8),
+			ColumnCount = 5,
+			RowCount = 1
+		};
+		cardRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+		cardRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+		cardRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+		cardRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+		cardRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+		cardRow.Controls.Add(Bind(Label("", UiTheme.Gold), "animation.field.card"), 0, 0);
+		cardRow.Controls.Add(_cardId, 1, 0);
+		cardRow.Controls.Add(locate, 2, 0);
+		cardRow.Controls.Add(_resourceStatus, 3, 0);
+		cardRow.Controls.Add(rebuild, 4, 0);
+		_chooseMedia = Bind(UiTheme.Button("", async delegate
+		{
+			await ChooseMediaAsync();
+		}, ButtonTone.Primary), "animation.action.choose");
+		_chooseMedia.Enabled = false;
+		_play = Bind(UiTheme.Button("", delegate
+		{
+			TogglePlay();
+		}), "animation.action.play");
+		_apply = Bind(UiTheme.Button("", async delegate
+		{
+			await ApplyAsync();
+		}, ButtonTone.Gold), "animation.action.apply");
+		_apply.Enabled = false;
+		_restore = Bind(UiTheme.Button("", async delegate
+		{
+			await RestoreAsync();
+		}, ButtonTone.Danger), "animation.action.restore");
+		_restore.Enabled = false;
+		TableLayoutPanel buttons = new TableLayoutPanel
+		{
+			Dock = DockStyle.Fill,
+			ColumnCount = 2,
+			RowCount = 3,
+			Padding = new Padding(0, 6, 0, 4),
+			BackColor = UiTheme.Surface
+		};
+		buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+		buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+		buttons.RowStyles.Add(new RowStyle(SizeType.Percent, 33.333f));
+		buttons.RowStyles.Add(new RowStyle(SizeType.Percent, 33.333f));
+		buttons.RowStyles.Add(new RowStyle(SizeType.Percent, 33.334f));
+		Button[] array = new Button[4] { _chooseMedia, _play, _apply, _restore };
+		foreach (Button obj in array)
+		{
+			obj.AutoSize = false;
+			obj.Dock = DockStyle.Fill;
+			obj.Margin = new Padding(3);
+		}
+		buttons.Controls.Add(_chooseMedia, 0, 0);
+		buttons.SetColumnSpan(_chooseMedia, 2);
+		buttons.Controls.Add(_play, 0, 1);
+		buttons.SetColumnSpan(_play, 2);
+		buttons.Controls.Add(_apply, 0, 2);
+		buttons.Controls.Add(_restore, 1, 2);
+		TableLayoutPanel options = new TableLayoutPanel
+		{
+			Dock = DockStyle.Top,
+			Height = 277,
+			ColumnCount = 2,
+			RowCount = 8,
+			Padding = new Padding(0, 4, 0, 4),
+			BackColor = UiTheme.Surface
+		};
+		options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58f));
+		options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42f));
+		AddOption(options, 0, "animation.field.name", _animationSelector);
+		AddOption(options, 1, "animation.field.fps", _fps);
+		AddOption(options, 2, "animation.field.start", _startSeconds);
+		AddOption(options, 3, "animation.field.frames", _maxFrames);
+		AddOption(options, 4, "animation.field.quality", _frameEdge);
+		AddOption(options, 5, "animation.field.atlas", _atlasEdge);
+		AddOption(options, 6, "animation.field.scale", _scale);
+		AddOption(options, 7, "animation.field.chroma", _removeGreenScreen);
+		Bind(_removeGreenScreen, "animation.option.chroma");
+		Label note = Bind(new Label
+		{
+			Dock = DockStyle.Top,
+			Height = 104,
+			ForeColor = UiTheme.Muted,
+			Padding = new Padding(0, 10, 0, 0)
+		}, "animation.note");
+		DarkScrollPanel optionScroll = new DarkScrollPanel
+		{
+			Dock = DockStyle.Fill,
+			BackColor = UiTheme.Surface,
+			Padding = Padding.Empty,
+			Margin = Padding.Empty,
+			ContentHeight = options.Height + note.Height
+		};
+		TableLayoutPanel optionContent = new()
+		{
+			Dock = DockStyle.Top,
+			Height = options.Height + note.Height,
+			ColumnCount = 1,
+			RowCount = 2,
+			Margin = Padding.Empty,
+			Padding = Padding.Empty,
+			BackColor = UiTheme.Surface
+		};
+		optionContent.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+		optionContent.RowStyles.Add(new RowStyle(SizeType.Absolute, options.Height));
+		optionContent.RowStyles.Add(new RowStyle(SizeType.Absolute, note.Height));
+		note.Dock = DockStyle.Fill;
+		optionContent.Controls.Add(options, 0, 0);
+		optionContent.Controls.Add(note, 0, 1);
+		optionScroll.ContentPanel.Controls.Add(optionContent);
+		BorderPanel side = new BorderPanel
+		{
+			Dock = DockStyle.Fill,
+			BackColor = UiTheme.Surface,
+			Padding = new Padding(18)
+		};
+		TableLayoutPanel sideLayout = new TableLayoutPanel
+		{
+			Dock = DockStyle.Fill,
+			ColumnCount = 1,
+			RowCount = 3,
+			Margin = Padding.Empty,
+			Padding = Padding.Empty,
+			BackColor = UiTheme.Surface
+		};
+		sideLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+		sideLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+		sideLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58f));
+		sideLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 132f));
+		sideLayout.Controls.Add(optionScroll, 0, 0);
+		sideLayout.Controls.Add(_sourceStatus, 0, 1);
+		sideLayout.Controls.Add(buttons, 0, 2);
+		side.Controls.Add(sideLayout);
+		TableLayoutPanel timelineRow = new TableLayoutPanel
+		{
+			Dock = DockStyle.Bottom,
+			Height = 48,
+			ColumnCount = 2,
+			Padding = new Padding(8, 5, 8, 5),
+			BackColor = UiTheme.SurfaceAlt
+		};
+		timelineRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+		timelineRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+		timelineRow.Controls.Add(_timeline, 0, 0);
+		timelineRow.Controls.Add(_frameLabel, 1, 0);
+		BorderPanel previewPanel = new BorderPanel
+		{
+			Dock = DockStyle.Fill,
+			BackColor = UiTheme.Surface,
+			Padding = new Padding(1)
+		};
+		previewPanel.Controls.Add(_preview);
+		previewPanel.Controls.Add(timelineRow);
+		SplitContainer body = new SplitContainer
+		{
+			Dock = DockStyle.Fill,
+			SplitterWidth = 8,
+			FixedPanel = FixedPanel.Panel2,
+			BackColor = UiTheme.Window
+		};
+		body.Panel1.Padding = new Padding(14, 14, 7, 14);
+		body.Panel2.Padding = new Padding(7, 14, 14, 14);
+		body.Panel1.Controls.Add(previewPanel);
+		body.Panel2.Controls.Add(side);
+		GradientBanner banner = new GradientBanner
+		{
+			Dock = DockStyle.Fill,
+			Padding = new Padding(22, 10, 22, 8)
+		};
+		banner.Controls.Add(new Label
+		{
+			Text = "MONSTER ANIMATION LAB",
+			Dock = DockStyle.Top,
+			Height = 28,
+			Font = new Font("Segoe UI Semibold", 16f),
+			ForeColor = UiTheme.Text,
+			BackColor = Color.Transparent
+		});
+		banner.Controls.Add(new Label
+		{
+			Text = "GIF / VIDEO  →  SPINE SEQUENCE  →  MASTER DUEL",
+			Dock = DockStyle.Bottom,
+			Height = 22,
+			ForeColor = UiTheme.Primary,
+			BackColor = Color.Transparent
+		});
+		TableLayoutPanel root = new TableLayoutPanel
+		{
+			Dock = DockStyle.Fill,
+			RowCount = 3,
+			ColumnCount = 1,
+			BackColor = UiTheme.Window
+		};
+		root.RowStyles.Add(new RowStyle(SizeType.Absolute, 68f));
+		root.RowStyles.Add(new RowStyle(SizeType.Absolute, 58f));
+		root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+		root.Controls.Add(banner, 0, 0);
+		root.Controls.Add(cardRow, 0, 1);
+		root.Controls.Add(body, 0, 2);
+		base.Controls.Add(root);
+		base.FormClosed += delegate
+		{
+			Localizer.LanguageChanged -= OnLanguageChanged;
+			_animationPreviewCancellation?.Cancel();
+			_animationPreviewCancellation?.Dispose();
+			_animationPreviewCancellation = null;
+			_cardLookupDebounce.Stop();
+			_cardLookupDebounce.Dispose();
+			DisposeMedia();
+		};
+		Localizer.LanguageChanged += OnLanguageChanged;
+		SetSourceStatus("animation.source.drop");
+		SetPreviewStatus("animation.preview.drop");
+		ApplyLanguage();
+		base.Shown += async delegate
+		{
+			int maximum = body.Width - 390 - body.SplitterWidth;
+			if (maximum >= 500)
+			{
+				body.SplitterDistance = Math.Clamp(body.Width - 420, 500, maximum);
+				body.Panel1MinSize = 500;
+				body.Panel2MinSize = 390;
+			}
+			if (_cardId.Text.Length > 0 && _set == null && !_busy)
+			{
+				await LocateAsync();
+			}
+		};
+	}
+
+	public string CardQuery => _cardId.Text.Trim();
+
+	public string? LocatedCardId => _set?.CardId;
+
+	/// <summary>
+	/// Card id that owns the six assets currently shown in the read-only preview.
+	/// This can differ from <see cref="LocatedCardId"/> for alternate-art/public ids
+	/// such as 3899, whose equivalent official cut-in is stored under P13668.
+	/// </summary>
+	public string? PreviewSourceCardId => _previewSet?.CardId;
+
+	public async Task PreviewCardAsync(string cardId)
+	{
+		if (string.IsNullOrWhiteSpace(cardId) || !cardId.All(char.IsAsciiDigit))
+		{
+			throw new ArgumentException("卡号必须是纯数字。", nameof(cardId));
+		}
+		_cardLookupDebounce.Stop();
+		if (_busy && string.Equals(CardQuery, cardId, StringComparison.Ordinal))
+		{
+			return;
+		}
+		_suppressCardLookup = true;
+		try
+		{
+			_cardId.Text = cardId;
+			_cardId.SelectionStart = _cardId.TextLength;
+		}
+		finally
+		{
+			_suppressCardLookup = false;
+		}
+		await LocateAsync();
+	}
+
+	private void ScheduleAutomaticCardLookup()
+	{
+		_cardLookupDebounce.Stop();
+		string query = _cardId.Text.Trim();
+		if (query.Length > 0 && query.All(char.IsAsciiDigit))
+		{
+			_cardLookupDebounce.Start();
+		}
+	}
+
+	private T Bind<T>(T control, string resourceId) where T : Control
+	{
+		_localizedControls[control] = resourceId;
+		control.Text = Localizer.T(resourceId);
+		return control;
+	}
+
+	private void ApplyLanguage()
+	{
+		Text = Localizer.T("animation.title");
+		foreach ((Control control, string id) in _localizedControls) control.Text = Localizer.T(id);
+		_cardId.PlaceholderText = Localizer.T("animation.search.placeholder");
+		bool automatic = _frameEdge.SelectedIndex == 0;
+		_frameEdge.Items[0] = Localizer.T("animation.quality.auto");
+		if (automatic) _frameEdge.SelectedIndex = 0;
+		_play.Text = Localizer.T(_playing ? "animation.action.pause" : "animation.action.play");
+		RefreshLocalizedStatuses();
+	}
+
+	private void OnLanguageChanged(object? sender, EventArgs e) => ApplyLanguage();
+
+	private void SetResourceStatus(string resourceId, params object?[] values)
+	{
+		object?[] captured = values.ToArray();
+		SetResourceStatus(() => Localizer.F(resourceId, captured));
+	}
+
+	private void SetResourceStatus(Func<string> factory)
+	{
+		_resourceStatusFactory = factory;
+		_resourceStatus.Text = factory();
+	}
+
+	private void SetSourceStatus(string resourceId, params object?[] values)
+	{
+		object?[] captured = values.ToArray();
+		SetSourceStatus(() => Localizer.F(resourceId, captured));
+	}
+
+	private void SetSourceStatus(Func<string> factory)
+	{
+		_sourceStatusFactory = factory;
+		_sourceStatus.Text = factory();
+	}
+
+	private void SetPreviewStatus(string resourceId, params object?[] values)
+	{
+		object?[] captured = values.ToArray();
+		SetPreviewStatus(() => Localizer.F(resourceId, captured));
+	}
+
+	private void SetPreviewStatus(Func<string> factory)
+	{
+		_previewStatusFactory = factory;
+		_preview.StatusText = factory();
+		_preview.Invalidate();
+	}
+
+	private void RefreshLocalizedStatuses()
+	{
+		if (_resourceStatusFactory != null) _resourceStatus.Text = _resourceStatusFactory();
+		if (_sourceStatusFactory != null) _sourceStatus.Text = _sourceStatusFactory();
+		if (_previewStatusFactory != null) _preview.StatusText = _previewStatusFactory();
+		_preview.Invalidate();
+	}
+
+	private static Label Label(string text, Color color)
+	{
+		return new Label
+		{
+			Text = text,
+			AutoSize = true,
+			Anchor = AnchorStyles.Left,
+			ForeColor = color,
+			Padding = new Padding(0, 7, 8, 0)
+		};
+	}
+
+	private void AddOption(TableLayoutPanel panel, int row, string resourceId, Control control)
+	{
+		panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 33f));
+		panel.Controls.Add(Bind(new Label
+		{
+			Dock = DockStyle.Fill,
+			TextAlign = ContentAlignment.MiddleLeft,
+			ForeColor = UiTheme.Text
+		}, resourceId), 0, row);
+		control.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+		panel.Controls.Add(control, 1, row);
+	}
+
+	private async Task LocateAsync()
+	{
+		_cardLookupDebounce.Stop();
+		_catalog = CardCatalogService.LoadBestAvailable();
+		string query = _cardId.Text.Trim();
+		CardCatalogEntry? card = null;
+		if (query.Length > 0 && query.All(char.IsAsciiDigit) && int.TryParse(query, out int numeric))
+		{
+			card = _catalog.FindCardOrMrk(numeric);
+		}
+		else if (query.Length > 0)
+		{
+			card = _catalog.Search(query, 1).FirstOrDefault();
+		}
+		string cardId = card?.CardId.ToString() ?? query;
+		if (!cardId.All(char.IsAsciiDigit) || cardId.Length == 0)
+		{
+			MessageBox.Show(this, Localizer.T("animation.prompt.card"), Text);
+			return;
+		}
+		try
+		{
+			_resolvedCard = card;
+			_suppressCardLookup = true;
+			try
+			{
+				_cardId.Text = cardId;
+				_cardId.SelectionStart = _cardId.TextLength;
+			}
+			finally
+			{
+				_suppressCardLookup = false;
+			}
+			_animationPreviewCancellation?.Cancel();
+			if (_media == null)
+			{
+				DisposeMedia();
+			}
+			_locatedResourceStatusFactory = null;
+			SetBusy(busy: true, "animation.status.locating");
+			_set = await Task.Run(() => MonsterAnimationIndexService.Find(_gameRoot, cardId));
+			_previewSet = _set;
+			_legacyCreation = await Task.Run(() => _service.HasCreationTransaction(_gameRoot, cardId));
+			if (!_set.IsComplete && card?.IsMonster == true)
+			{
+				// Alternate/public card ids do not always match the P-number used by
+				// MonsterCutIn.  Keep the selected id as the edit target, but resolve an
+				// equivalent multilingual card name for read-only official preview.
+				_previewSet = await Task.Run(() =>
+					MonsterAnimationIndexService.FindEquivalentPreview(_gameRoot, card, _catalog)) ?? _set;
+			}
+			bool canReplaceSelected = _set.IsComplete;
+			bool equivalentPreview = _previewSet.IsComplete
+				&& !string.Equals(_previewSet.CardId, _set.CardId, StringComparison.Ordinal);
+			Func<string> cardSuffix = () => card == null ? "" : $" · {card.Name(Localizer.Language)} · 卡号 {card.CardId}";
+			if (!_previewSet.IsComplete)
+			{
+				_locatedResourceStatusFactory = _legacyCreation
+					? () => Localizer.F("animation.status.located.legacy", cardSuffix())
+					: () => Localizer.F(card?.IsMonster == true
+						? "animation.status.located.unsupported"
+						: "animation.status.located.none", cardSuffix());
+				SetResourceStatus(_locatedResourceStatusFactory);
+			}
+			_resourceStatus.ForeColor = _previewSet.IsComplete ? UiTheme.Primary : Color.OrangeRed;
+			_chooseMedia.Enabled = canReplaceSelected;
+			_apply.Enabled = canReplaceSelected && _media != null;
+			_restore.Enabled = _set.IsComplete || _legacyCreation;
+			if (_previewSet.IsComplete)
+			{
+				MonsterAnimationTemplate template = await Task.Run(() => _service.ReadTemplate(_gameRoot, _previewSet));
+				_updatingAnimationSelector = true;
+				try
+				{
+					string? selectedAnimation = _animationSelector.SelectedItem as string;
+					_animationSelector.Items.Clear();
+					_animationSelector.Items.AddRange(template.EffectiveAnimationNames.Cast<object>().ToArray());
+					_animationSelector.SelectedItem = template.EffectiveAnimationNames.Contains(selectedAnimation ?? "", StringComparer.Ordinal)
+						? selectedAnimation : template.EffectiveAnimationNames[0];
+				}
+				finally { _updatingAnimationSelector = false; }
+				string animationNames = string.Join(" / ", template.EffectiveAnimationNames);
+				_locatedResourceStatusFactory = equivalentPreview
+					? () => Localizer.F("animation.status.located.fallback", _previewSet.CardId, cardSuffix(), animationNames)
+					: _legacyCreation
+						? () => Localizer.F("animation.status.located.legacy", cardSuffix())
+						: () => Localizer.F("animation.status.located.complete", _set.CountSummary, cardSuffix(), animationNames);
+				SetResourceStatus(_locatedResourceStatusFactory);
+				if (_media == null)
+				{
+					await LoadCurrentAnimationPreviewAsync(_previewSet);
+				}
+			}
+			else if (_media == null)
+			{
+				DisposeMedia();
+				SetSourceStatus(card?.IsMonster == true ? "animation.source.unsupported" : "animation.source.notapplicable");
+				SetPreviewStatus(card?.IsMonster == true ? "animation.preview.unsupported" : "animation.preview.notapplicable");
+			}
+		}
+		catch (Exception ex)
+		{
+			MessageBox.Show(this, ex.Message, Localizer.T("animation.error.locate"), MessageBoxButtons.OK, MessageBoxIcon.Hand);
+		}
+		finally
+		{
+			SetBusy(busy: false);
+		}
+	}
+
+	private async Task RebuildIndexAsync()
+	{
+		if (MessageBox.Show(this, Localizer.T("animation.confirm.rebuild.message"), Localizer.T("animation.confirm.rebuild.title"), MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation) != DialogResult.OK)
+		{
+			return;
+		}
+		try
+		{
+			SetBusy(busy: true, "animation.status.scanning");
+			await Task.Run(() => MonsterAnimationIndexService.Rebuild(_gameRoot, delegate(int done, int total, int found)
+			{
+				if (!base.IsDisposed && base.IsHandleCreated)
+				{
+					BeginInvoke(delegate
+					{
+						SetResourceStatus("animation.status.scanprogress", done, total, found);
+					});
+				}
+			}));
+			await LocateAsync();
+		}
+		catch (Exception ex)
+		{
+			MessageBox.Show(this, ex.Message, Localizer.T("animation.error.rebuild"), MessageBoxButtons.OK, MessageBoxIcon.Hand);
+		}
+		finally
+		{
+			SetBusy(busy: false);
+		}
+	}
+
+	private async Task ChooseMediaAsync()
+	{
+		if (_set?.IsComplete != true)
+		{
+			MessageBox.Show(this, Localizer.T("animation.prompt.officialonly"), Text,
+				MessageBoxButtons.OK, MessageBoxIcon.Information);
+			return;
+		}
+		OpenFileDialog dialog = new OpenFileDialog
+		{
+			Title = Localizer.T("animation.dialog.media.title"),
+			Filter = Localizer.T("animation.dialog.media.filter"),
+			Multiselect = true
+		};
+		try
+		{
+			if (dialog.ShowDialog(this) == DialogResult.OK)
+			{
+				string[] selected = dialog.FileNames;
+				await LoadMediaAsync(selected.All(IsImageFile) ? selected : [selected[0]]);
+			}
+		}
+		finally
+		{
+			((IDisposable)(object)dialog)?.Dispose();
+		}
+	}
+
+	private Task LoadMediaAsync(string path) => LoadMediaAsync([path]);
+
+	private async Task LoadMediaAsync(IReadOnlyList<string> paths)
+	{
+		ExtractedAnimation loadedMedia = null;
+		List<Bitmap> loadedFrames = null;
+		bool resetToFullGameCanvas = _media == null;
+		bool automaticQuality = _frameEdge.SelectedIndex == 0;
+		bool removeGreenScreen = _removeGreenScreen.Checked;
+		int resolvedFrameEdge = 0;
+		int mediaWidth = 0;
+		int mediaHeight = 0;
+		try
+		{
+			if (automaticQuality)
+			{
+				SetBusy(busy: true, "animation.status.probing");
+				using ExtractedAnimation probe = await ExtractSourceAsync(paths, 128, removeGreenScreen: false);
+				using Bitmap probeFrame = probe.LoadFrame(0);
+				resolvedFrameEdge = MonsterAnimationBuilder.ChooseAutomaticFrameEdge(probe.FramePaths.Count, probeFrame.Width, probeFrame.Height, int.Parse(_atlasEdge.Text));
+				SetBusy(busy: true, "animation.status.extractauto", probe.FramePaths.Count, resolvedFrameEdge);
+			}
+			else
+			{
+				resolvedFrameEdge = int.Parse(_frameEdge.Text);
+				SetBusy(busy: true, "animation.status.extractfixed", resolvedFrameEdge);
+			}
+			loadedMedia = await ExtractSourceAsync(paths, resolvedFrameEdge, removeGreenScreen);
+			using (Bitmap firstFrame = loadedMedia.LoadFrame(0))
+			{
+				mediaWidth = firstFrame.Width;
+				mediaHeight = firstFrame.Height;
+			}
+			int previewEdge = Math.Min(512, resolvedFrameEdge);
+			ExtractedAnimation mediaForPreview = loadedMedia;
+			loadedFrames = await Task.Run(() => (from i in Enumerable.Range(0, mediaForPreview.FramePaths.Count)
+				select mediaForPreview.LoadFrame(i, previewEdge)).ToList());
+			DisposeMedia();
+			_media = loadedMedia;
+			loadedMedia = null;
+			_automaticQuality = automaticQuality;
+			_resolvedFrameEdge = resolvedFrameEdge;
+			_mediaWidth = mediaWidth;
+			_mediaHeight = mediaHeight;
+			_previewFrames.AddRange(loadedFrames);
+			loadedFrames = null;
+			if (resetToFullGameCanvas)
+			{
+				_scale.Value = 100m;
+			}
+			SetPreviewRate((int)_fps.Value);
+			_timeline.Maximum = Math.Max(0, _previewFrames.Count - 1);
+			_timeline.Value = 0;
+			_timeline.Enabled = _previewFrames.Count > 1;
+			ShowFrame(0);
+			UpdateSourceStatus();
+			_apply.Enabled = _set?.IsComplete == true;
+			if (!_playing)
+			{
+				TogglePlay();
+			}
+		}
+		catch (Exception ex)
+		{
+			loadedMedia?.Dispose();
+			if (loadedFrames != null)
+			{
+				foreach (Bitmap item in loadedFrames)
+				{
+					item.Dispose();
+				}
+			}
+			MessageBox.Show(this, ex.Message, Localizer.T("animation.error.media"), MessageBoxButtons.OK, MessageBoxIcon.Hand);
+		}
+		finally
+		{
+			SetBusy(busy: false);
+		}
+	}
+
+	private Task<ExtractedAnimation> ExtractSourceAsync(IReadOnlyList<string> paths, int maxFrameEdge, bool removeGreenScreen)
+	{
+		return paths.All(IsImageFile)
+			? MonsterAnimationMedia.ExtractSequenceAsync(paths, (int)_fps.Value, (int)_maxFrames.Value, maxFrameEdge, removeGreenScreen)
+			: MonsterAnimationMedia.ExtractAsync(paths[0], (int)_fps.Value, (int)_maxFrames.Value, maxFrameEdge, (double)_startSeconds.Value, removeGreenScreen);
+	}
+
+	private static bool IsImageFile(string path)
+	{
+		return Path.GetExtension(path).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg" or ".webp" or ".bmp" or ".tif" or ".tiff";
+	}
+
+	private void UpdateSourceStatus()
+	{
+		if (_media == null)
+		{
+			SetSourceStatus("animation.source.drop");
+			return;
+		}
+		ExtractedAnimation media = _media;
+		SetSourceStatus(() =>
+		{
+			string quality = Localizer.F(_automaticQuality ? "animation.quality.resolved.auto" : "animation.quality.resolved.fixed", _resolvedFrameEdge);
+			string transparency = media.GreenScreenRemoved ? Localizer.T("animation.source.transparent") : "";
+			return Localizer.F("animation.source.media", Path.GetFileName(media.SourcePath), media.FramePaths.Count,
+				(int)_fps.Value, (double)media.FramePaths.Count / (double)_fps.Value, _mediaWidth, _mediaHeight, quality, transparency);
+		});
+	}
+
+	private async Task LoadCurrentAnimationPreviewAsync(MonsterAnimationSet set)
+	{
+		int previewVersion = ++_animationPreviewVersion;
+		_animationPreviewCancellation?.Cancel();
+		_animationPreviewCancellation?.Dispose();
+		CancellationTokenSource cancellation = new();
+		_animationPreviewCancellation = cancellation;
+		CancellationToken cancellationToken = cancellation.Token;
+		string? animationName = _animationSelector.SelectedItem as string;
+		Func<string> resourceBase = _locatedResourceStatusFactory ?? _resourceStatusFactory ?? (() => "");
+		SetResourceStatus(() => resourceBase() + Localizer.T("animation.status.preview.loading"));
+		int streamedFrames = 0;
+		void ShowRenderedFrame(Bitmap frame, int frameIndex, int frameCount)
+		{
+			if (cancellationToken.IsCancellationRequested) return;
+			Bitmap? display = new Bitmap(frame);
+			try
+			{
+				if (base.IsDisposed || !base.IsHandleCreated) return;
+				Invoke((Action)delegate
+				{
+					if (display == null || base.IsDisposed || previewVersion != _animationPreviewVersion
+						|| cancellationToken.IsCancellationRequested) return;
+					if (frameIndex == 0)
+					{
+						DisposeMedia();
+						SetPreviewRate(24);
+					}
+					_previewFrames.Add(display);
+					display = null;
+					streamedFrames = _previewFrames.Count;
+					_timeline.Maximum = Math.Max(0, _previewFrames.Count - 1);
+					_timeline.Enabled = _previewFrames.Count > 1;
+					if (frameIndex == 0)
+					{
+						_timeline.Value = 0;
+						ShowFrame(0);
+					}
+					SetSourceStatus("animation.preview.rendering", streamedFrames, frameCount);
+					if (_previewFrames.Count >= 2 && !_playing)
+					{
+						TogglePlay();
+					}
+				});
+			}
+			catch (InvalidOperationException)
+			{
+			}
+			finally
+			{
+				display?.Dispose();
+			}
+		}
+		CurrentMonsterAnimationPreview? current;
+		try
+		{
+			current = await Task.Run(() =>
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				return MonsterAnimationCurrentPreview.TryLoad(set)
+					?? Spine42PreviewRenderer.TryLoad(set, animationName, cancellationToken: cancellationToken,
+						frameRendered: ShowRenderedFrame);
+			}, cancellationToken);
+		}
+		catch (OperationCanceledException)
+		{
+			return;
+		}
+		finally
+		{
+			if (ReferenceEquals(_animationPreviewCancellation, cancellation))
+			{
+				_animationPreviewCancellation = null;
+			}
+			cancellation.Dispose();
+		}
+		if (previewVersion != _animationPreviewVersion || base.IsDisposed)
+		{
+			current?.Dispose();
+			return;
+		}
+		if (current == null)
+		{
+			DisposeMedia();
+			SetSourceStatus("animation.source.complex");
+			SetPreviewStatus("animation.preview.complex");
+			SetResourceStatus(() => resourceBase() + Localizer.T("animation.status.preview.complex"));
+			return;
+		}
+		int fps = current.FramesPerSecond;
+		string loadedAnimationName = current.AnimationName;
+		int scalePercent = current.ScalePercent;
+		if (streamedFrames == 0)
+		{
+			List<Bitmap> frames = current.Frames.ToList();
+			current.Frames.Clear();
+			current.Dispose();
+			DisposeMedia();
+			_previewFrames.AddRange(frames);
+		}
+		else
+		{
+			current.Dispose();
+		}
+		_scale.Value = scalePercent;
+		SetPreviewRate(fps);
+		_timeline.Maximum = Math.Max(0, _previewFrames.Count - 1);
+		_timeline.Value = 0;
+		_timeline.Enabled = _previewFrames.Count > 1;
+		SetPreviewStatus(() => "");
+		ShowFrame(0);
+		SetSourceStatus("animation.source.current", loadedAnimationName, _previewFrames.Count, fps,
+			(double)_previewFrames.Count / (double)fps, scalePercent);
+		SetResourceStatus(() => resourceBase() + Localizer.T("animation.status.preview.playing"));
+		if (!_playing)
+		{
+			TogglePlay();
+		}
+	}
+
+	private void SetPreviewRate(int framesPerSecond)
+	{
+		_previewFramesPerSecond = Math.Clamp(framesPerSecond, 1, 60);
+		_timer.Interval = 15;
+		if (_playing)
+		{
+			_playStartFrame = _timeline.Value;
+			_playClock.Restart();
+		}
+	}
+
+	private void TogglePlay()
+	{
+		if (_previewFrames.Count >= 2)
+		{
+			_playing = !_playing;
+			_play.Text = Localizer.T(_playing ? "animation.action.pause" : "animation.action.play");
+			if (_playing)
+			{
+				_playStartFrame = _timeline.Value;
+				_playClock.Restart();
+			}
+			else
+			{
+				_playClock.Stop();
+			}
+			_timer.Enabled = _playing;
+		}
+	}
+
+	private void AdvanceFrame()
+	{
+		if (_previewFrames.Count != 0)
+		{
+			int frame = (_playStartFrame + (int)Math.Floor(_playClock.Elapsed.TotalSeconds * _previewFramesPerSecond)) % _previewFrames.Count;
+			if (frame == _timeline.Value)
+			{
+				return;
+			}
+			_updatingTimeline = true;
+			_timeline.Value = frame;
+			_updatingTimeline = false;
+			ShowFrame(_timeline.Value);
+		}
+	}
+
+	private void ShowFrame(int index)
+	{
+		if (index >= 0 && index < _previewFrames.Count)
+		{
+			_preview.Frame = _previewFrames[index];
+			_preview.Invalidate();
+			_frameLabel.Text = $"{index + 1} / {_previewFrames.Count}";
+		}
+	}
+
+	private async Task ApplyAsync()
+	{
+		MonsterAnimationSet? set = _set;
+		if (set?.IsComplete != true || _media == null)
+		{
+			MessageBox.Show(this, Localizer.T("animation.prompt.officialonly"), Text);
+		}
+		else
+		{
+			string operation = Localizer.T("animation.operation.modify");
+			if (!EnsureGameClosed() || MessageBox.Show(this, Localizer.F("animation.confirm.apply.message", set.CardId, operation),
+				Localizer.T("animation.confirm.apply.title"), MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation) != DialogResult.OK)
+			{
+				return;
+			}
+			try
+			{
+				SetBusy(busy: true, "animation.status.building");
+				MonsterAnimationTemplate template = await Task.Run(() => _service.ReadTemplate(_gameRoot, set));
+				MonsterAnimationBuildResult built = await Task.Run(() => MonsterAnimationBuilder.Build(_media.FramePaths, set.CardId, (int)_fps.Value, (int)_scale.Value, template, int.Parse(_atlasEdge.Text)));
+				try
+				{
+					SetResourceStatus("animation.status.compressing", built.AtlasWidth, built.AtlasHeight);
+					await Task.Run(() => _service.Apply(_gameRoot, set, built));
+					_resourceStatus.ForeColor = UiTheme.Primary;
+					SetResourceStatus("animation.status.completed", built.FrameCount, built.FramesPerSecond,
+						(int)_scale.Value, built.AtlasWidth, built.AtlasHeight);
+					string launchNote = Localizer.T("animation.message.launch.restart");
+					MessageBox.Show(this, Localizer.F("animation.message.completed", launchNote),
+						Localizer.T("animation.message.completed.title"), MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
+				}
+				finally
+				{
+					if (built != null)
+					{
+						((IDisposable)built).Dispose();
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				MessageBox.Show(this, ex.Message, Localizer.T("animation.error.replace"), MessageBoxButtons.OK, MessageBoxIcon.Hand);
+			}
+			finally
+			{
+				SetBusy(busy: false);
+			}
+		}
+	}
+
+	private async Task RestoreAsync()
+	{
+		if (_set == null)
+		{
+			MessageBox.Show(this, Localizer.T("animation.prompt.restore"), Text);
+		}
+		else
+		{
+			if (!EnsureGameClosed() || MessageBox.Show(this, Localizer.F("animation.confirm.restore.message", _set.CardId),
+				Localizer.T("animation.confirm.restore.title"), MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation) != DialogResult.OK)
+			{
+				return;
+			}
+			try
+			{
+				SetBusy(busy: true, "animation.status.restoring");
+				int count = await Task.Run(() => _service.Restore(_gameRoot, _set));
+				SetResourceStatus(count == 0 ? "animation.status.restore.none" : "animation.status.restore.count", count);
+				MessageBox.Show(this, count == 0 ? Localizer.T("animation.message.restore.none") : Localizer.F("animation.message.restore.count", count),
+					Localizer.T("animation.confirm.restore.title"), MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
+				if (count > 0)
+				{
+					_legacyCreation = false;
+					await LocateAsync();
+				}
+			}
+			catch (Exception ex)
+			{
+				MessageBox.Show(this, ex.Message, Localizer.T("animation.error.restore"), MessageBoxButtons.OK, MessageBoxIcon.Hand);
+			}
+			finally
+			{
+				SetBusy(busy: false);
+			}
+		}
+	}
+
+	private void SetBusy(bool busy, string? statusResourceId = null, params object?[] statusValues)
+	{
+		_busy = busy;
+		base.UseWaitCursor = busy;
+		if (statusResourceId != null)
+		{
+			SetResourceStatus(statusResourceId, statusValues);
+		}
+		_cardId.Enabled = !busy;
+		bool officialAnimation = !busy && _set?.IsComplete == true;
+		_chooseMedia.Enabled = officialAnimation;
+		_apply.Enabled = officialAnimation && _media != null;
+		_restore.Enabled = !busy && (_set?.IsComplete == true || _legacyCreation);
+	}
+
+	private bool EnsureGameClosed()
+	{
+		try
+		{
+			if (Process.GetProcessesByName("masterduel").Length == 0)
+			{
+				return true;
+			}
+		}
+		catch
+		{
+			return true;
+		}
+		MessageBox.Show(this, Localizer.T("animation.error.game.running"), Localizer.T("animation.error.game.title"), MessageBoxButtons.OK, MessageBoxIcon.Exclamation);
+		return false;
+	}
+
+	private void DisposeMedia()
+	{
+		_timer.Stop();
+		_playing = false;
+		_play.Text = Localizer.T("animation.action.play");
+		_preview.Frame = null;
+		foreach (Bitmap previewFrame in _previewFrames)
+		{
+			previewFrame.Dispose();
+		}
+		_previewFrames.Clear();
+		_media?.Dispose();
+		_media = null;
+		_timeline.Value = 0;
+		_timeline.Maximum = 0;
+		_timeline.Enabled = false;
+		_frameLabel.Text = "";
+	}
 }

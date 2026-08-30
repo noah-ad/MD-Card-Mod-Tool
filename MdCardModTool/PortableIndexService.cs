@@ -1,209 +1,230 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace MdCardModTool;
 
-public sealed class PortableGameIndex
-{
-    [JsonPropertyName("v")] public int FormatVersion { get; init; } = 1;
-    [JsonPropertyName("b")] public string GameBuildId { get; init; } = "";
-    [JsonPropertyName("a")] public int AlternateArtIndexVersion { get; init; }
-    [JsonPropertyName("t")] public List<PortableTextureEntry> Textures { get; init; } = [];
-}
-
-public sealed class PortableTextureEntry
-{
-    [JsonPropertyName("r")] public string RelativeBundlePath { get; init; } = "";
-    [JsonPropertyName("p")] public long PathId { get; init; }
-    [JsonPropertyName("f")] public string AssetFileName { get; init; } = "";
-    [JsonPropertyName("n")] public string Name { get; init; } = "";
-    [JsonPropertyName("w")] public int Width { get; init; }
-    [JsonPropertyName("h")] public int Height { get; init; }
-    [JsonPropertyName("c")] public string Category { get; init; } = "其他贴图";
-    [JsonPropertyName("a")] public bool IsAlternateArt { get; init; }
-    [JsonPropertyName("m")] public bool IsTokenOrMisc { get; init; }
-    [JsonPropertyName("s")] public string SourceKind { get; init; } = "";
-    [JsonPropertyName("k")] public string CardKey { get; init; } = "";
-}
-
-/// <summary>把已建立的卡号/资源映射转换成不含用户哈希和绝对路径的随包索引。</summary>
 public static class PortableIndexService
 {
-    public const string BundledFileName = "prebuilt-index-v1.json.br";
+	public const string BundledFileName = "prebuilt-index-v1.json.br";
 
-    public static string BundledPath => Path.Combine(AppContext.BaseDirectory, BundledFileName);
+	public static string BundledPath => Path.Combine(AppContext.BaseDirectory, "prebuilt-index-v1.json.br");
 
-    public static bool TryLoadBundled(string gameRoot, out GameIndex index, out string buildId)
-    {
-        index = new GameIndex(); buildId = "";
-        if (!File.Exists(BundledPath)) return false;
-        var portable = Read(BundledPath);
-        if (portable.FormatVersion != 1 || portable.Textures.Count < 1_000) throw new InvalidDataException("随包预绑定索引格式错误或内容不完整。");
-        var localRoot = IndexService.FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");
-        var streamingRoot = IndexService.StreamingRoot(gameRoot);
-        index = new GameIndex
-        {
-            // 随包索引可能来自上一版游戏；启动时必须用当前 data.unity3d 刷新卡框 PathID。
-            CardFrameDataStamp = "",
-            AlternateArtIndexVersion = portable.AlternateArtIndexVersion,
-            Textures = portable.Textures.Select(x => new TexRef
-            {
-                BundlePath = ResolveInside(SourceRoot(gameRoot, localRoot, streamingRoot, x.SourceKind), x.RelativeBundlePath),
-                RelativeBundlePath = x.RelativeBundlePath.Replace('/', Path.DirectorySeparatorChar),
-                PathId = x.PathId,
-                AssetFileName = x.AssetFileName,
-                Name = x.Name,
-                Width = x.Width,
-                Height = x.Height,
-                Category = x.Category,
-                IsAlternateArt = x.IsAlternateArt,
-                IsTokenOrMisc = x.IsTokenOrMisc,
-                SourceKind = x.SourceKind,
-                CardKey = x.CardKey
-            }).ToList()
-        };
-        buildId = portable.GameBuildId;
-        return true;
-    }
+	public static bool TryLoadBundled(string gameRoot, out GameIndex index, out string buildId)
+	{
+		index = new GameIndex();
+		buildId = "";
+		if (!File.Exists(BundledPath))
+		{
+			return false;
+		}
+		PortableGameIndex portable = Read(BundledPath);
+		if (portable.FormatVersion != 1 || portable.Textures.Count < 1000)
+		{
+			throw new InvalidDataException("随包预绑定索引格式错误或内容不完整。");
+		}
+		string localRoot = IndexService.FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");
+		string streamingRoot = IndexService.StreamingRoot(gameRoot);
+		index = new GameIndex
+		{
+			AlternateArtIndexVersion = portable.AlternateArtIndexVersion,
+			Textures = portable.Textures.Select((PortableTextureEntry x) => new TexRef
+			{
+				BundlePath = ResolveInside(SourceRoot(gameRoot, localRoot, streamingRoot, x.SourceKind), x.RelativeBundlePath),
+				RelativeBundlePath = x.RelativeBundlePath.Replace('/', Path.DirectorySeparatorChar),
+				PathId = x.PathId,
+				AssetFileName = x.AssetFileName,
+				Name = x.Name,
+				Width = x.Width,
+				Height = x.Height,
+				Category = x.Category,
+				IsAlternateArt = x.IsAlternateArt,
+				IsTokenOrMisc = x.IsTokenOrMisc,
+				SourceKind = x.SourceKind,
+				CardKey = x.CardKey
+			}).ToList()
+		};
+		buildId = portable.GameBuildId;
+		return true;
+	}
 
-    /// <summary>
-    /// 以随包预绑定为完整基线修复本地索引，同时保留本机索引中预绑定尚未收录、
-    /// 且底层 Bundle 仍然存在的新版或额外资源。
-    /// </summary>
-    public static bool TryRepairFromBundled(string gameRoot, GameIndex? existing, out GameIndex repaired, out string buildId, out int retainedExtras)
-    {
-        retainedExtras = 0;
-        if (!TryLoadBundled(gameRoot, out repaired, out buildId)) return false;
-        if (existing is null) return true;
+	public static bool TryRepairFromBundled(string gameRoot, GameIndex? existing, out GameIndex repaired, out string buildId, out int retainedExtras)
+	{
+		retainedExtras = 0;
+		if (!TryLoadBundled(gameRoot, out repaired, out buildId))
+		{
+			return false;
+		}
+		if (existing == null)
+		{
+			return true;
+		}
+		HashSet<string> known = repaired.Textures.Select(TextureLogicalIdentity).ToHashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (TexRef texture in existing.Textures)
+		{
+			if (File.Exists(texture.BundlePath) && known.Add(TextureLogicalIdentity(texture)))
+			{
+				repaired.Textures.Add(texture);
+				retainedExtras++;
+			}
+		}
+		HashSet<string> checkedPaths = repaired.CheckedLocalBundlePaths.ToHashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (string path in existing.CheckedLocalBundlePaths)
+		{
+			if (checkedPaths.Add(path))
+			{
+				repaired.CheckedLocalBundlePaths.Add(path);
+			}
+		}
+		repaired.Textures.Sort((TexRef a, TexRef b) => string.Compare($"{a.SourceKind}\0{a.Category}\0{a.Name}\0{a.Width:D8}", $"{b.SourceKind}\0{b.Category}\0{b.Name}\0{b.Width:D8}", StringComparison.Ordinal));
+		return true;
+	}
 
-        var known = repaired.Textures.Select(TextureLogicalIdentity).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var texture in existing.Textures)
-        {
-            if (!File.Exists(texture.BundlePath) || !known.Add(TextureLogicalIdentity(texture))) continue;
-            repaired.Textures.Add(texture);
-            retainedExtras++;
-        }
+	public static void Export(string gameRoot, GameIndex index, string outputPath)
+	{
+		List<PortableTextureEntry> entries = index.Textures.Select(ToPortable).ToList();
+		NormalizeBackedUpBundles(gameRoot, index.Textures, entries);
+		PortableGameIndex portable = new PortableGameIndex
+		{
+			GameBuildId = GetGameBuildId(gameRoot),
+			AlternateArtIndexVersion = index.AlternateArtIndexVersion,
+			Textures = entries
+		};
+		Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)));
+		using FileStream file = File.Create(outputPath);
+		using BrotliStream brotli = new BrotliStream(file, CompressionLevel.SmallestSize);
+		JsonSerializer.Serialize(brotli, portable);
+	}
 
-        var checkedPaths = repaired.CheckedLocalBundlePaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var path in existing.CheckedLocalBundlePaths)
-            if (checkedPaths.Add(path)) repaired.CheckedLocalBundlePaths.Add(path);
+	public static PortableGameIndex Read(string path)
+	{
+		using FileStream file = File.OpenRead(path);
+		using BrotliStream brotli = new BrotliStream(file, CompressionMode.Decompress);
+		return JsonSerializer.Deserialize<PortableGameIndex>(brotli) ?? throw new InvalidDataException("无法读取随包预绑定索引。");
+	}
 
-        repaired.Textures.Sort((a, b) => string.Compare(
-            $"{a.SourceKind}\0{a.Category}\0{a.Name}\0{a.Width:D8}",
-            $"{b.SourceKind}\0{b.Category}\0{b.Name}\0{b.Width:D8}",
-            StringComparison.Ordinal));
-        return true;
-    }
+	private static PortableTextureEntry ToPortable(TexRef x)
+	{
+		return new PortableTextureEntry
+		{
+			RelativeBundlePath = x.RelativeBundlePath.Replace('\\', '/'),
+			PathId = x.PathId,
+			AssetFileName = x.AssetFileName,
+			Name = x.Name,
+			Width = x.Width,
+			Height = x.Height,
+			Category = x.Category,
+			IsAlternateArt = x.IsAlternateArt,
+			IsTokenOrMisc = x.IsTokenOrMisc,
+			SourceKind = x.SourceKind,
+			CardKey = x.CardKey
+		};
+	}
 
-    public static void Export(string gameRoot, GameIndex index, string outputPath)
-    {
-        var entries = index.Textures.Select(ToPortable).ToList();
-        NormalizeBackedUpBundles(gameRoot, index.Textures, entries);
-        var portable = new PortableGameIndex
-        {
-            GameBuildId = GetGameBuildId(gameRoot),
-            AlternateArtIndexVersion = index.AlternateArtIndexVersion,
-            Textures = entries
-        };
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath))!);
-        using var file = File.Create(outputPath);
-        using var brotli = new BrotliStream(file, CompressionLevel.SmallestSize);
-        JsonSerializer.Serialize(brotli, portable);
-    }
+	private static string TextureLogicalIdentity(TexRef texture)
+	{
+		return $"{texture.SourceKind}\0{texture.RelativeBundlePath.Replace('\\', '/')}\0{texture.CardKey}\0{texture.Name}";
+	}
 
-    public static PortableGameIndex Read(string path)
-    {
-        using var file = File.OpenRead(path);
-        using var brotli = new BrotliStream(file, CompressionMode.Decompress);
-        return JsonSerializer.Deserialize<PortableGameIndex>(brotli) ?? throw new InvalidDataException("无法读取随包预绑定索引。");
-    }
+	private static void NormalizeBackedUpBundles(string gameRoot, IReadOnlyList<TexRef> textures, List<PortableTextureEntry> entries)
+	{
+		ModEngine engine = new ModEngine();
+		for (int i = 0; i < textures.Count; i++)
+		{
+			TexRef texture = textures[i];
+			string backupRoot = Path.Combine(gameRoot, "_MD卡图备份", texture.SourceKind);
+			string backup = Path.Combine(backupRoot, texture.RelativeBundlePath);
+			if (!File.Exists(backup))
+			{
+				continue;
+			}
+			try
+			{
+				TexRef original = engine.ScanBundle(backup, backupRoot, texture.SourceKind, includeDependencies: false).Textures.FirstOrDefault((TexRef x) => x.PathId == texture.PathId && x.AssetFileName == texture.AssetFileName);
+				if (original == null)
+				{
+					continue;
+				}
+				string category = original.Category;
+				if (texture.SourceKind == "本地卡图")
+				{
+					if (original.Width == 512 && original.Height == 1024)
+					{
+						category = "灵摆卡图";
+					}
+					else if (original.Width == 512 && original.Height == 512)
+					{
+						category = (texture.IsAlternateArt ? "异画卡图" : (texture.IsTokenOrMisc ? "Token／杂图" : "卡图缩略图"));
+					}
+				}
+				entries[i] = new PortableTextureEntry
+				{
+					RelativeBundlePath = entries[i].RelativeBundlePath,
+					PathId = entries[i].PathId,
+					AssetFileName = entries[i].AssetFileName,
+					Name = entries[i].Name,
+					Width = original.Width,
+					Height = original.Height,
+					Category = category,
+					IsAlternateArt = entries[i].IsAlternateArt,
+					IsTokenOrMisc = entries[i].IsTokenOrMisc,
+					SourceKind = entries[i].SourceKind,
+					CardKey = entries[i].CardKey
+				};
+			}
+			catch
+			{
+			}
+		}
+	}
 
-    static PortableTextureEntry ToPortable(TexRef x) => new()
-    {
-        RelativeBundlePath = x.RelativeBundlePath.Replace('\\', '/'),
-        PathId = x.PathId,
-        AssetFileName = x.AssetFileName,
-        Name = x.Name,
-        Width = x.Width,
-        Height = x.Height,
-        Category = x.Category,
-        IsAlternateArt = x.IsAlternateArt,
-        IsTokenOrMisc = x.IsTokenOrMisc,
-        SourceKind = x.SourceKind,
-        CardKey = x.CardKey
-    };
+	private static string SourceRoot(string gameRoot, string localRoot, string streamingRoot, string sourceKind)
+	{
+		return sourceKind switch
+		{
+			"本地卡图" => localRoot,
+			"视觉资源" => localRoot,
+			"游戏内图片" => streamingRoot,
+			"卡框资源" => gameRoot,
+			"基础视觉资源" => gameRoot,
+			_ => throw new InvalidDataException("预绑定索引包含未知来源：" + sourceKind),
+		};
+	}
 
-    static string TextureLogicalIdentity(TexRef texture) =>
-        $"{texture.SourceKind}\0{texture.RelativeBundlePath.Replace('\\', '/')}\0{texture.CardKey}\0{texture.Name}";
+	private static string ResolveInside(string root, string relative)
+	{
+		if (string.IsNullOrWhiteSpace(relative) || Path.IsPathRooted(relative))
+		{
+			throw new InvalidDataException("预绑定索引包含无效路径。");
+		}
+		string fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+		string fullPath = Path.GetFullPath(Path.Combine(fullRoot, relative.Replace('/', Path.DirectorySeparatorChar)));
+		if (!fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
+		{
+			throw new InvalidDataException("预绑定索引路径越出了游戏目录。");
+		}
+		return fullPath;
+	}
 
-    static void NormalizeBackedUpBundles(string gameRoot, IReadOnlyList<TexRef> textures, List<PortableTextureEntry> entries)
-    {
-        var engine = new ModEngine();
-        for (var i = 0; i < textures.Count; i++)
-        {
-            var texture = textures[i];
-            var backupRoot = Path.Combine(gameRoot, "_MD卡图备份", texture.SourceKind);
-            var backup = Path.Combine(backupRoot, texture.RelativeBundlePath);
-            if (!File.Exists(backup)) continue;
-            try
-            {
-                var original = engine.ScanBundle(backup, backupRoot, texture.SourceKind, includeDependencies: false).Textures
-                    .FirstOrDefault(x => x.PathId == texture.PathId && x.AssetFileName == texture.AssetFileName);
-                if (original is null) continue;
-                var category = original.Category;
-                if (texture.SourceKind == "本地卡图")
-                {
-                    if (original.Width == 512 && original.Height == 1024) category = "灵摆卡图";
-                    else if (original.Width == 512 && original.Height == 512)
-                        category = texture.IsAlternateArt ? "异画卡图" : texture.IsTokenOrMisc ? "Token／杂图" : "卡图缩略图";
-                }
-                entries[i] = new PortableTextureEntry
-                {
-                    RelativeBundlePath = entries[i].RelativeBundlePath,
-                    PathId = entries[i].PathId,
-                    AssetFileName = entries[i].AssetFileName,
-                    Name = entries[i].Name,
-                    Width = original.Width,
-                    Height = original.Height,
-                    Category = category,
-                    IsAlternateArt = entries[i].IsAlternateArt,
-                    IsTokenOrMisc = entries[i].IsTokenOrMisc,
-                    SourceKind = entries[i].SourceKind,
-                    CardKey = entries[i].CardKey
-                };
-            }
-            catch { }
-        }
-    }
-
-    static string SourceRoot(string gameRoot, string localRoot, string streamingRoot, string sourceKind) => sourceKind switch
-    {
-        "本地卡图" => localRoot,
-        "游戏内图片" => streamingRoot,
-        "卡框资源" => gameRoot,
-        _ => throw new InvalidDataException($"预绑定索引包含未知来源：{sourceKind}")
-    };
-
-    static string ResolveInside(string root, string relative)
-    {
-        if (string.IsNullOrWhiteSpace(relative) || Path.IsPathRooted(relative)) throw new InvalidDataException("预绑定索引包含无效路径。");
-        var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        var full = Path.GetFullPath(Path.Combine(fullRoot, relative.Replace('/', Path.DirectorySeparatorChar)));
-        if (!full.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("预绑定索引路径越出了游戏目录。");
-        return full;
-    }
-
-    public static string GetGameBuildId(string gameRoot)
-    {
-        try
-        {
-            var manifest = Path.GetFullPath(Path.Combine(gameRoot, "..", "..", "appmanifest_1449850.acf"));
-            if (!File.Exists(manifest)) return "";
-            var match = Regex.Match(File.ReadAllText(manifest), "\\\"buildid\\\"\\s+\\\"(?<id>\\d+)\\\"", RegexOptions.IgnoreCase);
-            return match.Success ? match.Groups["id"].Value : "";
-        }
-        catch { return ""; }
-    }
+	public static string GetGameBuildId(string gameRoot)
+	{
+		try
+		{
+			string manifest = Path.GetFullPath(Path.Combine(gameRoot, "..", "..", "appmanifest_1449850.acf"));
+			if (!File.Exists(manifest))
+			{
+				return "";
+			}
+			Match match = Regex.Match(File.ReadAllText(manifest), "\\\"buildid\\\"\\s+\\\"(?<id>\\d+)\\\"", RegexOptions.IgnoreCase);
+			return match.Success ? match.Groups["id"].Value : "";
+		}
+		catch
+		{
+			return "";
+		}
+	}
 }

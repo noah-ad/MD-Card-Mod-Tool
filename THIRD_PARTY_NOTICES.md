@@ -1,11 +1,30 @@
-# Third-party notices
+MD Card Mod Tool 2.0 - third-party notices index
+==================================================
 
-This project uses the following libraries and data files:
+AstellarTool
+------------
+Project: https://github.com/LLKSENsei/AstellarTool-Master-Duel-Modding-Tool
+License: MIT
+Use: multilingual card metadata/catalog and visual-resource catalog workflow reference.
+Full attribution and license: ASTELLAR-NOTICE.txt
 
-- AssetsTools.NET and its `classdata.tpk` type database — MIT License. Compatibility builds are included under `MdCardModTool/Assets`.
-- AssetsTools.NET.Texture and AssetRipper.TextureDecoder — MIT License. Compatibility builds are included under `MdCardModTool/Assets`.
-- SixLabors.ImageSharp — Six Labors Split License / Apache License 2.0 terms as applicable to the package version
-- DirectXTex `texconv.exe` — MIT License. The portable release uses the unmodified native utility to encode animation atlases as BC3/DXT5; details are included in `DIRECTXTEX-NOTICE.txt`.
-- Portable release only: FFmpeg executable — distributed as a separate program under the license reported by `ffmpeg -version`; source and legal links are included in `FFMPEG-NOTICE.txt`.
+Floowan / master-duel-modding
+-----------------------------
+Project: https://github.com/AmidoriA/master-duel-modding
+License: MIT
+Use: normal and OfGradient card-frame templates plus over-frame workflow reference.
+Full attribution and license: FLOOWAN-NOTICE.txt
 
-The corresponding license texts and source links are available from each package's NuGet page and source repository. These components are not relicensed by this project's MIT License.
+SkiaSharp 2.88.9
+-----------------
+Project: https://github.com/mono/SkiaSharp
+License: MIT
+Use: rendering the independently implemented, read-only Spine 4.2 preview.
+Full license: licenses/SkiaSharp-LICENSE.txt
+Native dependency notices: licenses/SkiaSharp-THIRD-PARTY-NOTICES.txt
+
+Other bundled dependencies and tools
+------------------------------------
+DirectXTex/texconv and FFmpeg notices are distributed as DIRECTXTEX-NOTICE.txt,
+FFMPEG-NOTICE.txt, and tools/FFMPEG-LICENSE.txt. Existing dependency notices
+from the original recovered distribution remain included unchanged.

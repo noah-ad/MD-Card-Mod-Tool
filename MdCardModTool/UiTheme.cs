@@ -1,184 +1,233 @@
+using System;
+using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
+using System.Windows.Forms;
 
 namespace MdCardModTool;
 
 public static class UiTheme
 {
-    public static readonly Color Window = Color.FromArgb(7, 12, 23);
-    public static readonly Color Surface = Color.FromArgb(14, 23, 38);
-    public static readonly Color SurfaceAlt = Color.FromArgb(18, 30, 49);
-    public static readonly Color Elevated = Color.FromArgb(23, 39, 63);
-    public static readonly Color Border = Color.FromArgb(43, 64, 93);
-    public static readonly Color Primary = Color.FromArgb(82, 209, 244);
-    public static readonly Color PrimaryDark = Color.FromArgb(29, 122, 179);
-    public static readonly Color Gold = Color.FromArgb(239, 194, 104);
-    public static readonly Color Text = Color.FromArgb(239, 245, 252);
-    public static readonly Color Muted = Color.FromArgb(148, 166, 191);
-    public static readonly Color Selection = Color.FromArgb(31, 91, 133);
-    public static readonly Color Danger = Color.FromArgb(193, 78, 97);
+	public static readonly Color Window = Color.FromArgb(7, 12, 23);
 
-    public static void ApplyDarkTitleBar(Form form)
-    {
-        form.AutoScaleMode = AutoScaleMode.Dpi;
-        form.HandleCreated += (_, _) =>
-        {
-            if (!OperatingSystem.IsWindows()) return;
-            var enabled = 1;
-            if (DwmSetWindowAttribute(form.Handle, 20, ref enabled, sizeof(int)) != 0)
-                DwmSetWindowAttribute(form.Handle, 19, ref enabled, sizeof(int));
-        };
-        form.Shown += (_, _) => KeepInsideWorkingArea(form);
-        form.DpiChanged += (_, _) => form.BeginInvoke(() => KeepInsideWorkingArea(form));
-    }
+	public static readonly Color Surface = Color.FromArgb(14, 23, 38);
 
-    static void KeepInsideWorkingArea(Form form)
-    {
-        if (form.WindowState != FormWindowState.Normal) return;
-        var area = Screen.FromControl(form).WorkingArea;
-        var maximum = new Size(Math.Max(720, (int)(area.Width * 0.96)), Math.Max(540, (int)(area.Height * 0.94)));
-        if (form.MinimumSize.Width > maximum.Width || form.MinimumSize.Height > maximum.Height)
-            form.MinimumSize = new Size(Math.Min(form.MinimumSize.Width, maximum.Width), Math.Min(form.MinimumSize.Height, maximum.Height));
-        var width = Math.Min(form.Width, maximum.Width);
-        var height = Math.Min(form.Height, maximum.Height);
-        if (form.Width != width || form.Height != height) form.Size = new Size(width, height);
-        if (form.Right > area.Right || form.Bottom > area.Bottom || form.Left < area.Left || form.Top < area.Top)
-            form.Location = new Point(area.Left + Math.Max(0, (area.Width - form.Width) / 2), area.Top + Math.Max(0, (area.Height - form.Height) / 2));
-    }
+	public static readonly Color SurfaceAlt = Color.FromArgb(18, 30, 49);
 
-    [DllImport("dwmapi.dll")]
-    static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+	public static readonly Color Elevated = Color.FromArgb(23, 39, 63);
 
-    public static void StyleTextBox(TextBox box)
-    {
-        box.BackColor = SurfaceAlt; box.ForeColor = Text; box.BorderStyle = BorderStyle.FixedSingle;
-        box.Font = new Font("Microsoft YaHei UI", 9.5F); box.Margin = new Padding(6);
-    }
+	public static readonly Color Border = Color.FromArgb(43, 64, 93);
 
-    public static void StyleComboBox(ComboBox box)
-    {
-        box.BackColor = SurfaceAlt; box.ForeColor = Text; box.FlatStyle = FlatStyle.Flat;
-        box.DrawMode = DrawMode.OwnerDrawFixed; box.ItemHeight = 24; box.Font = new Font("Microsoft YaHei UI", 9F);
-        box.DrawItem += (_, e) =>
-        {
-            if (e.Index < 0) return;
-            var selected = (e.State & DrawItemState.Selected) != 0;
-            using var background = new SolidBrush(selected ? Selection : SurfaceAlt);
-            using var foreground = new SolidBrush(selected ? Color.White : Text);
-            e.Graphics.FillRectangle(background, e.Bounds);
-            e.Graphics.DrawString(box.Items[e.Index]?.ToString() ?? "", box.Font, foreground, e.Bounds.X + 8, e.Bounds.Y + 3);
-            e.DrawFocusRectangle();
-        };
-    }
+	public static readonly Color Primary = Color.FromArgb(82, 209, 244);
 
-    public static void StyleTree(TreeView tree)
-    {
-        tree.BackColor = Surface; tree.ForeColor = Text; tree.BorderStyle = BorderStyle.None;
-        tree.LineColor = Border; tree.FullRowSelect = true; tree.ShowLines = false; tree.ShowPlusMinus = true;
-        tree.ItemHeight = 28; tree.Indent = 18; tree.Font = new Font("Microsoft YaHei UI", 9F); tree.DrawMode = TreeViewDrawMode.Normal;
-    }
+	public static readonly Color PrimaryDark = Color.FromArgb(29, 122, 179);
 
-    public static void StyleList(ListView list)
-    {
-        list.BackColor = Surface; list.ForeColor = Text; list.BorderStyle = BorderStyle.None;
-        list.GridLines = false; list.OwnerDraw = true; list.Font = new Font("Microsoft YaHei UI", 9F);
-        list.SmallImageList = new ImageList { ImageSize = new Size(1, 30), ColorDepth = ColorDepth.Depth32Bit };
-        list.DrawColumnHeader += (_, e) =>
-        {
-            using var background = new SolidBrush(Elevated);
-            using var border = new Pen(Border);
-            using var foreground = new SolidBrush(Muted);
-            e.Graphics.FillRectangle(background, e.Bounds);
-            e.Graphics.DrawLine(border, e.Bounds.Left, e.Bounds.Bottom - 1, e.Bounds.Right, e.Bounds.Bottom - 1);
-            using var bold = new Font(list.Font, FontStyle.Bold);
-            e.Graphics.DrawString(e.Header?.Text ?? "", bold, foreground, e.Bounds.X + 10, e.Bounds.Y + 8);
-        };
-        list.DrawItem += (_, e) => { if (list.View != View.Details) e.DrawDefault = true; };
-        list.DrawSubItem += (_, e) =>
-        {
-            var selected = e.Item?.Selected == true;
-            var modded = e.Item?.Tag is TexRef texture && texture.IsModded;
-            var alternate = e.ItemIndex % 2 == 1;
-            var backgroundColor = selected ? Selection : alternate ? Color.FromArgb(16, 27, 44) : Surface;
-            using var background = new SolidBrush(backgroundColor);
-            using var foreground = new SolidBrush(selected ? Color.White : (modded && e.ColumnIndex == 0 ? Gold : e.ColumnIndex == 0 ? Text : Muted));
-            e.Graphics.FillRectangle(background, e.Bounds);
-            var text = e.SubItem?.Text ?? "";
-            TextRenderer.DrawText(e.Graphics, text, list.Font, new Rectangle(e.Bounds.X + 10, e.Bounds.Y + 6, e.Bounds.Width - 14, e.Bounds.Height - 8), foreground.Color, TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
-        };
-    }
+	public static readonly Color Gold = Color.FromArgb(239, 194, 104);
 
-    public static Button Button(string text, EventHandler click, ButtonTone tone = ButtonTone.Neutral)
-    {
-        var normal = tone switch
-        {
-            ButtonTone.Primary => PrimaryDark,
-            ButtonTone.Gold => Color.FromArgb(132, 100, 42),
-            ButtonTone.Danger => Color.FromArgb(102, 45, 59),
-            _ => Elevated
-        };
-        var hover = tone switch
-        {
-            ButtonTone.Primary => Color.FromArgb(38, 148, 203),
-            ButtonTone.Gold => Color.FromArgb(160, 121, 49),
-            ButtonTone.Danger => Danger,
-            _ => Color.FromArgb(34, 53, 81)
-        };
-        var border = tone switch
-        {
-            ButtonTone.Primary => Primary,
-            ButtonTone.Gold => Gold,
-            ButtonTone.Danger => Color.FromArgb(226, 112, 128),
-            _ => Border
-        };
-        var button = new Button
-        {
-            Text = text, AutoSize = true, Height = 34, MinimumSize = new Size(0, 34), Padding = new Padding(12, 0, 12, 0),
-            Margin = new Padding(5, 4, 0, 4), FlatStyle = FlatStyle.Flat, BackColor = normal, ForeColor = Text,
-            Cursor = Cursors.Hand, Font = new Font("Microsoft YaHei UI", 9F, tone is ButtonTone.Primary or ButtonTone.Gold ? FontStyle.Bold : FontStyle.Regular)
-        };
-        button.FlatAppearance.BorderColor = border; button.FlatAppearance.BorderSize = 1;
-        button.FlatAppearance.MouseDownBackColor = Color.FromArgb(Math.Max(0, hover.R - 18), Math.Max(0, hover.G - 18), Math.Max(0, hover.B - 18));
-        button.MouseEnter += (_, _) => button.BackColor = hover;
-        button.MouseLeave += (_, _) => button.BackColor = normal;
-        button.Click += click;
-        return button;
-    }
+	public static readonly Color Text = Color.FromArgb(239, 245, 252);
+
+	public static readonly Color Muted = Color.FromArgb(148, 166, 191);
+
+	public static readonly Color Selection = Color.FromArgb(31, 91, 133);
+
+	public static readonly Color Danger = Color.FromArgb(193, 78, 97);
+
+	public static void ApplyDarkTitleBar(Form form)
+	{
+		form.HandleCreated += delegate
+		{
+			if (OperatingSystem.IsWindows())
+			{
+				int value = 1;
+				if (DwmSetWindowAttribute(form.Handle, 20, ref value, 4) != 0)
+				{
+					DwmSetWindowAttribute(form.Handle, 19, ref value, 4);
+				}
+			}
+		};
+	}
+
+	[DllImport("dwmapi.dll")]
+	private static extern int DwmSetWindowAttribute(nint hwnd, int attribute, ref int value, int size);
+
+	public static int Scale(Control control, int logicalPixels) =>
+		Math.Max(1, (int)Math.Round(logicalPixels * Math.Max(96, control.DeviceDpi) / 96d));
+
+	public static void StyleTextBox(TextBox box)
+	{
+		box.BackColor = SurfaceAlt;
+		box.ForeColor = Text;
+		box.BorderStyle = BorderStyle.None;
+		box.Font = new Font("Microsoft YaHei UI", 9.5f);
+		box.Margin = new Padding(6);
+	}
+
+	public static void StyleComboBox(ComboBox box)
+	{
+		box.BackColor = SurfaceAlt;
+		box.ForeColor = Text;
+		box.FlatStyle = FlatStyle.Flat;
+		box.DrawMode = DrawMode.OwnerDrawFixed;
+		box.ItemHeight = 24;
+		box.IntegralHeight = false;
+		box.DropDownHeight = 24 * 9;
+		box.Font = new Font("Microsoft YaHei UI", 9f);
+		box.DrawItem += delegate(object? _, DrawItemEventArgs e)
+		{
+			if (e.Index < 0)
+			{
+				return;
+			}
+			bool flag = (e.State & DrawItemState.Selected) != 0;
+			using SolidBrush brush = new SolidBrush(flag ? Selection : SurfaceAlt);
+			using SolidBrush brush2 = new SolidBrush(flag ? Color.White : Text);
+			e.Graphics.FillRectangle(brush, e.Bounds);
+			TextRenderer.DrawText(e.Graphics, box.Items[e.Index]?.ToString() ?? "", box.Font,
+				new Rectangle(e.Bounds.X + 9, e.Bounds.Y, Math.Max(1, e.Bounds.Width - 38), e.Bounds.Height),
+				brush2.Color, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+		};
+	}
+
+	public static void StyleTree(TreeView tree)
+	{
+		tree.BackColor = Surface;
+		tree.ForeColor = Text;
+		tree.BorderStyle = BorderStyle.None;
+		tree.LineColor = Border;
+		tree.FullRowSelect = true;
+		tree.ShowLines = false;
+		tree.ShowPlusMinus = true;
+		tree.ItemHeight = 28;
+		tree.Indent = 18;
+		tree.Font = new Font("Microsoft YaHei UI", 9f);
+		tree.DrawMode = TreeViewDrawMode.Normal;
+	}
+
+	public static void StyleList(ListView list)
+	{
+		list.BackColor = Surface;
+		list.ForeColor = Text;
+		list.BorderStyle = BorderStyle.None;
+		list.GridLines = false;
+		list.OwnerDraw = true;
+		list.Font = new Font("Microsoft YaHei UI", 9f);
+		list.SmallImageList = new ImageList
+		{
+			ImageSize = new Size(1, 30),
+			ColorDepth = ColorDepth.Depth32Bit
+		};
+		list.DrawColumnHeader += delegate(object? _, DrawListViewColumnHeaderEventArgs e)
+		{
+			using SolidBrush brush = new SolidBrush(Elevated);
+			using Pen pen = new Pen(Border);
+			using SolidBrush brush2 = new SolidBrush(Muted);
+			e.Graphics.FillRectangle(brush, e.Bounds);
+			e.Graphics.DrawLine(pen, e.Bounds.Left, e.Bounds.Bottom - 1, e.Bounds.Right, e.Bounds.Bottom - 1);
+			using Font font = new Font(list.Font, FontStyle.Bold);
+			e.Graphics.DrawString(e.Header?.Text ?? "", font, brush2, e.Bounds.X + 10, e.Bounds.Y + 8);
+		};
+		list.DrawItem += delegate(object? _, DrawListViewItemEventArgs e)
+		{
+			if (list.View != View.Details)
+			{
+				e.DrawDefault = true;
+			}
+		};
+		list.DrawSubItem += delegate(object? _, DrawListViewSubItemEventArgs e)
+		{
+			bool flag = e.Item?.Selected ?? false;
+			bool flag2 = e.Item?.Tag is TexRef texRef && texRef.IsModded;
+			bool flag3 = e.ItemIndex % 2 == 1;
+			using SolidBrush brush = new SolidBrush(flag ? Selection : (flag3 ? Color.FromArgb(16, 27, 44) : Surface));
+			using SolidBrush solidBrush = new SolidBrush(flag ? Color.White : ((flag2 && e.ColumnIndex == 0) ? Gold : ((e.ColumnIndex == 0) ? Text : Muted)));
+			e.Graphics.FillRectangle(brush, e.Bounds);
+			string text = e.SubItem?.Text ?? "";
+			TextRenderer.DrawText(e.Graphics, text, list.Font, new Rectangle(e.Bounds.X + 10, e.Bounds.Y + 6, e.Bounds.Width - 14, e.Bounds.Height - 8), solidBrush.Color, TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter);
+		};
+	}
+
+	public static Button Button(string text, EventHandler click, ButtonTone tone = ButtonTone.Neutral)
+	{
+		Color normal = tone switch
+		{
+			ButtonTone.Primary => PrimaryDark,
+			ButtonTone.Gold => Color.FromArgb(132, 100, 42),
+			ButtonTone.Danger => Color.FromArgb(102, 45, 59),
+			_ => Elevated,
+		};
+		Color hover = tone switch
+		{
+			ButtonTone.Primary => Color.FromArgb(38, 148, 203),
+			ButtonTone.Gold => Color.FromArgb(160, 121, 49),
+			ButtonTone.Danger => Danger,
+			_ => Color.FromArgb(34, 53, 81),
+		};
+		Color border = tone switch
+		{
+			ButtonTone.Primary => Primary,
+			ButtonTone.Gold => Gold,
+			ButtonTone.Danger => Color.FromArgb(226, 112, 128),
+			_ => Border,
+		};
+		RoundedButton button = new RoundedButton();
+		button.Text = text;
+		button.AutoSize = true;
+		button.Height = 34;
+		button.MinimumSize = new Size(0, 34);
+		button.Padding = new Padding(12, 0, 12, 0);
+		button.Margin = new Padding(5, 4, 0, 4);
+		button.NormalColor = normal;
+		button.HoverColor = hover;
+		button.BackColor = normal;
+		button.ForeColor = Text;
+		button.Cursor = Cursors.Hand;
+		Button button2 = button;
+		bool flag = (uint)(tone - 1) <= 1u;
+		button2.Font = new Font("Microsoft YaHei UI", 9f, flag ? FontStyle.Bold : FontStyle.Regular);
+		RoundedButton button3 = button;
+		button3.BorderColor = border;
+		button3.Click += click;
+		return button3;
+	}
+
+	public static RoundedField Field(Control control) => new(control) { Dock = DockStyle.Fill };
+
+	public static GraphicsPath RoundedPath(Rectangle bounds, int radius)
+	{
+		int diameter = Math.Max(1, Math.Min(Math.Min(bounds.Width, bounds.Height), radius * 2));
+		GraphicsPath path = new();
+		path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180, 90);
+		path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270, 90);
+		path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
+		path.AddArc(bounds.Left, bounds.Bottom - diameter, diameter, diameter, 90, 90);
+		path.CloseFigure();
+		return path;
+	}
 }
 
-public enum ButtonTone { Neutral, Primary, Gold, Danger }
-
-public sealed class BufferedListView : ListView
+internal static class GraphicsRoundedExtensions
 {
-    public BufferedListView() => DoubleBuffered = true;
-}
+	public static void FillRoundedRectangle(this Graphics graphics, Brush brush, RectangleF bounds, float radius)
+	{
+		using GraphicsPath path = Rounded(bounds, radius);
+		graphics.FillPath(brush, path);
+	}
 
-public sealed class GradientBanner : Panel
-{
-    public GradientBanner() { DoubleBuffered = true; }
+	public static void DrawRoundedRectangle(this Graphics graphics, Pen pen, RectangleF bounds, float radius)
+	{
+		using GraphicsPath path = Rounded(bounds, radius);
+		graphics.DrawPath(pen, path);
+	}
 
-    protected override void OnPaintBackground(PaintEventArgs e)
-    {
-        using var gradient = new LinearGradientBrush(ClientRectangle, Color.FromArgb(15, 40, 70), UiTheme.Window, 0F);
-        e.Graphics.FillRectangle(gradient, ClientRectangle);
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        using var cyan = new Pen(Color.FromArgb(38, UiTheme.Primary), 1F);
-        using var gold = new Pen(Color.FromArgb(30, UiTheme.Gold), 1F);
-        for (var x = Width - 440; x < Width + 80; x += 52)
-        {
-            e.Graphics.DrawLine(cyan, x, 0, x - 92, Height);
-            e.Graphics.DrawEllipse(gold, x - 35, 12, 52, 52);
-        }
-    }
-}
-
-public sealed class BorderPanel : Panel
-{
-    public BorderPanel() { DoubleBuffered = true; Padding = new Padding(1); }
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        base.OnPaint(e);
-        using var pen = new Pen(UiTheme.Border);
-        e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
-    }
+	private static GraphicsPath Rounded(RectangleF bounds, float radius)
+	{
+		float diameter = Math.Max(1, Math.Min(Math.Min(bounds.Width, bounds.Height), radius * 2));
+		GraphicsPath path = new();
+		path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180, 90);
+		path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270, 90);
+		path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
+		path.AddArc(bounds.Left, bounds.Bottom - diameter, diameter, diameter, 90, 90);
+		path.CloseFigure();
+		return path;
+	}
 }

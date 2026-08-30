@@ -1,84 +1,160 @@
+using System.IO;
 using System.Text.Json;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.PixelFormats;
-using SharpImage = SixLabors.ImageSharp.Image;
+using SixLabors.ImageSharp.Processing;
 
 namespace MdCardModTool;
 
-public sealed record OverFrameFrameSettings(string FrameKey = "card_frame01", bool UsesCustomFrame = false);
-
-/// <summary>保存每张超框卡的透明原画与卡框选择，防止再次编辑时把旧卡框叠进新卡框。</summary>
 public static class OverFrameArtStore
 {
-    public static string CardFolder(string gameRoot, ushort cardId) => Path.Combine(gameRoot, "_MD卡图素材", "超框", cardId.ToString());
-    public static string ArtPath(string gameRoot, ushort cardId) => Path.Combine(CardFolder(gameRoot, cardId), "透明原画.png");
-    public static string CustomFramePath(string gameRoot, ushort cardId) => Path.Combine(CardFolder(gameRoot, cardId), "自定义卡框.png");
-    static string SettingsPath(string gameRoot, ushort cardId) => Path.Combine(CardFolder(gameRoot, cardId), "卡框设置.json");
-    public static bool HasSettings(string gameRoot, ushort cardId) => File.Exists(SettingsPath(gameRoot, cardId));
+	public static string CardFolder(string gameRoot, ushort cardId)
+	{
+		return Path.Combine(gameRoot, "_MD卡图素材", "超框", cardId.ToString());
+	}
 
-    /// <summary>
-    /// 返回已经完成过“透明原画 + 卡框设置”保存的卡号。
-    /// 这些文件是游戏更新重置 of_card_asset 后恢复超框登记的本地依据。
-    /// </summary>
-    public static IReadOnlyList<ushort> SavedCardIds(string gameRoot)
-    {
-        var root = Path.Combine(gameRoot, "_MD卡图素材", "超框");
-        if (!Directory.Exists(root)) return [];
-        var result = new List<ushort>();
-        foreach (var folder in Directory.EnumerateDirectories(root))
-        {
-            if (!ushort.TryParse(Path.GetFileName(folder), out var cardId)) continue;
-            if (!File.Exists(Path.Combine(folder, "透明原画.png")) || !File.Exists(Path.Combine(folder, "卡框设置.json"))) continue;
-            result.Add(cardId);
-        }
-        return result.Distinct().OrderBy(x => x).ToArray();
-    }
+	public static string ArtPath(string gameRoot, ushort cardId)
+	{
+		return Path.Combine(CardFolder(gameRoot, cardId), "透明原画.png");
+	}
 
-    public static void SaveArt(string gameRoot, ushort cardId, string imagePath)
-    {
-        using var image = SharpImage.Load<Rgba32>(imagePath);
-        Validate(image.Width, image.Height, "透明高图");
-        Directory.CreateDirectory(CardFolder(gameRoot, cardId));
-        image.SaveAsPng(ArtPath(gameRoot, cardId));
-    }
+	public static string SourcePath(string gameRoot, ushort cardId)
+	{
+		return Path.Combine(CardFolder(gameRoot, cardId), "卡图源.png");
+	}
 
-    public static void SaveArt(string gameRoot, ushort cardId, byte[] png)
-    {
-        using var image = SharpImage.Load<Rgba32>(png);
-        Validate(image.Width, image.Height, "透明高图");
-        Directory.CreateDirectory(CardFolder(gameRoot, cardId));
-        image.SaveAsPng(ArtPath(gameRoot, cardId));
-    }
+	public static string BackgroundPath(string gameRoot, ushort cardId)
+	{
+		return Path.Combine(CardFolder(gameRoot, cardId), "叠底背景.png");
+	}
 
-    public static string SaveCustomFrame(string gameRoot, ushort cardId, string imagePath)
-    {
-        using var image = SharpImage.Load<Rgba32>(imagePath);
-        Validate(image.Width, image.Height, "自定义卡框");
-        Directory.CreateDirectory(CardFolder(gameRoot, cardId));
-        var target = CustomFramePath(gameRoot, cardId);
-        image.SaveAsPng(target);
-        return target;
-    }
+	public static string CustomFramePath(string gameRoot, ushort cardId)
+	{
+		return Path.Combine(CardFolder(gameRoot, cardId), "自定义卡框.png");
+	}
 
-    public static OverFrameFrameSettings ReadSettings(string gameRoot, ushort cardId)
-    {
-        try
-        {
-            var path = SettingsPath(gameRoot, cardId);
-            return File.Exists(path) ? JsonSerializer.Deserialize<OverFrameFrameSettings>(File.ReadAllText(path)) ?? new() : new();
-        }
-        catch { return new(); }
-    }
+	private static string SettingsPath(string gameRoot, ushort cardId)
+	{
+		return Path.Combine(CardFolder(gameRoot, cardId), "卡框设置.json");
+	}
 
-    public static void SaveSettings(string gameRoot, ushort cardId, OverFrameFrameSettings settings)
-    {
-        Directory.CreateDirectory(CardFolder(gameRoot, cardId));
-        File.WriteAllText(SettingsPath(gameRoot, cardId), JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
-    }
+	public static bool HasSettings(string gameRoot, ushort cardId)
+	{
+		return File.Exists(SettingsPath(gameRoot, cardId));
+	}
 
-    static void Validate(int width, int height, string label)
-    {
-        if (width != FrameComposer.Width || height != FrameComposer.Height)
-            throw new InvalidDataException($"{label}必须严格为 {FrameComposer.Width}×{FrameComposer.Height}；当前为 {width}×{height}。");
-    }
+	public static void SaveArt(string gameRoot, ushort cardId, string imagePath)
+	{
+		using Image<Rgba32> image = Image.Load<Rgba32>(imagePath);
+		Validate(image.Width, image.Height, "透明高图");
+		Directory.CreateDirectory(CardFolder(gameRoot, cardId));
+		image.SaveAsPng(ArtPath(gameRoot, cardId));
+	}
+
+	public static void SaveArt(string gameRoot, ushort cardId, byte[] png)
+	{
+		using Image<Rgba32> image = Image.Load<Rgba32>(png);
+		Validate(image.Width, image.Height, "透明高图");
+		Directory.CreateDirectory(CardFolder(gameRoot, cardId));
+		image.SaveAsPng(ArtPath(gameRoot, cardId));
+	}
+
+	public static void SaveSource(string gameRoot, ushort cardId, string imagePath)
+	{
+		using Image<Rgba32> image = Image.Load<Rgba32>(imagePath);
+		image.Mutate(context => context.AutoOrient());
+		SaveSourceImage(gameRoot, cardId, image);
+	}
+
+	public static void SaveSource(string gameRoot, ushort cardId, byte[] imageBytes)
+	{
+		using Image<Rgba32> image = Image.Load<Rgba32>(imageBytes);
+		image.Mutate(context => context.AutoOrient());
+		SaveSourceImage(gameRoot, cardId, image);
+	}
+
+	public static void SaveBackground(string gameRoot, ushort cardId, string imagePath)
+	{
+		using Image<Rgba32> image = Image.Load<Rgba32>(imagePath);
+		Validate(image.Width, image.Height, "叠底背景");
+		SaveBackgroundImage(gameRoot, cardId, image);
+	}
+
+	public static void SaveBackground(string gameRoot, ushort cardId, byte[] png)
+	{
+		using Image<Rgba32> image = Image.Load<Rgba32>(png);
+		Validate(image.Width, image.Height, "叠底背景");
+		SaveBackgroundImage(gameRoot, cardId, image);
+	}
+
+	public static void DeleteBackground(string gameRoot, ushort cardId)
+	{
+		string path = BackgroundPath(gameRoot, cardId);
+		if (File.Exists(path)) File.Delete(path);
+	}
+
+	public static string SaveCustomFrame(string gameRoot, ushort cardId, string imagePath)
+	{
+		using Image<Rgba32> image = Image.Load<Rgba32>(imagePath);
+		Validate(image.Width, image.Height, "自定义卡框");
+		Directory.CreateDirectory(CardFolder(gameRoot, cardId));
+		string target = CustomFramePath(gameRoot, cardId);
+		image.SaveAsPng(target);
+		return target;
+	}
+
+	public static OverFrameFrameSettings ReadSettings(string gameRoot, ushort cardId)
+	{
+		try
+		{
+			string path = SettingsPath(gameRoot, cardId);
+			return File.Exists(path) ? (JsonSerializer.Deserialize<OverFrameFrameSettings>(File.ReadAllText(path)) ?? new OverFrameFrameSettings()) : new OverFrameFrameSettings();
+		}
+		catch
+		{
+			return new OverFrameFrameSettings();
+		}
+	}
+
+	public static void SaveSettings(string gameRoot, ushort cardId, OverFrameFrameSettings settings)
+	{
+		Directory.CreateDirectory(CardFolder(gameRoot, cardId));
+		File.WriteAllText(SettingsPath(gameRoot, cardId), JsonSerializer.Serialize(settings, new JsonSerializerOptions
+		{
+			WriteIndented = true
+		}));
+	}
+
+	private static void Validate(int width, int height, string label)
+	{
+		if (width != 704 || height != 1024)
+		{
+			throw new InvalidDataException($"{label}必须严格为 {704}×{1024}；当前为 {width}×{height}。");
+		}
+	}
+
+	private static void SaveBackgroundImage(string gameRoot, ushort cardId, Image<Rgba32> image)
+	{
+		Directory.CreateDirectory(CardFolder(gameRoot, cardId));
+		image.Save(BackgroundPath(gameRoot, cardId), new PngEncoder
+		{
+			ColorType = PngColorType.RgbWithAlpha,
+			TransparentColorMode = PngTransparentColorMode.Preserve
+		});
+	}
+
+	private static void SaveSourceImage(string gameRoot, ushort cardId, Image<Rgba32> image)
+	{
+		if (image.Width <= 0 || image.Height <= 0)
+		{
+			throw new InvalidDataException("卡图源尺寸无效。");
+		}
+		Directory.CreateDirectory(CardFolder(gameRoot, cardId));
+		image.Save(SourcePath(gameRoot, cardId), new PngEncoder
+		{
+			ColorType = PngColorType.RgbWithAlpha,
+			TransparentColorMode = PngTransparentColorMode.Preserve
+		});
+	}
 }
