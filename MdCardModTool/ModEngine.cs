@@ -11,6 +11,7 @@ using AssetsTools.NET;
 using AssetsTools.NET.Extra;
 using AssetsTools.NET.Texture;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 
@@ -18,7 +19,7 @@ namespace MdCardModTool;
 
 public sealed class ModEngine
 {
-	private readonly string _classData = Path.Combine(AppContext.BaseDirectory, "classdata.tpk");
+	private readonly string _classData = AppPaths.ResolveFile("classdata.tpk");
 
 	[ThreadStatic]
 	private static AssetsManager? _threadManager;
@@ -630,7 +631,7 @@ public sealed class ModEngine
 			}));
 		}
 		using MemoryStream output = new();
-		image.SaveAsPng(output);
+		image.Save(output, TransparentRgbPngEncoder());
 		return output.ToArray();
 	}
 
@@ -661,7 +662,7 @@ public sealed class ModEngine
 			{
 				using (MemoryStream original = new MemoryStream())
 				{
-					image.SaveAsPng(original);
+					image.Save(original, TransparentRgbPngEncoder());
 					return original.ToArray();
 				}
 			}
@@ -677,7 +678,7 @@ public sealed class ModEngine
 				});
 			}
 			using MemoryStream resized = new MemoryStream();
-			image.SaveAsPng(resized);
+			image.Save(resized, TransparentRgbPngEncoder());
 			return resized.ToArray();
 		}
 		finally
@@ -685,6 +686,15 @@ public sealed class ModEngine
 			manager.UnloadAll();
 		}
 	}
+
+	private static PngEncoder TransparentRgbPngEncoder() => new()
+	{
+		ColorType = PngColorType.RgbWithAlpha,
+		// Master Duel stores shader-visible RGB below zero alpha. Explicitly
+		// preserving it keeps decode -> edit -> write round-trips lossless.
+		TransparentColorMode = PngTransparentColorMode.Preserve,
+		CompressionLevel = PngCompressionLevel.BestCompression
+	};
 
 	public TexRef? ResolveTextureReference(TexRef texture)
 	{
@@ -1027,10 +1037,10 @@ public sealed class ModEngine
 
 	public AnimationAtlasTextureData EncodeAnimationAtlas(Image<Rgba32> atlas)
 	{
-		string texconv = Path.Combine(AppContext.BaseDirectory, "tools", "texconv.exe");
+		string texconv = AppPaths.ResolveFile("tools", "texconv.exe");
 		if (!File.Exists(texconv))
 		{
-			throw new FileNotFoundException("缺少动画图集编码器 tools\\texconv.exe，请使用完整分享包。", texconv);
+			throw new FileNotFoundException("缺少动画图集编码器 data\\tools\\texconv.exe，请使用完整分享包。", texconv);
 		}
 		string temporary = Path.Combine(Path.GetTempPath(), "MDCardModTool", "texconv_" + Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(temporary);

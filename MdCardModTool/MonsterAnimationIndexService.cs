@@ -22,7 +22,7 @@ public static class MonsterAnimationIndexService
 	}.Concat(Enumerable.Range(1, 2000).Select(value => ((double)value / 1000.0)
 		.ToString("0.###", CultureInfo.InvariantCulture))).Distinct(StringComparer.Ordinal).ToArray();
 
-	public static string BundledPath => Path.Combine(AppContext.BaseDirectory, "prebuilt-animation-index-v1.json.br");
+	public static string BundledPath => AppPaths.ResolveFile("prebuilt-animation-index-v1.json.br");
 
 	public static MonsterAnimationSet Find(string gameRoot, string cardId)
 	{
@@ -53,7 +53,7 @@ public static class MonsterAnimationIndexService
 
 	public static HashSet<string> LoadBundledCardIds()
 	{
-		string path = Path.Combine(AppContext.BaseDirectory, "monster-animation-cards-v1.txt");
+		string path = AppPaths.ResolveFile("monster-animation-cards-v1.txt");
 		if (!File.Exists(path))
 		{
 			return new HashSet<string>();

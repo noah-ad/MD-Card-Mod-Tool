@@ -95,14 +95,18 @@ public static class BuiltInCardFrameCatalog
 
 	private static IEnumerable<string> CandidateAstellarDirectories()
 	{
-		yield return Path.Combine(AppContext.BaseDirectory, "CardFrames");
-		yield return Path.Combine(AppContext.BaseDirectory, "Resources", "CardFrames");
+		foreach (string candidate in AppPaths.CandidatePaths("CardFrames"))
+		{
+			yield return candidate;
+		}
 	}
 
 	private static IEnumerable<string> CandidateFloowanDirectories()
 	{
-		yield return Path.Combine(AppContext.BaseDirectory, "CardFrames", "Floowan");
-		yield return Path.Combine(AppContext.BaseDirectory, "Resources", "CardFrames", "Floowan");
+		foreach (string candidate in AppPaths.CandidatePaths("CardFrames", "Floowan"))
+		{
+			yield return candidate;
+		}
 		// Development fallback. Published builds receive the same MIT resources via
 		// MSBuild content linking and do not depend on this checkout path.
 		yield return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..",

@@ -20,8 +20,8 @@ public static class MonsterAnimationMedia
 	{
 		string[] array = new string[2]
 		{
-			Path.Combine(AppContext.BaseDirectory, "tools", "ffmpeg.exe"),
-			Path.Combine(AppContext.BaseDirectory, "ffmpeg.exe")
+			AppPaths.ResolveFile("tools", "ffmpeg.exe"),
+			AppPaths.ResolveFile("ffmpeg.exe")
 		};
 		foreach (string candidate in array)
 		{
@@ -71,7 +71,7 @@ public static class MonsterAnimationMedia
 		{
 			throw new ArgumentOutOfRangeException("startSeconds");
 		}
-		string ffmpeg = FindFfmpeg() ?? throw new FileNotFoundException("未找到 FFmpeg。请使用完整分享包，或把 ffmpeg.exe 放到程序目录的 tools 文件夹。", "ffmpeg.exe");
+		string ffmpeg = FindFfmpeg() ?? throw new FileNotFoundException("未找到 FFmpeg。请使用完整分享包，或把 ffmpeg.exe 放到 data\\tools 文件夹。", "ffmpeg.exe");
 		string directory = Path.Combine(Path.GetTempPath(), "MDCardModTool", "animation_" + Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(directory);
 		string output = Path.Combine(directory, "frame_%05d.png");

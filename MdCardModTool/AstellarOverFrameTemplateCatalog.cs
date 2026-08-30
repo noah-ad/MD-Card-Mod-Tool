@@ -53,7 +53,9 @@ public static class AstellarOverFrameTemplateCatalog
 
 	private static IEnumerable<string> CandidateRoots()
 	{
-		yield return Path.Combine(AppContext.BaseDirectory, "OverFrameTemplates");
-		yield return Path.Combine(AppContext.BaseDirectory, "Resources", "OverFrameTemplates");
+		foreach (string candidate in AppPaths.CandidatePaths("OverFrameTemplates"))
+		{
+			yield return candidate;
+		}
 	}
 }

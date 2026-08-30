@@ -78,7 +78,6 @@ public static class AstellarOverFrameComposer
 			}
 		}
 
-		Rgba32[] preview = (Rgba32[])output.Clone();
 		int transparentPixels = 0;
 		for (int index = 0; index < output.Length; index++)
 		{
@@ -87,13 +86,11 @@ public static class AstellarOverFrameComposer
 			bool carriesRgb = pixel.R != 0 || pixel.G != 0 || pixel.B != 0;
 			pixel.A = 0;
 			output[index] = pixel;
-			Rgba32 visible = preview[index];
-			visible.A = 255;
-			preview[index] = visible;
 			// Fully black edge pixels still need alpha cleared, but they carry no
 			// hidden RGB shader data and therefore must not inflate this diagnostic.
 			if (carriesRgb) transparentPixels++;
 		}
+		Rgba32[] preview = CreateVisibleRgbProjection(output);
 
 		return new AstellarOverFrameComposition(
 			Encode(output),
@@ -129,16 +126,34 @@ public static class AstellarOverFrameComposer
 		Validate(frame, "卡框");
 		Rgba32[] pixels = new Rgba32[FrameComposer.Width * FrameComposer.Height];
 		frame.CopyPixelDataTo(pixels);
-		for (int index = 0; index < pixels.Length; index++)
+		return Encode(CreateVisibleRgbProjection(pixels));
+	}
+
+	/// <summary>
+	/// Creates the same RGB projection used by Master Duel's full-card shader:
+	/// zero-alpha pixels that still carry RGB are made visible for display only.
+	/// The returned PNG is never written back to Texture2D; the original alpha is
+	/// retained in <see cref="AstellarOverFrameComposition.GamePng"/>.
+	/// </summary>
+	public static byte[] CreateVisibleRgbPreview(byte[] texturePng)
+	{
+		using Image<Rgba32> image = Image.Load<Rgba32>(texturePng);
+		Rgba32[] pixels = new Rgba32[image.Width * image.Height];
+		image.CopyPixelDataTo(pixels);
+		return Encode(CreateVisibleRgbProjection(pixels), image.Width, image.Height);
+	}
+
+	private static Rgba32[] CreateVisibleRgbProjection(Rgba32[] source)
+	{
+		Rgba32[] preview = (Rgba32[])source.Clone();
+		for (int index = 0; index < preview.Length; index++)
 		{
-			Rgba32 pixel = pixels[index];
-			if (pixel.A == 0 && (pixel.R != 0 || pixel.G != 0 || pixel.B != 0))
-			{
-				pixel.A = 255;
-				pixels[index] = pixel;
-			}
+			Rgba32 pixel = preview[index];
+			if (pixel.A != 0 || (pixel.R == 0 && pixel.G == 0 && pixel.B == 0)) continue;
+			pixel.A = 255;
+			preview[index] = pixel;
 		}
-		return Encode(pixels);
+		return preview;
 	}
 
 	private static Rgba32[] CreateUnderlay(int pixelCount, byte[]? backgroundPng)
@@ -194,7 +209,12 @@ public static class AstellarOverFrameComposer
 
 	private static byte[] Encode(Rgba32[] pixels)
 	{
-		using Image<Rgba32> image = Image.LoadPixelData<Rgba32>(pixels, FrameComposer.Width, FrameComposer.Height);
+		return Encode(pixels, FrameComposer.Width, FrameComposer.Height);
+	}
+
+	private static byte[] Encode(Rgba32[] pixels, int width, int height)
+	{
+		using Image<Rgba32> image = Image.LoadPixelData<Rgba32>(pixels, width, height);
 		using MemoryStream stream = new();
 		image.Save(stream, new PngEncoder
 		{

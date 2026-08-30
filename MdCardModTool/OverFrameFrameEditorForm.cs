@@ -132,6 +132,10 @@ public sealed class OverFrameFrameEditorForm : Form
 
 	private readonly Button _clearBackgroundButton;
 
+	private readonly RoundedButton _finalPreviewButton;
+
+	private readonly RoundedButton _editCanvasButton;
+
 	private readonly System.Windows.Forms.Timer _renderTimer = new()
 	{
 		Interval = 160
@@ -176,6 +180,8 @@ public sealed class OverFrameFrameEditorForm : Form
 	private bool _restoredTransform;
 
 	private bool _sourceHasTransparency;
+
+	private bool _showRenderedPreview = true;
 
 	private string? _customFramePath;
 
@@ -236,13 +242,29 @@ public sealed class OverFrameFrameEditorForm : Form
 		Button changeArt = UiTheme.Button("更换卡图", async delegate { await ChangeArtAsync(); }, ButtonTone.Primary);
 		Button addBackground = UiTheme.Button("添加叠底背景", async delegate { await AddBackgroundAsync(); }, ButtonTone.Gold);
 		_clearBackgroundButton = Button("清除背景", async delegate { await ClearBackgroundAsync(); });
-		Button exportPreview = Button("导出合成预览", delegate { ExportPreview(); });
-		Button reset = Button("铺满插图区", delegate { _canvas.ResetView(); });
-		Button whole = Button("显示整张图", delegate { _canvas.ShowWholeImage(); });
+		Button exportPreview = Button("导出游戏预览", delegate { ExportPreview(); });
+		_finalPreviewButton = (RoundedButton)UiTheme.Button("游戏最终预览", delegate
+		{
+			SetCanvasView(showRenderedPreview: true);
+		}, ButtonTone.Primary);
+		_editCanvasButton = (RoundedButton)UiTheme.Button("构图编辑", delegate
+		{
+			SetCanvasView(showRenderedPreview: false);
+		});
+		Button reset = Button("铺满插图区", delegate
+		{
+			SetCanvasView(showRenderedPreview: false);
+			_canvas.ResetView();
+		});
+		Button whole = Button("显示整张图", delegate
+		{
+			SetCanvasView(showRenderedPreview: false);
+			_canvas.ShowWholeImage();
+		});
 		Button apply = Button("应用到游戏", async delegate { await ApplyAsync(); }, accent: true);
 
 		TableLayoutPanel top = BuildToolbar(apply, changeArt, addBackground, importFrame,
-			exportFrame, exportPreview, reset, whole);
+			exportFrame, exportPreview, _finalPreviewButton, _editCanvasButton, reset, whole);
 		Controls.Add(_canvas);
 		Controls.Add(_status);
 		Controls.Add(top);
@@ -277,18 +299,20 @@ public sealed class OverFrameFrameEditorForm : Form
 
 		UpdateLayerStatus();
 		UpdateTransformStatus();
+		SetCanvasView(showRenderedPreview: true);
 	}
 
 	private TableLayoutPanel BuildToolbar(Button apply, Button changeArt, Button addBackground,
-		Button importFrame, Button exportFrame, Button exportPreview, Button reset, Button whole)
+		Button importFrame, Button exportFrame, Button exportPreview, Button finalPreview,
+		Button editCanvas, Button reset, Button whole)
 	{
 		TableLayoutPanel top = new()
 		{
 			Dock = DockStyle.Top,
-			Height = 268,
+			Height = 310,
 			Padding = new Padding(14, 10, 14, 8),
 			ColumnCount = 3,
-			RowCount = 7,
+			RowCount = 8,
 			BackColor = UiTheme.SurfaceAlt
 		};
 		top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -296,6 +320,7 @@ public sealed class OverFrameFrameEditorForm : Form
 		top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
 		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
+		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
 		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
 		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
 		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
@@ -323,6 +348,20 @@ public sealed class OverFrameFrameEditorForm : Form
 		top.Controls.Add(fileActions, 0, 3);
 		top.SetColumnSpan(fileActions, 3);
 
+		FlowLayoutPanel previewActions = ActionRow();
+		previewActions.Controls.Add(ToolbarLabel("画布模式", UiTheme.Text));
+		previewActions.Controls.Add(finalPreview);
+		previewActions.Controls.Add(editCanvas);
+		previewActions.Controls.Add(new Label
+		{
+			Text = "最终预览直接投影将写入 Texture2D 的 RGB；透明 Alpha 保持不变",
+			AutoSize = true,
+			ForeColor = UiTheme.Muted,
+			Margin = new Padding(12, 9, 0, 0)
+		});
+		top.Controls.Add(previewActions, 0, 4);
+		top.SetColumnSpan(previewActions, 3);
+
 		FlowLayoutPanel canvasActions = ActionRow();
 		canvasActions.Controls.Add(ToolbarLabel("卡图缩放", UiTheme.Text));
 		canvasActions.Controls.Add(_zoom);
@@ -330,10 +369,10 @@ public sealed class OverFrameFrameEditorForm : Form
 		canvasActions.Controls.Add(reset);
 		canvasActions.Controls.Add(whole);
 		canvasActions.Controls.Add(_transformStatus);
-		top.Controls.Add(canvasActions, 0, 4);
+		top.Controls.Add(canvasActions, 0, 5);
 		top.SetColumnSpan(canvasActions, 3);
 
-		top.Controls.Add(_layerStatus, 0, 5);
+		top.Controls.Add(_layerStatus, 0, 6);
 		top.SetColumnSpan(_layerStatus, 3);
 		Label help = new()
 		{
@@ -343,7 +382,7 @@ public sealed class OverFrameFrameEditorForm : Form
 			AutoEllipsis = true,
 			TextAlign = ContentAlignment.MiddleLeft
 		};
-		top.Controls.Add(help, 0, 6);
+		top.Controls.Add(help, 0, 7);
 		top.SetColumnSpan(help, 3);
 		return top;
 	}
@@ -578,6 +617,7 @@ public sealed class OverFrameFrameEditorForm : Form
 		_rendering = true;
 		_outputBytes = null;
 		_previewBytes = null;
+		_canvas.SetRenderedPreview(null);
 		_previewFrameKey = null;
 		_transparentEdgePixels = 0;
 		UseWaitCursor = true;
@@ -651,6 +691,8 @@ public sealed class OverFrameFrameEditorForm : Form
 			_artBytes = artBytes;
 			_previewBytes = preview;
 			_outputBytes = output;
+			_canvas.SetRenderedPreview(FrameComposer.PreviewBitmap(preview));
+			_canvas.SetRenderedPreviewVisible(_showRenderedPreview);
 			_previewFrameKey = choice.Key;
 			_previewMode = mode;
 			_transparentEdgePixels = transparentPixels;
@@ -707,7 +749,35 @@ public sealed class OverFrameFrameEditorForm : Form
 	private void ZoomValueChanged(object? sender, EventArgs e)
 	{
 		if (_syncingZoom || _loading) return;
+		SetCanvasView(showRenderedPreview: false);
 		_canvas.SetZoom(_zoom.Value / 100f, null);
+	}
+
+	private void SetCanvasView(bool showRenderedPreview)
+	{
+		_showRenderedPreview = showRenderedPreview;
+		_canvas.SetRenderedPreviewVisible(showRenderedPreview);
+		UpdateCanvasModeButtons();
+		_zoom.Enabled = !showRenderedPreview;
+		if (showRenderedPreview && _previewBytes == null)
+		{
+			_status.Text = "游戏最终预览正在生成；完成前不会显示旧结果。";
+		}
+	}
+
+	private void UpdateCanvasModeButtons()
+	{
+		SetSegmentState(_finalPreviewButton, _showRenderedPreview);
+		SetSegmentState(_editCanvasButton, !_showRenderedPreview);
+	}
+
+	private static void SetSegmentState(RoundedButton button, bool active)
+	{
+		button.NormalColor = active ? UiTheme.PrimaryDark : UiTheme.Elevated;
+		button.HoverColor = active ? Color.FromArgb(38, 148, 203) : Color.FromArgb(34, 53, 81);
+		button.BorderColor = active ? UiTheme.Primary : UiTheme.Border;
+		button.Font = new Font("Microsoft YaHei UI", 9f, active ? FontStyle.Bold : FontStyle.Regular);
+		button.Invalidate();
 	}
 
 	private void UpdateTransformStatus(ImageRenderSpec? provided = null)
@@ -956,7 +1026,7 @@ public sealed class OverFrameFrameEditorForm : Form
 		using SaveFileDialog dialog = new()
 		{
 			Filter = "PNG 图片|*.png",
-			FileName = $"{_cardId}_超框合成预览.png"
+			FileName = $"{_cardId}_游戏最终预览.png"
 		};
 		if (dialog.ShowDialog(this) == DialogResult.OK)
 		{

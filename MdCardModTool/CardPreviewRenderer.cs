@@ -10,9 +10,11 @@ namespace MdCardModTool;
 /// </summary>
 public static class CardPreviewRenderer
 {
-	public static Bitmap RenderRaw(byte[] texturePng)
+	public static Bitmap RenderRaw(byte[] texturePng, bool showTransparentRgb = false)
 	{
-		return RgbaBitmap.FromPng(texturePng);
+		return RgbaBitmap.FromPng(showTransparentRgb
+			? AstellarOverFrameComposer.CreateVisibleRgbPreview(texturePng)
+			: texturePng);
 	}
 
 	public static Bitmap Render(byte[] texturePng, byte[]? framePng, bool fullArt,

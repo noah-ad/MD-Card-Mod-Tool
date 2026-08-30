@@ -5,6 +5,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -75,20 +76,33 @@ internal static class Program
 		}
 		if (args.Length == 1 && args[0] == "--test-card-preview-raw")
 		{
-			using Bitmap art = new(512, 1024);
-			using (Graphics graphics = Graphics.FromImage(art))
+			byte[] png;
+			using (SixLabors.ImageSharp.Image<Rgba32> art = new(512, 1024,
+				new Rgba32(System.Drawing.Color.MediumPurple.R, System.Drawing.Color.MediumPurple.G,
+					System.Drawing.Color.MediumPurple.B, 255)))
+			using (MemoryStream stream = new())
 			{
-				graphics.Clear(System.Drawing.Color.MediumPurple);
+				art[10, 10] = new Rgba32(19, 143, 227, 0);
+				art.Save(stream, new SixLabors.ImageSharp.Formats.Png.PngEncoder
+				{
+					ColorType = SixLabors.ImageSharp.Formats.Png.PngColorType.RgbWithAlpha,
+					TransparentColorMode = SixLabors.ImageSharp.Formats.Png.PngTransparentColorMode.Preserve
+				});
+				png = stream.ToArray();
 			}
-			using MemoryStream stream = new();
-			art.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
-			using Bitmap preview = CardPreviewRenderer.RenderRaw(stream.ToArray());
+			using Bitmap preview = CardPreviewRenderer.RenderRaw(png);
+			using Bitmap shaderPreview = CardPreviewRenderer.RenderRaw(png, showTransparentRgb: true);
 			System.Drawing.Color center = preview.GetPixel(preview.Width / 2, preview.Height / 2);
+			System.Drawing.Color hidden = preview.GetPixel(10, 10);
+			System.Drawing.Color projected = shaderPreview.GetPixel(10, 10);
 			bool ready = preview.Width == 512 && preview.Height == 1024
 				&& center.R == System.Drawing.Color.MediumPurple.R
 				&& center.G == System.Drawing.Color.MediumPurple.G
-				&& center.B == System.Drawing.Color.MediumPurple.B;
-			Console.WriteLine($"preview={preview.Width}x{preview.Height}; center={center.R},{center.G},{center.B}; frameComposed=False; ready={ready}");
+				&& center.B == System.Drawing.Color.MediumPurple.B
+				&& hidden.A == 0 && hidden.R == 19 && hidden.G == 143 && hidden.B == 227
+				&& projected.A == 255 && projected.R == hidden.R && projected.G == hidden.G
+				&& projected.B == hidden.B;
+			Console.WriteLine($"preview={preview.Width}x{preview.Height}; center={center.R},{center.G},{center.B}; hidden={hidden.R},{hidden.G},{hidden.B},{hidden.A}; projected={projected.R},{projected.G},{projected.B},{projected.A}; frameComposed=False; ready={ready}");
 			if (!ready) Environment.ExitCode = 2;
 			return;
 		}
@@ -280,12 +294,16 @@ internal static class Program
 						.Select(button => button.Text).ToArray();
 					string[] modeLabels = mode.Items.Cast<object>().Select(item => item.ToString() ?? "").ToArray();
 					editorUiReady = modesReady && canvas.IsOverFrameEditing
+						&& canvas.ShowingRenderedPreview
 						&& modeLabels.SequenceEqual(expectedModes)
 						&& layerStatus.Text.Contains("已添加背景", StringComparison.Ordinal)
 						&& layerStatus.Text.Contains("主体可越过卡框", StringComparison.Ordinal)
 						&& editorButtons.Contains("更换卡图")
 						&& editorButtons.Contains("添加叠底背景")
 						&& editorButtons.Contains("清除背景")
+						&& editorButtons.Contains("游戏最终预览")
+						&& editorButtons.Contains("构图编辑")
+						&& editorButtons.Contains("导出游戏预览")
 						&& editorButtons.Contains("铺满插图区")
 						&& editorButtons.Contains("显示整张图");
 					string? screenshotPath = Environment.GetEnvironmentVariable("MDCT_OVERFRAME_SCREENSHOT");
@@ -315,6 +333,7 @@ internal static class Program
 						?? throw new MissingFieldException(nameof(OverFrameFrameEditorForm), "_outputBytes");
 					reopenRestored = WaitFor(() => reopenedOutput.GetValue(reopened) is byte[])
 						&& reopenedCanvas.IsOverFrameEditing
+						&& reopenedCanvas.ShowingRenderedPreview
 						&& Math.Abs(reopenedCanvas.RenderSpec.ImageScale - movedSpec.ImageScale) < 0.02f
 						&& Math.Abs(reopenedCanvas.RenderSpec.OffsetX - movedSpec.OffsetX) < 1f
 						&& Math.Abs(reopenedCanvas.RenderSpec.OffsetY - movedSpec.OffsetY) < 1f;
@@ -422,23 +441,32 @@ internal static class Program
 			int visiblePreview = 0;
 			int dirtyPixels = 0;
 			int dirtyAlphaFailures = 0;
-			int dirtyPreviewFailures = 0;
+			int projectionAlphaFailures = 0;
+			int projectionRgbFailures = 0;
 			int visibleOutsideDirty = 0;
 			for (int y = 0; y < game.Height; y++)
 			for (int x = 0; x < game.Width; x++)
 			{
 				int index = y * game.Width + x;
 				Rgba32 pixel = game[x, y];
-				if (pixel.A == 0 && (pixel.R != 0 || pixel.G != 0 || pixel.B != 0))
+				Rgba32 projected = preview[x, y];
+				bool carriesTransparentRgb = pixel.A == 0
+					&& (pixel.R != 0 || pixel.G != 0 || pixel.B != 0);
+				byte expectedPreviewAlpha = carriesTransparentRgb ? (byte)255 : pixel.A;
+				if (projected.A != expectedPreviewAlpha) projectionAlphaFailures++;
+				if (projected.R != pixel.R || projected.G != pixel.G || projected.B != pixel.B)
+				{
+					projectionRgbFailures++;
+				}
+				if (carriesTransparentRgb)
 				{
 					transparentRgb++;
-					if (preview[x, y].A == 255) visiblePreview++;
+					if (projected.A == 255) visiblePreview++;
 				}
 				if (dirtyMask[index])
 				{
 					dirtyPixels++;
 					if (pixel.A != 0) dirtyAlphaFailures++;
-					if (preview[x, y].A != 255) dirtyPreviewFailures++;
 				}
 				else if (pixel.A > 0)
 				{
@@ -448,12 +476,13 @@ internal static class Program
 			Rgba32 subject = game[subjectPoint.X, subjectPoint.Y];
 			bool ready = template.Layers.Count == 6 && game.Width == 704 && game.Height == 1024
 				&& transparentRgb > 10000 && visiblePreview == transparentRgb
-				&& dirtyPixels > 10000 && dirtyAlphaFailures == 0 && dirtyPreviewFailures == 0
+				&& dirtyPixels > 10000 && dirtyAlphaFailures == 0
+				&& projectionAlphaFailures == 0 && projectionRgbFailures == 0
 				&& visibleOutsideDirty > 10000
 				&& composition.TransparentEdgePixels == transparentRgb
 				&& subject.R == 239 && subject.G == 31 && subject.B == 47 && subject.A == 0
 				&& preview[subjectPoint.X, subjectPoint.Y].A == 255;
-			Console.WriteLine($"template={key}; layers={template.Layers.Count}; transparentRgb={transparentRgb}/{composition.TransparentEdgePixels}; previewVisible={visiblePreview}; dirty={dirtyPixels}; dirtyAlphaFailures={dirtyAlphaFailures}; dirtyPreviewFailures={dirtyPreviewFailures}; visibleOutsideDirty={visibleOutsideDirty}; subjectOverFrame={subject.R},{subject.G},{subject.B},{subject.A}@{subjectPoint.X},{subjectPoint.Y}; gameBytes={composition.GamePng.Length}; ready={ready}");
+			Console.WriteLine($"template={key}; layers={template.Layers.Count}; transparentRgb={transparentRgb}/{composition.TransparentEdgePixels}; previewVisible={visiblePreview}; dirty={dirtyPixels}; dirtyAlphaFailures={dirtyAlphaFailures}; projectionAlphaFailures={projectionAlphaFailures}; projectionRgbFailures={projectionRgbFailures}; visibleOutsideDirty={visibleOutsideDirty}; subjectOverFrame={subject.R},{subject.G},{subject.B},{subject.A}@{subjectPoint.X},{subjectPoint.Y}; gameBytes={composition.GamePng.Length}; ready={ready}");
 			if (!ready) Environment.ExitCode = 2;
 			return;
 		}
@@ -479,25 +508,126 @@ internal static class Program
 			int zeroAlpha = 0;
 			int hiddenRgb = 0;
 			int opaque = 0;
-			int previewOpaque = 0;
+			int previewVisibleRgb = 0;
+			int projectionFailures = 0;
 			for (int y = 0; y < game.Height; y++)
 			for (int x = 0; x < game.Width; x++)
 			{
 				Rgba32 pixel = game[x, y];
+				Rgba32 projected = preview[x, y];
+				bool carriesTransparentRgb = pixel.A == 0
+					&& (pixel.R != 0 || pixel.G != 0 || pixel.B != 0);
 				if (pixel.A == 0)
 				{
 					zeroAlpha++;
-					if (pixel.R != 0 || pixel.G != 0 || pixel.B != 0) hiddenRgb++;
+					if (carriesTransparentRgb)
+					{
+						hiddenRgb++;
+						if (projected.A == 255) previewVisibleRgb++;
+					}
 				}
 				if (pixel.A == 255) opaque++;
-				if (preview[x, y].A == 255) previewOpaque++;
+				byte expectedAlpha = carriesTransparentRgb ? (byte)255 : pixel.A;
+				if (projected.A != expectedAlpha || projected.R != pixel.R
+					|| projected.G != pixel.G || projected.B != pixel.B) projectionFailures++;
 			}
 			bool ready = game.Width == FrameComposer.Width && game.Height == FrameComposer.Height
 				&& zeroAlpha > 100000 && hiddenRgb > 100000 && opaque > 100000
-				&& previewOpaque == game.Width * game.Height
+				&& previewVisibleRgb == hiddenRgb && projectionFailures == 0
 				&& composition.TransparentEdgePixels == hiddenRgb;
-			Console.WriteLine($"draft={draftRoot}; frame={frameKey}; zeroAlpha={zeroAlpha}; hiddenRgb={hiddenRgb}/{composition.TransparentEdgePixels}; opaque={opaque}; previewOpaque={previewOpaque}; gameBytes={composition.GamePng.Length}; ready={ready}");
+			Console.WriteLine($"draft={draftRoot}; frame={frameKey}; zeroAlpha={zeroAlpha}; hiddenRgb={hiddenRgb}/{composition.TransparentEdgePixels}; opaque={opaque}; previewVisibleRgb={previewVisibleRgb}; projectionFailures={projectionFailures}; gameBytes={composition.GamePng.Length}; ready={ready}");
 			if (!ready) Environment.ExitCode = 2;
+			return;
+		}
+		if (args.Length == 4 && args[0] == "--test-texture-rgba-roundtrip")
+		{
+			string gameRoot = Path.GetFullPath(args[1]);
+			string cardId = args[2];
+			string draftRoot = Path.GetFullPath(args[3]);
+			if (!PortableIndexService.TryLoadBundled(gameRoot, out GameIndex currentIndex, out _))
+			{
+				throw new FileNotFoundException("程序目录没有随包预绑定索引。", PortableIndexService.BundledPath);
+			}
+			TexRef indexed = currentIndex.Textures.FirstOrDefault(texture =>
+				texture.SourceKind == "本地卡图" && texture.CardKey == cardId)
+				?? throw new InvalidDataException("预绑定索引不含卡号 " + cardId + "。");
+			ModEngine engine = new();
+			TexRef resolved = engine.ResolveTextureReference(indexed)
+				?? throw new InvalidDataException("无法重新定位卡号 " + cardId + " 的 Texture2D。");
+			string realBundle = Path.GetFullPath(resolved.ActiveBundlePath);
+			byte[] HashFile(string path)
+			{
+				using FileStream stream = File.OpenRead(path);
+				return SHA256.HashData(stream);
+			}
+			byte[] realHashBefore = HashFile(realBundle);
+
+			OverFrameFrameSettings settings = JsonSerializer.Deserialize<OverFrameFrameSettings>(
+				File.ReadAllText(Path.Combine(draftRoot, "卡框设置.json")))
+				?? throw new InvalidDataException("无法读取超框草稿设置。");
+			string frameKey = settings.FrameKey.StartsWith("transparent_", StringComparison.Ordinal)
+				? settings.FrameKey["transparent_".Length..]
+				: settings.FrameKey;
+			string backgroundPath = Path.Combine(draftRoot, "叠底背景.png");
+			AstellarOverFrameComposition composition = AstellarOverFrameComposer.Compose(
+				File.ReadAllBytes(Path.Combine(draftRoot, "透明原画.png")),
+				AstellarOverFrameTemplateCatalog.Load(frameKey),
+				File.Exists(backgroundPath) ? File.ReadAllBytes(backgroundPath) : null);
+
+			string testRoot = Path.Combine(Path.GetTempPath(), "MDCardModTool",
+				"TextureRoundTripTests", Guid.NewGuid().ToString("N"));
+			Directory.CreateDirectory(testRoot);
+			try
+			{
+				string temporaryBundle = Path.Combine(testRoot, Path.GetFileName(realBundle));
+				File.Copy(realBundle, temporaryBundle);
+				TexRef temporary = new()
+				{
+					BundlePath = temporaryBundle,
+					RelativeBundlePath = Path.GetFileName(temporaryBundle),
+					PathId = resolved.PathId,
+					AssetFileName = resolved.AssetFileName,
+					Name = resolved.Name,
+					Width = resolved.Width,
+					Height = resolved.Height,
+					Category = resolved.Category,
+					SourceKind = resolved.SourceKind,
+					CardKey = resolved.CardKey
+				};
+				engine.Replace(temporary, composition.GamePng, Path.Combine(testRoot, "backup"));
+				byte[] decoded = engine.DecodePng(temporary);
+				using SixLabors.ImageSharp.Image<Rgba32> expected =
+					SixLabors.ImageSharp.Image.Load<Rgba32>(composition.GamePng);
+				using SixLabors.ImageSharp.Image<Rgba32> actual =
+					SixLabors.ImageSharp.Image.Load<Rgba32>(decoded);
+				Rgba32[] expectedPixels = new Rgba32[expected.Width * expected.Height];
+				Rgba32[] actualPixels = new Rgba32[actual.Width * actual.Height];
+				expected.CopyPixelDataTo(expectedPixels);
+				actual.CopyPixelDataTo(actualPixels);
+				int mismatches = expectedPixels.Length == actualPixels.Length
+					? expectedPixels.Zip(actualPixels).Count(pair => pair.First != pair.Second)
+					: Math.Max(expectedPixels.Length, actualPixels.Length);
+				int hiddenRgb = actualPixels.Count(pixel => pixel.A == 0
+					&& (pixel.R != 0 || pixel.G != 0 || pixel.B != 0));
+				bool realUnchanged = realHashBefore.SequenceEqual(HashFile(realBundle));
+				bool ready = actual.Width == expected.Width && actual.Height == expected.Height
+					&& mismatches == 0 && hiddenRgb == composition.TransparentEdgePixels
+					&& realUnchanged;
+				Console.WriteLine($"card={cardId}; temporaryBundle=True; expected={expected.Width}x{expected.Height}; decoded={actual.Width}x{actual.Height}; rgbaMismatches={mismatches}; hiddenRgb={hiddenRgb}/{composition.TransparentEdgePixels}; realBundleUnchanged={realUnchanged}; ready={ready}");
+				if (!ready) Environment.ExitCode = 2;
+			}
+			finally
+			{
+				string fullTestRoot = Path.GetFullPath(testRoot);
+				string safeParent = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "MDCardModTool",
+					"TextureRoundTripTests")).TrimEnd(Path.DirectorySeparatorChar)
+					+ Path.DirectorySeparatorChar;
+				if (fullTestRoot.StartsWith(safeParent, StringComparison.OrdinalIgnoreCase)
+					&& Directory.Exists(fullTestRoot))
+				{
+					Directory.Delete(fullTestRoot, recursive: true);
+				}
+			}
 			return;
 		}
 		if (args.Length == 3 && args[0] == "--test-overframe-editor-current")
@@ -575,12 +705,39 @@ internal static class Program
 					modesReady &= output != null && dimensions && frameChoices.Items.Count == 16
 						&& status.Text.StartsWith(expectedStatus[index], StringComparison.Ordinal);
 				}
-				bool ready = decoded.Length > 0 && canvas.IsOverFrameEditing && canvas.HasFrame && modesReady
+				mode.SelectedIndex = 0;
+				DateTime finalPreviewDeadline = DateTime.UtcNow.AddSeconds(20);
+				while (DateTime.UtcNow < finalPreviewDeadline &&
+					(outputField.GetValue(form) is not byte[]
+						|| !status.Text.StartsWith(expectedStatus[0], StringComparison.Ordinal)
+						|| !canvas.ShowingRenderedPreview))
+				{
+					Application.DoEvents();
+					Thread.Sleep(20);
+				}
+				modesReady &= outputField.GetValue(form) is byte[]
+					&& status.Text.StartsWith(expectedStatus[0], StringComparison.Ordinal)
+					&& canvas.ShowingRenderedPreview;
+				string[] editorButtons = Descendants(form).OfType<Button>()
+					.Select(button => button.Text).ToArray();
+				bool ready = decoded.Length > 0 && canvas.IsOverFrameEditing && canvas.HasFrame
+					&& canvas.ShowingRenderedPreview && modesReady
+					&& editorButtons.Contains("游戏最终预览")
+					&& editorButtons.Contains("构图编辑")
+					&& editorButtons.Contains("导出游戏预览")
 					&& frames.Count(BuiltInCardFrameCatalog.IsNormalFrame) == 16
 					&& frames.Count(BuiltInCardFrameCatalog.IsTransparentFrame) == 16
 					&& frames.Count(BuiltInCardFrameCatalog.IsGradientFrame) == 16;
 				ImageRenderSpec spec = canvas.RenderSpec;
 				Console.WriteLine($"card={cardId}; source={art.Width}x{art.Height}; decoded={decoded.Length}; defaultOverframe={defaultOverframe}; modes={string.Join(',', choiceCounts)}; status={status.Text}; directCanvas={canvas.IsOverFrameEditing}; transform={spec.ImageScale:0.000}@{spec.OffsetX:0.0},{spec.OffsetY:0.0}; gameWrites=False; ready={ready}");
+				string? screenshotPath = Environment.GetEnvironmentVariable("MDCT_OVERFRAME_CURRENT_SCREENSHOT");
+				if (!string.IsNullOrWhiteSpace(screenshotPath))
+				{
+					using Bitmap screenshot = new(form.Width, form.Height);
+					form.DrawToBitmap(screenshot, new System.Drawing.Rectangle(0, 0,
+						screenshot.Width, screenshot.Height));
+					screenshot.Save(screenshotPath, System.Drawing.Imaging.ImageFormat.Png);
+				}
 				form.Close();
 				if (!ready) Environment.ExitCode = 2;
 			}

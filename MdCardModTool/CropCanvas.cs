@@ -21,6 +21,10 @@ public sealed class CropCanvas : Control
 
 	private Bitmap? _frame;
 
+	private Bitmap? _renderedPreview;
+
+	private bool _showRenderedPreview;
+
 	private RectangleF _artWindow;
 
 	private float _zoom = 1f;
@@ -38,6 +42,8 @@ public sealed class CropCanvas : Control
 	public bool HasFrame => _frame != null;
 
 	public bool IsOverFrameEditing => _overFrameEditing;
+
+	public bool ShowingRenderedPreview => _showRenderedPreview && _renderedPreview != null;
 
 	public SizeF VisualArtSize
 	{
@@ -216,6 +222,20 @@ public sealed class CropCanvas : Control
 		Invalidate();
 	}
 
+	public void SetRenderedPreview(Bitmap? preview)
+	{
+		_renderedPreview?.Dispose();
+		_renderedPreview = preview;
+		Invalidate();
+	}
+
+	public void SetRenderedPreviewVisible(bool visible)
+	{
+		_showRenderedPreview = visible;
+		Cursor = ShowingRenderedPreview ? Cursors.Default : Cursors.Hand;
+		Invalidate();
+	}
+
 	public void DisposeFrame()
 	{
 		_frame?.Dispose();
@@ -342,6 +362,7 @@ public sealed class CropCanvas : Control
 	protected override void OnMouseDown(MouseEventArgs e)
 	{
 		base.OnMouseDown(e);
+		if (ShowingRenderedPreview) return;
 		RectangleF hitArea = _overFrameEditing ? CardRectangle : WorkRectangle;
 		if (e.Button == MouseButtons.Left && hitArea.Contains(e.Location))
 		{
@@ -356,6 +377,7 @@ public sealed class CropCanvas : Control
 	protected override void OnMouseMove(MouseEventArgs e)
 	{
 		base.OnMouseMove(e);
+		if (ShowingRenderedPreview) return;
 		if (_dragging)
 		{
 			_offsetX += e.X - _lastMouse.X;
@@ -381,18 +403,21 @@ public sealed class CropCanvas : Control
 	protected override void OnMouseWheel(MouseEventArgs e)
 	{
 		base.OnMouseWheel(e);
+		if (ShowingRenderedPreview) return;
 		SetZoom(_zoom * ((e.Delta > 0) ? 1.12f : (25f / 28f)), e.Location);
 	}
 
 	protected override void OnDoubleClick(EventArgs e)
 	{
 		base.OnDoubleClick(e);
+		if (ShowingRenderedPreview) return;
 		ResetView();
 	}
 
 	protected override void OnKeyDown(KeyEventArgs e)
 	{
 		base.OnKeyDown(e);
+		if (ShowingRenderedPreview) return;
 		int step = (e.Shift ? 10 : 2);
 		bool changed = true;
 		switch (e.KeyCode)
@@ -435,6 +460,19 @@ public sealed class CropCanvas : Control
 		base.OnPaint(e);
 		Graphics graphics = e.Graphics;
 		CardFrameRenderer.Configure(graphics);
+		if (ShowingRenderedPreview)
+		{
+			RectangleF card = CardRectangle;
+			using (SolidBrush shadow = new(Color.FromArgb(90, 0, 0, 0)))
+			{
+				graphics.FillRectangle(shadow, card.Left + 9f, card.Top + 10f, card.Width, card.Height);
+			}
+			DrawCheckerboard(graphics, card);
+			graphics.DrawImage(_renderedPreview!, card);
+			using Pen previewBorder = new(UiTheme.Primary, 2f);
+			graphics.DrawRectangle(previewBorder, card.X, card.Y, card.Width, card.Height);
+			return;
+		}
 		RectangleF work = WorkRectangle;
 		if (_frame != null)
 		{
@@ -575,6 +613,8 @@ public sealed class CropCanvas : Control
 			_background = null;
 			_frame?.Dispose();
 			_frame = null;
+			_renderedPreview?.Dispose();
+			_renderedPreview = null;
 		}
 		base.Dispose(disposing);
 	}

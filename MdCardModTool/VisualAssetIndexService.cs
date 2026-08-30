@@ -98,7 +98,7 @@ public static class VisualAssetIndexService
 
 	private static List<CatalogEntry> ReadCatalog()
 	{
-		string external = Path.Combine(AppContext.BaseDirectory, "visual-assets-v1.tsv");
+		string external = AppPaths.ResolveFile("visual-assets-v1.tsv");
 		using Stream stream = File.Exists(external) ? File.OpenRead(external) : (Assembly.GetExecutingAssembly().GetManifestResourceStream(EmbeddedCatalogName) ?? throw new FileNotFoundException("程序缺少 Astellar 视觉资源目录。", external));
 		using StreamReader reader = new StreamReader(stream);
 		List<CatalogEntry> result = new List<CatalogEntry>();

@@ -775,7 +775,7 @@ public sealed class MainForm : Form
 			BackColor = UiTheme.Surface,
 			Font = new Font("Segoe UI", 8f),
 			TextAlign = ContentAlignment.MiddleLeft,
-			Text = $"v2.0  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
+			Text = $"v2.0.1  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
 		};
 		TableLayoutPanel sidebar = new()
 		{
@@ -1129,11 +1129,7 @@ public sealed class MainForm : Form
 
 	private static Image? LoadBrandImage()
 	{
-		foreach (string path in new[]
-		{
-			Path.Combine(AppContext.BaseDirectory, "app-icon-rounded.png"),
-			Path.Combine(AppContext.BaseDirectory, "Resources", "app-icon-rounded.png")
-		})
+		foreach (string path in AppPaths.CandidatePaths("app-icon-rounded.png"))
 		{
 			try
 			{
@@ -1151,11 +1147,7 @@ public sealed class MainForm : Form
 
 	private static Icon? LoadWindowIcon()
 	{
-		foreach (string path in new[]
-		{
-			Path.Combine(AppContext.BaseDirectory, "app-icon.ico"),
-			Path.Combine(AppContext.BaseDirectory, "Resources", "app-icon.ico")
-		})
+		foreach (string path in AppPaths.CandidatePaths("app-icon.ico"))
 		{
 			try
 			{
@@ -2516,7 +2508,9 @@ public sealed class MainForm : Form
 			// The resource workspace previews exactly what is stored in Texture2D.
 			// Card-frame composition is an explicit action; doing it automatically made
 			// Pendulum cards look as if their frame were part of the selected artwork.
-			Bitmap display = CardPreviewRenderer.RenderRaw(data);
+			bool showTransparentRgb = x.SourceKind == "本地卡图"
+				&& x.Width == FrameComposer.Width && x.Height == FrameComposer.Height;
+			Bitmap display = CardPreviewRenderer.RenderRaw(data, showTransparentRgb);
 			if (cancellationToken.IsCancellationRequested || generation != _previewGeneration || Selected() != x)
 			{
 				display.Dispose();
@@ -2528,14 +2522,15 @@ public sealed class MainForm : Form
 			string frameLine = "";
 			if (_gameRoot != null && x.SourceKind == "本地卡图" && x.Width == 704 && x.Height == 1024 && ushort.TryParse(x.CardKey, out var cardId))
 			{
+				frameLine = "\n预览：游戏 RGB 显示（透明 Alpha 仍原样保存在 Texture2D）";
 				if (OverFrameArtStore.HasSettings(_gameRoot, cardId))
 				{
 					OverFrameFrameSettings settings = OverFrameArtStore.ReadSettings(_gameRoot, cardId);
-					frameLine = "\n卡框：" + (settings.UsesCustomFrame ? "自定义卡框" : settings.FrameKey) + "  ·  可用下方“制作超框”更换";
+					frameLine += "\n卡框：" + (settings.UsesCustomFrame ? "自定义卡框" : settings.FrameKey) + "  ·  可用下方“制作超框”更换";
 				}
 				else
 				{
-					frameLine = "\n卡框：尚未单独合成  ·  点击下方“制作超框”，可直接使用当前原卡图";
+					frameLine += "\n卡框：尚未单独合成  ·  点击下方“制作超框”，可直接使用当前原卡图";
 				}
 			}
 			else if (x.SourceKind == "本地卡图" && x.Width == 512 && (x.Height == 512 || x.Height == 1024))

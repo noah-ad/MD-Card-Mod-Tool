@@ -38,7 +38,7 @@ public sealed class CardCatalogService
 
 	public IReadOnlyList<CardCatalogEntry> Entries => _entries;
 
-	public static string BundledPath => Path.Combine(AppContext.BaseDirectory, BundledFileName);
+	public static string BundledPath => AppPaths.ResolveFile(BundledFileName);
 
 	public static CardCatalogService LoadBestAvailable()
 	{

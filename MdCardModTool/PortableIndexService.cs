@@ -12,7 +12,7 @@ public static class PortableIndexService
 {
 	public const string BundledFileName = "prebuilt-index-v1.json.br";
 
-	public static string BundledPath => Path.Combine(AppContext.BaseDirectory, "prebuilt-index-v1.json.br");
+	public static string BundledPath => AppPaths.ResolveFile("prebuilt-index-v1.json.br");
 
 	public static bool TryLoadBundled(string gameRoot, out GameIndex index, out string buildId)
 	{
