@@ -42,6 +42,10 @@ public static class CardFrameCatalog
 
 	public static string BaseKey(string key)
 	{
+		if (key.StartsWith("transparent_gradient_", StringComparison.OrdinalIgnoreCase))
+		{
+			return key["transparent_gradient_".Length..];
+		}
 		if (key.StartsWith("transparent_", StringComparison.OrdinalIgnoreCase))
 		{
 			return key["transparent_".Length..];

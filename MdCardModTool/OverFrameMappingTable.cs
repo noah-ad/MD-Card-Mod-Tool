@@ -70,7 +70,8 @@ public sealed class OverFrameMappingTable : Control
 	{
 		base.OnPaint(e);
 		e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-		e.Graphics.Clear(UiTheme.Surface);
+		using SolidBrush background = new(UiTheme.Surface);
+		e.Graphics.FillRectangle(background, ClientRectangle);
 
 		int headerHeight = HeaderHeight;
 		int rowHeight = RowHeight;

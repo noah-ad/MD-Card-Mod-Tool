@@ -13,7 +13,8 @@ public sealed class ImageCropForm : Form
 	private enum FrameCategory
 	{
 		Transparent,
-		Cool,
+		TransparentGradient,
+		Gradient,
 		Normal
 	}
 
@@ -146,7 +147,8 @@ public sealed class ImageCropForm : Form
 		if (fullCardOverlay && hasFrames)
 		{
 			_frameCategory.Items.Add(new FrameCategoryChoice(FrameCategory.Transparent, "透明卡框"));
-			_frameCategory.Items.Add(new FrameCategoryChoice(FrameCategory.Cool, "炫酷卡框"));
+			_frameCategory.Items.Add(new FrameCategoryChoice(FrameCategory.TransparentGradient, "透明炫彩卡框"));
+			_frameCategory.Items.Add(new FrameCategoryChoice(FrameCategory.Gradient, "炫彩卡框"));
 			_frameCategory.Items.Add(new FrameCategoryChoice(FrameCategory.Normal, "普通卡框"));
 			_frameCategory.SelectedIndex = CategoryIndex(preferredFrameKey);
 		}
@@ -191,7 +193,7 @@ public sealed class ImageCropForm : Form
 		header.Controls.Add(title);
 		Label help = new Label
 		{
-			Text = (fullCardOverlay ? "图层顺序：叠底背景 → 卡框 → 卡图主体。\n\n• 三类卡框可独立切换\n• 更换卡图不会移除叠底背景\n• 左键拖动卡图，滚轮／滑杆缩放\n• 方向键微调，Shift + 方向键快速移动\n• 双击画面恢复铺满\n\n确认后进入超框编辑器完成应用。" : (hasFrames ? "操作\n\n• 卡框下拉只控制实装预览与构图比例\n• 左键拖动图片，滚轮／滑杆缩放\n• 可缩到画框以内，透明处按游戏白色底板显示\n• 方向键微调，Shift + 方向键快速移动\n• 双击画面恢复铺满\n\n灵摆卡会按正常宽画面预览，保存时再自动压回 512×1024。" : "操作\n\n• 左键拖动图片\n• 滚轮／滑杆可自由放大和缩小\n• 方向键微调位置\n• 双击恢复铺满\n\n确认后自动转换为目标尺寸，透明 PNG 的 Alpha 会保留。")),
+			Text = (fullCardOverlay ? "图层顺序：叠底背景 → 卡框 → 卡图主体。\n\n• 四类卡框可独立切换\n• 更换卡图不会移除叠底背景\n• 左键拖动卡图，滚轮／滑杆缩放\n• 方向键微调，Shift + 方向键快速移动\n• 双击画面恢复铺满\n\n确认后进入超框编辑器完成应用。" : (hasFrames ? "操作\n\n• 卡框下拉只控制实装预览与构图比例\n• 左键拖动图片，滚轮／滑杆缩放\n• 可缩到画框以内，透明处按游戏白色底板显示\n• 方向键微调，Shift + 方向键快速移动\n• 双击画面恢复铺满\n\n灵摆卡会按正常宽画面预览，保存时再自动压回 512×1024。" : "操作\n\n• 左键拖动图片\n• 滚轮／滑杆可自由放大和缩小\n• 方向键微调位置\n• 双击恢复铺满\n\n确认后自动转换为目标尺寸，透明 PNG 的 Alpha 会保留。")),
 			Dock = DockStyle.Top,
 			Height = (fullCardOverlay ? 190 : (hasFrames ? 260 : 210)),
 			ForeColor = UiTheme.Text,
@@ -397,9 +399,10 @@ public sealed class ImageCropForm : Form
 
 	private static int CategoryIndex(string? frameKey)
 	{
-		if (frameKey?.StartsWith("gradient_", StringComparison.OrdinalIgnoreCase) == true) return 1;
+		if (frameKey?.StartsWith("transparent_gradient_", StringComparison.OrdinalIgnoreCase) == true) return 1;
 		if (frameKey?.StartsWith("transparent_", StringComparison.OrdinalIgnoreCase) == true) return 0;
-		return 2;
+		if (frameKey?.StartsWith("gradient_", StringComparison.OrdinalIgnoreCase) == true) return 2;
+		return 3;
 	}
 
 	private FrameCategory CurrentFrameCategory =>
@@ -418,7 +421,8 @@ public sealed class ImageCropForm : Form
 				source = source.Where(frame => CurrentFrameCategory switch
 				{
 					FrameCategory.Transparent => BuiltInCardFrameCatalog.IsTransparentFrame(frame),
-					FrameCategory.Cool => BuiltInCardFrameCatalog.IsGradientFrame(frame),
+					FrameCategory.TransparentGradient => BuiltInCardFrameCatalog.IsTransparentGradientFrame(frame),
+					FrameCategory.Gradient => BuiltInCardFrameCatalog.IsGradientFrame(frame),
 					_ => BuiltInCardFrameCatalog.IsNormalFrame(frame)
 				});
 			}

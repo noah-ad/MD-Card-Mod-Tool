@@ -15,7 +15,7 @@
 	<DebugType>None</DebugType>
 	<DebugSymbols>false</DebugSymbols>
     <Nullable>enable</Nullable>
-    <Version>2.0.1</Version>
+    <Version>2.0.3</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationIcon>Resources\app-icon.ico</ApplicationIcon>
 	<Win32Icon>Resources\app-icon.ico</Win32Icon>
@@ -46,7 +46,7 @@
     <None Update="DIRECTXTEX-NOTICE.txt" Link="data\licenses\DIRECTXTEX-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="FFMPEG-NOTICE.txt" Link="data\licenses\FFMPEG-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\README.md" Link="data\README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-	<None Include="..\RELEASE-NOTES-v2.0.1.md" Link="data\RELEASE-NOTES-v2.0.1.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\RELEASE-NOTES-v2.0.3.md" Link="data\RELEASE-NOTES-v2.0.3.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 	<None Include="..\THIRD_PARTY_NOTICES.md" Link="data\licenses\THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 	<None Include="..\FLOOWAN-NOTICE.txt" Link="data\licenses\FLOOWAN-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\ASTELLAR-NOTICE.txt" Link="data\licenses\ASTELLAR-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

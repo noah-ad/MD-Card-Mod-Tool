@@ -201,6 +201,8 @@ public sealed class MonsterAnimationForm : Form
 		base.AutoScaleMode = AutoScaleMode.Dpi;
 		base.KeyPreview = true;
 		AllowDrop = true;
+		DpiChanged += delegate { UiTheme.QueueStableRepaint(this); };
+		ResizeEnd += delegate { UiTheme.QueueStableRepaint(this); };
 		UiTheme.StyleTextBox(_cardId);
 		UiTheme.StyleComboBox(_frameEdge);
 		UiTheme.StyleComboBox(_atlasEdge);
@@ -301,6 +303,7 @@ public sealed class MonsterAnimationForm : Form
 		TableLayoutPanel cardRow = new TableLayoutPanel
 		{
 			Dock = DockStyle.Fill,
+			Margin = Padding.Empty,
 			BackColor = UiTheme.Surface,
 			Padding = new Padding(18, 8, 18, 8),
 			ColumnCount = 5,
@@ -338,6 +341,7 @@ public sealed class MonsterAnimationForm : Form
 		TableLayoutPanel buttons = new TableLayoutPanel
 		{
 			Dock = DockStyle.Fill,
+			Margin = Padding.Empty,
 			ColumnCount = 2,
 			RowCount = 3,
 			Padding = new Padding(0, 6, 0, 4),
@@ -345,9 +349,9 @@ public sealed class MonsterAnimationForm : Form
 		};
 		buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
 		buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
-		buttons.RowStyles.Add(new RowStyle(SizeType.Percent, 33.333f));
-		buttons.RowStyles.Add(new RowStyle(SizeType.Percent, 33.333f));
-		buttons.RowStyles.Add(new RowStyle(SizeType.Percent, 33.334f));
+		buttons.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
+		buttons.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
+		buttons.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
 		Button[] array = new Button[4] { _chooseMedia, _play, _apply, _restore };
 		foreach (Button obj in array)
 		{
@@ -430,7 +434,7 @@ public sealed class MonsterAnimationForm : Form
 		};
 		sideLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
 		sideLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-		sideLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58f));
+		sideLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 64f));
 		sideLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 132f));
 		sideLayout.Controls.Add(optionScroll, 0, 0);
 		sideLayout.Controls.Add(_sourceStatus, 0, 1);
@@ -459,6 +463,7 @@ public sealed class MonsterAnimationForm : Form
 		SplitContainer body = new SplitContainer
 		{
 			Dock = DockStyle.Fill,
+			Margin = Padding.Empty,
 			SplitterWidth = 8,
 			FixedPanel = FixedPanel.Panel2,
 			BackColor = UiTheme.Window
@@ -470,25 +475,47 @@ public sealed class MonsterAnimationForm : Form
 		GradientBanner banner = new GradientBanner
 		{
 			Dock = DockStyle.Fill,
-			Padding = new Padding(22, 10, 22, 8)
+			Margin = Padding.Empty,
+			Padding = new Padding(22, 6, 22, 6)
 		};
-		banner.Controls.Add(new Label
+		Label bannerTitle = new Label
 		{
+			Name = "MonsterAnimationBannerTitle",
 			Text = "MONSTER ANIMATION LAB",
-			Dock = DockStyle.Top,
-			Height = 28,
+			Dock = DockStyle.Fill,
+			Margin = Padding.Empty,
 			Font = new Font("Segoe UI Semibold", 16f),
 			ForeColor = UiTheme.Text,
-			BackColor = Color.Transparent
-		});
-		banner.Controls.Add(new Label
+			BackColor = Color.Transparent,
+			TextAlign = ContentAlignment.MiddleLeft,
+			AutoEllipsis = true
+		};
+		Label bannerSubtitle = new Label
 		{
+			Name = "MonsterAnimationBannerSubtitle",
 			Text = "GIF / VIDEO  →  SPINE SEQUENCE  →  MASTER DUEL",
-			Dock = DockStyle.Bottom,
-			Height = 22,
+			Dock = DockStyle.Fill,
+			Margin = Padding.Empty,
 			ForeColor = UiTheme.Primary,
+			BackColor = Color.Transparent,
+			TextAlign = ContentAlignment.MiddleLeft,
+			AutoEllipsis = true
+		};
+		TableLayoutPanel bannerText = new TableLayoutPanel
+		{
+			Dock = DockStyle.Fill,
+			Margin = Padding.Empty,
+			Padding = Padding.Empty,
+			ColumnCount = 1,
+			RowCount = 2,
 			BackColor = Color.Transparent
-		});
+		};
+		bannerText.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+		bannerText.RowStyles.Add(new RowStyle(SizeType.Absolute, 34f));
+		bannerText.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
+		bannerText.Controls.Add(bannerTitle, 0, 0);
+		bannerText.Controls.Add(bannerSubtitle, 0, 1);
+		banner.Controls.Add(bannerText);
 		TableLayoutPanel root = new TableLayoutPanel
 		{
 			Dock = DockStyle.Fill,
@@ -502,6 +529,9 @@ public sealed class MonsterAnimationForm : Form
 		root.Controls.Add(banner, 0, 0);
 		root.Controls.Add(cardRow, 0, 1);
 		root.Controls.Add(body, 0, 2);
+		// Do not expose the design-time bounds. The embedded form is resized to its
+		// host immediately before Load, and only that final layout is ever painted.
+		root.Visible = false;
 		base.Controls.Add(root);
 		base.FormClosed += delegate
 		{
@@ -517,8 +547,14 @@ public sealed class MonsterAnimationForm : Form
 		SetSourceStatus("animation.source.drop");
 		SetPreviewStatus("animation.preview.drop");
 		ApplyLanguage();
-		base.Shown += async delegate
+		base.Load += async delegate
 		{
+			// Visible controls participate in SplitContainer and TableLayoutPanel
+			// measurement. Load still runs before the form's first paint, so exposing
+			// the root here gives us real bounds without showing a design-size frame.
+			root.Visible = true;
+			root.PerformLayout();
+			body.PerformLayout();
 			int maximum = body.Width - 390 - body.SplitterWidth;
 			if (maximum >= 500)
 			{
@@ -526,6 +562,10 @@ public sealed class MonsterAnimationForm : Form
 				body.Panel1MinSize = 500;
 				body.Panel2MinSize = 390;
 			}
+			body.PerformLayout();
+			root.PerformLayout();
+			root.Invalidate(true);
+			UiTheme.QueueStableRepaint(this);
 			if (_cardId.Text.Length > 0 && _set == null && !_busy)
 			{
 				await LocateAsync();

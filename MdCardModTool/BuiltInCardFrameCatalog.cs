@@ -6,10 +6,10 @@ using System.Linq;
 namespace MdCardModTool;
 
 /// <summary>
-/// Read-only 704x1024 card-frame library. Three visually and technically
+/// Read-only 704x1024 card-frame library. Four visually and technically
 /// different resources are deliberately exposed instead of relabelling one PNG:
-/// normal Floowan frames, Astellar transparent-RGB frames, and Floowan's
-/// iridescent OfGradient frames.
+/// normal Floowan frames, Astellar transparent-RGB frames, Floowan's iridescent
+/// OfGradient frames, and a derived transparent-iridescent combination.
 /// </summary>
 public static class BuiltInCardFrameCatalog
 {
@@ -19,9 +19,16 @@ public static class BuiltInCardFrameCatalog
 
 	public const string TransparentCategory = "透明卡框";
 
-	public const string GradientCategory = "炫彩超框";
+	public const string TransparentGradientCategory = "透明炫彩卡框";
+
+	public const string GradientCategory = "炫彩卡框";
 
 	private sealed record FrameDefinition(string Key, string SolidFile, string GradientFile);
+
+	private static readonly object TransparentGradientCacheLock = new();
+
+	private static readonly Dictionary<string, byte[]> TransparentGradientCache =
+		new(StringComparer.OrdinalIgnoreCase);
 
 	private static readonly FrameDefinition[] Definitions =
 	[
@@ -54,6 +61,7 @@ public static class BuiltInCardFrameCatalog
 				NormalCategory, Path.Combine("Resources", "CardFrames", "Floowan", definition.SolidFile));
 			AddIfPresent(frames, astellarDirectory, definition.Key + ".png", "transparent_" + definition.Key,
 				TransparentCategory, Path.Combine("Resources", "CardFrames", definition.Key + ".png"));
+			AddTransparentGradientIfPresent(frames, astellarDirectory, floowanDirectory, definition);
 			AddIfPresent(frames, floowanDirectory, definition.GradientFile, "gradient_" + definition.Key,
 				GradientCategory, Path.Combine("Resources", "CardFrames", "Floowan", definition.GradientFile));
 		}
@@ -70,8 +78,56 @@ public static class BuiltInCardFrameCatalog
 	public static bool IsTransparentFrame(TexRef texture) => IsPackagedFrame(texture)
 		&& texture.Name.StartsWith("transparent_card_frame", StringComparison.OrdinalIgnoreCase);
 
+	public static bool IsTransparentGradientFrame(TexRef texture) => IsPackagedFrame(texture)
+		&& texture.Name.StartsWith("transparent_gradient_card_frame", StringComparison.OrdinalIgnoreCase);
+
 	public static bool IsGradientFrame(TexRef texture) => IsPackagedFrame(texture)
 		&& texture.Name.StartsWith("gradient_card_frame", StringComparison.OrdinalIgnoreCase);
+
+	public static byte[] DecodeTransparentGradientFrame(TexRef texture)
+	{
+		if (!IsTransparentGradientFrame(texture))
+		{
+			throw new ArgumentException("资源不是透明炫彩卡框。", nameof(texture));
+		}
+		string baseKey = CardFrameCatalog.BaseKey(texture.Name);
+		string? astellarDirectory = CandidateAstellarDirectories().FirstOrDefault(Directory.Exists);
+		string transparentPath = astellarDirectory == null
+			? ""
+			: Path.Combine(astellarDirectory, baseKey + ".png");
+		if (!File.Exists(transparentPath))
+		{
+			throw new FileNotFoundException($"透明炫彩卡框缺少 {baseKey} 的 Astellar Alpha 模板。",
+				transparentPath);
+		}
+		string gradientPath = texture.ActiveBundlePath;
+		string cacheKey = string.Join("|", gradientPath, File.GetLastWriteTimeUtc(gradientPath).Ticks,
+			transparentPath, File.GetLastWriteTimeUtc(transparentPath).Ticks);
+		lock (TransparentGradientCacheLock)
+		{
+			if (TransparentGradientCache.TryGetValue(cacheKey, out byte[]? cached)) return cached;
+		}
+		byte[] generated = AstellarOverFrameComposer.CreateTransparentGradientFrame(
+			File.ReadAllBytes(gradientPath), File.ReadAllBytes(transparentPath));
+		lock (TransparentGradientCacheLock)
+		{
+			TransparentGradientCache[cacheKey] = generated;
+		}
+		return generated;
+	}
+
+	private static void AddTransparentGradientIfPresent(List<TexRef> output,
+		string? astellarDirectory, string? floowanDirectory, FrameDefinition definition)
+	{
+		if (astellarDirectory == null || floowanDirectory == null
+			|| !File.Exists(Path.Combine(astellarDirectory, definition.Key + ".png")))
+		{
+			return;
+		}
+		AddIfPresent(output, floowanDirectory, definition.GradientFile,
+			"transparent_gradient_" + definition.Key, TransparentGradientCategory,
+			Path.Combine("Resources", "CardFrames", "TransparentGradient", definition.Key + ".png"));
+	}
 
 	private static void AddIfPresent(List<TexRef> output, string? directory, string fileName,
 		string name, string category, string relativePath)

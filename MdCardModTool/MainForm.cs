@@ -76,7 +76,7 @@ public sealed class MainForm : Form
 		AllowDrop = true
 	};
 
-	private readonly PictureBox _preview = new PictureBox
+	private readonly PictureBox _preview = new AlphaPreviewBox
 	{
 		Dock = DockStyle.Fill,
 		SizeMode = PictureBoxSizeMode.Zoom,
@@ -229,6 +229,8 @@ public sealed class MainForm : Form
 
 	private readonly Panel _framesHost = new() { Dock = DockStyle.Fill, BackColor = UiTheme.Window };
 
+	private TableLayoutPanel? _rootLayout;
+
 	private readonly List<NavigationButton> _navigationButtons = [];
 
 	private bool _animationWorkspaceQueued;
@@ -279,6 +281,10 @@ public sealed class MainForm : Form
 	private Task? _backgroundRefreshTask;
 
 	private readonly System.Windows.Forms.Timer _searchDebounce = new() { Interval = 180 };
+
+	private readonly System.Windows.Forms.Timer _layoutSurfaceReset = new() { Interval = 90 };
+
+	private bool _resettingLayoutSurface;
 
 	private string? _gameRoot;
 
@@ -454,6 +460,12 @@ public sealed class MainForm : Form
 			SelectGroup(e.Node?.Tag as string);
 		};
 		BuildInterface();
+		_layoutSurfaceReset.Tick += delegate { ResetLayoutSurface(); };
+		DpiChanged += delegate
+		{
+			UiTheme.QueueStableRepaint(this);
+			QueueLayoutSurfaceReset();
+		};
 		_profileSelector.SelectedIndexChanged += async delegate
 		{
 			if (!_changingProfile && _profileSelector.SelectedItem is LocalDataProfile profile && _gameRoot != null)
@@ -491,6 +503,8 @@ public sealed class MainForm : Form
 			_backgroundRefreshCancellation?.Dispose();
 			_searchDebounce.Stop();
 			_searchDebounce.Dispose();
+			_layoutSurfaceReset.Stop();
+			_layoutSurfaceReset.Dispose();
 			_brandImage?.Dispose();
 			_windowIcon?.Dispose();
 		};
@@ -510,6 +524,8 @@ public sealed class MainForm : Form
 			{
 				_workspaceSplit.SplitterDistance = Math.Min((int)(_workspaceSplit.Width * 0.66), _workspaceSplit.Width - 410);
 			}
+			UiTheme.QueueStableRepaint(this);
+			QueueLayoutSurfaceReset();
 			if (_assetRoot != null)
 			{
 				await ScanAsync();
@@ -561,6 +577,7 @@ public sealed class MainForm : Form
 		TableLayoutPanel topBar = new()
 		{
 			Dock = DockStyle.Fill,
+			Margin = Padding.Empty,
 			Padding = new Padding(16, 10, 16, 10),
 			BackColor = UiTheme.Surface,
 			ColumnCount = 1,
@@ -775,7 +792,7 @@ public sealed class MainForm : Form
 			BackColor = UiTheme.Surface,
 			Font = new Font("Segoe UI", 8f),
 			TextAlign = ContentAlignment.MiddleLeft,
-			Text = $"v2.0.1  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
+			Text = $"v2.0.3  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
 		};
 		TableLayoutPanel sidebar = new()
 		{
@@ -861,6 +878,7 @@ public sealed class MainForm : Form
 		root.RowStyles.Add(new RowStyle(SizeType.Absolute, 30f));
 		root.Controls.Add(body, 0, 0);
 		root.Controls.Add(status, 0, 1);
+		_rootLayout = root;
 		base.Controls.Add(root);
 		base.Controls.Add(_searchSuggestionPopup);
 		_searchSuggestionPopup.BringToFront();
@@ -870,6 +888,7 @@ public sealed class MainForm : Form
 			{
 				PositionSearchSuggestions();
 			}
+			QueueLayoutSurfaceReset();
 		};
 		ShowPage(WorkspacePage.Cards);
 	}
@@ -1041,7 +1060,8 @@ public sealed class MainForm : Form
 		NavigationButton button = Bind(new NavigationButton
 		{
 			Page = page,
-			Dock = DockStyle.Fill,
+			AutoSize = false,
+			Anchor = AnchorStyles.Left | AnchorStyles.Right,
 			Margin = new Padding(4, 3, 4, 3)
 		}, resourceId);
 		button.Click += delegate { ShowPage(page); };
@@ -1364,7 +1384,6 @@ public sealed class MainForm : Form
 		{
 			button.Selected = button.Page == page;
 			button.Invalidate();
-			button.Update();
 		}
 		UpdatePageHeader();
 		UpdateVisualShortcutStyles();
@@ -1393,7 +1412,8 @@ public sealed class MainForm : Form
 		_pageDescription.Refresh();
 		_catalogBadge.Refresh();
 		_pageHost.Invalidate(true);
-		_pageHost.Update();
+		UiTheme.QueueStableRepaint(this);
+		QueueLayoutSurfaceReset();
 		if (queueAnimationWorkspace)
 		{
 			QueueEmbeddedAnimationWorkspace();
@@ -1505,6 +1525,43 @@ public sealed class MainForm : Form
 		root.PerformLayout();
 	}
 
+	private void QueueLayoutSurfaceReset()
+	{
+		if (IsDisposed || _resettingLayoutSurface || _rootLayout is not { Visible: true })
+		{
+			return;
+		}
+		_layoutSurfaceReset.Stop();
+		_layoutSurfaceReset.Start();
+	}
+
+	private void ResetLayoutSurface()
+	{
+		_layoutSurfaceReset.Stop();
+		TableLayoutPanel? root = _rootLayout;
+		if (IsDisposed || !Visible || WindowState == FormWindowState.Minimized
+			|| _resettingLayoutSurface || root == null || root.IsDisposed || !root.Visible)
+		{
+			return;
+		}
+
+		// Finish the deferred layout without hiding the root or pumping a nested
+		// message loop. Hide/Show + Application.DoEvents allowed animation ticks and
+		// hover paints to run against the temporarily empty form, which is exactly how
+		// old captions/borders survived after a few interactions.
+		_resettingLayoutSurface = true;
+		try
+		{
+			StabilizeEmbeddedLayout(root);
+			root.Invalidate(true);
+			_searchSuggestionPopup.BringToFront();
+		}
+		finally
+		{
+			_resettingLayoutSurface = false;
+		}
+	}
+
 	private void UpdatePageHeader()
 	{
 		string key = _currentPage switch
@@ -1557,8 +1614,6 @@ public sealed class MainForm : Form
 			{
 				overlay.BringToFront();
 			}
-			candidate.Show();
-			_embeddedAnimation = candidate;
 		}
 		catch
 		{
@@ -1569,16 +1624,35 @@ public sealed class MainForm : Form
 		{
 			_animationHost.ResumeLayout(performLayout: true);
 		}
-		// A TopLevel=false Form receives two layout waves when its previously hidden
-		// parent becomes visible. Finish both waves once, while the opaque loading
-		// overlay still covers native child handles, then reveal the finished page.
+		// Size the hidden child from the real host rather than its standalone design
+		// size, then let Load finish its splitter and table layouts before the loading
+		// overlay is removed.
+		candidate.Bounds = _animationHost.ClientRectangle;
 		StabilizeEmbeddedLayout(candidate);
+		try
+		{
+			candidate.Show();
+			foreach (Control overlay in loadingOverlay)
+			{
+				overlay.BringToFront();
+			}
+			StabilizeEmbeddedLayout(candidate);
+			_embeddedAnimation = candidate;
+		}
+		catch
+		{
+			candidate.Dispose();
+			throw;
+		}
 		foreach (Control overlay in loadingOverlay)
 		{
 			_animationHost.Controls.Remove(overlay);
 			overlay.Dispose();
 		}
 		candidate.BringToFront();
+		UiTheme.QueueStableRepaint(candidate);
+		UiTheme.QueueStableRepaint(this);
+		QueueLayoutSurfaceReset();
 	}
 
 	private void EnsureEmbeddedFrames(bool force = false)
@@ -2005,7 +2079,7 @@ public sealed class MainForm : Form
 				}
 				foreach (IGrouping<string, TexRef> group in from x in source
 					group x by x.Category into x
-					orderby x.Key
+					orderby ResourceCategoryOrder(x.Key), x.Key
 					select x)
 				{
 					string key = source.Key + "|" + group.Key;
@@ -2023,6 +2097,18 @@ public sealed class MainForm : Form
 			_groups.EndUpdate();
 			_changingCategory = wasChangingCategory;
 		}
+	}
+
+	private static int ResourceCategoryOrder(string category)
+	{
+		return category switch
+		{
+			BuiltInCardFrameCatalog.TransparentCategory => 10,
+			BuiltInCardFrameCatalog.TransparentGradientCategory => 11,
+			BuiltInCardFrameCatalog.GradientCategory => 12,
+			BuiltInCardFrameCatalog.NormalCategory => 13,
+			_ => 0
+		};
 	}
 
 	private void RenderList()
@@ -2303,7 +2389,8 @@ public sealed class MainForm : Form
 			"卡框资源" => ("卡框资源", "卡框資源", "カードフレーム", "Card Frames"),
 			"普通卡框" => ("普通卡框", "普通卡框", "標準カードフレーム", "Normal Frames"),
 			"透明卡框" => ("透明卡框", "透明卡框", "透明カードフレーム", "Transparent Frames"),
-			"炫彩超框" => ("炫彩超框", "炫彩超框", "グラデーションOF", "Iridescent Overframes"),
+			"透明炫彩卡框" => ("透明炫彩卡框", "透明炫彩卡框", "透明グラデーションフレーム", "Transparent Iridescent Frames"),
+			"炫彩卡框" => ("炫彩卡框", "炫彩卡框", "グラデーションカードフレーム", "Iridescent Frames"),
 			"决斗场地" => ("决斗场地", "決鬥場地", "デュエルフィールド", "Duel Fields"),
 			"大厅壁纸" => ("大厅壁纸", "大廳桌布", "ホーム壁紙", "Home Wallpaper"),
 			"大厅背景" => ("大厅背景", "大廳背景", "ホーム背景", "Home Background"),
@@ -2508,9 +2595,9 @@ public sealed class MainForm : Form
 			// The resource workspace previews exactly what is stored in Texture2D.
 			// Card-frame composition is an explicit action; doing it automatically made
 			// Pendulum cards look as if their frame were part of the selected artwork.
-			bool showTransparentRgb = x.SourceKind == "本地卡图"
-				&& x.Width == FrameComposer.Width && x.Height == FrameComposer.Height;
-			Bitmap display = CardPreviewRenderer.RenderRaw(data, showTransparentRgb);
+			// Default previews respect the Texture2D Alpha channel. Hidden RGB remains
+			// intact in the decoded PNG but is never forced opaque in the normal UI.
+			Bitmap display = CardPreviewRenderer.RenderRaw(data);
 			if (cancellationToken.IsCancellationRequested || generation != _previewGeneration || Selected() != x)
 			{
 				display.Dispose();
@@ -2522,7 +2609,7 @@ public sealed class MainForm : Form
 			string frameLine = "";
 			if (_gameRoot != null && x.SourceKind == "本地卡图" && x.Width == 704 && x.Height == 1024 && ushort.TryParse(x.CardKey, out var cardId))
 			{
-				frameLine = "\n预览：游戏 RGB 显示（透明 Alpha 仍原样保存在 Texture2D）";
+				frameLine = "\n预览：真实 Alpha 显示（透明像素中的 RGB 数据仍原样保留）";
 				if (OverFrameArtStore.HasSettings(_gameRoot, cardId))
 				{
 					OverFrameFrameSettings settings = OverFrameArtStore.ReadSettings(_gameRoot, cardId);
@@ -2848,9 +2935,11 @@ public sealed class MainForm : Form
 		}
 		if (BuiltInCardFrameCatalog.IsPackagedFrame(x))
 		{
-			string notice = BuiltInCardFrameCatalog.IsTransparentFrame(x)
-				? "ASTELLAR-NOTICE.txt"
-				: "FLOOWAN-NOTICE.txt";
+			string notice = BuiltInCardFrameCatalog.IsTransparentGradientFrame(x)
+				? "ASTELLAR-NOTICE.txt 与 FLOOWAN-NOTICE.txt"
+				: BuiltInCardFrameCatalog.IsTransparentFrame(x)
+					? "ASTELLAR-NOTICE.txt"
+					: "FLOOWAN-NOTICE.txt";
 			MessageBox.Show(this,
 				$"内置{x.Category}：{x.Name} · {CardFrameCatalog.FriendlyName(x.Name)}\n704×1024 PNG\n\n该资源为只读模板；来源与许可详见 {notice}。",
 				"卡框资源");

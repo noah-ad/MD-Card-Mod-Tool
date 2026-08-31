@@ -14,6 +14,10 @@ using System.Windows.Forms;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using Color = System.Drawing.Color;
+using Point = System.Drawing.Point;
+using Rectangle = System.Drawing.Rectangle;
+using Size = System.Drawing.Size;
 
 namespace MdCardModTool;
 
@@ -140,9 +144,12 @@ internal static class Program
 			string catalogPendulum = CardFrameCatalog.RecommendedKey(installedCatalog.Find(20486), 512, 1024);
 			int normal = frames.Count(BuiltInCardFrameCatalog.IsNormalFrame);
 			int transparent = frames.Count(BuiltInCardFrameCatalog.IsTransparentFrame);
+			int transparentGradient = frames.Count(BuiltInCardFrameCatalog.IsTransparentGradientFrame);
 			int gradient = frames.Count(BuiltInCardFrameCatalog.IsGradientFrame);
 			TexRef normalEffect = frames.Single(frame => frame.Name == "card_frame01");
 			TexRef transparentEffect = frames.Single(frame => frame.Name == "transparent_card_frame01");
+			TexRef transparentGradientEffect = frames.Single(frame =>
+				frame.Name == "transparent_gradient_card_frame01");
 			TexRef gradientEffect = frames.Single(frame => frame.Name == "gradient_card_frame01");
 			Rgba32[] ReadPixels(TexRef frame)
 			{
@@ -153,24 +160,38 @@ internal static class Program
 			}
 			Rgba32[] normalPixels = ReadPixels(normalEffect);
 			Rgba32[] transparentPixels = ReadPixels(transparentEffect);
+			Rgba32[] transparentGradientPixels = ReadPixels(transparentGradientEffect);
 			Rgba32[] gradientPixels = ReadPixels(gradientEffect);
 			int normalVisible = normalPixels.Count(pixel => pixel.A > 0);
 			int transparentVisible = transparentPixels.Count(pixel => pixel.A > 0);
 			int transparentRgb = transparentPixels.Count(pixel => pixel.A == 0 && (pixel.R != 0 || pixel.G != 0 || pixel.B != 0));
+			int transparentGradientVisible = transparentGradientPixels.Count(pixel => pixel.A > 0);
+			int transparentGradientRgb = transparentGradientPixels.Count(pixel => pixel.A == 0
+				&& (pixel.R != 0 || pixel.G != 0 || pixel.B != 0));
+			int transparentGradientColorDifference = transparentPixels.Zip(transparentGradientPixels)
+				.Count(pair => pair.First.R != pair.Second.R || pair.First.G != pair.Second.G
+					|| pair.First.B != pair.Second.B);
+			int transparentGradientAlphaDifference = gradientPixels.Zip(transparentGradientPixels)
+				.Count(pair => pair.First.A != pair.Second.A);
 			int gradientDifference = normalPixels.Zip(gradientPixels)
 				.Count(pair => pair.First.R != pair.Second.R || pair.First.G != pair.Second.G
 					|| pair.First.B != pair.Second.B || pair.First.A != pair.Second.A);
-			bool ready = frames.Count == 48 && valid == frames.Count
-				&& normal == 16 && transparent == 16 && gradient == 16
+			bool ready = frames.Count == 64 && valid == frames.Count
+				&& normal == 16 && transparent == 16 && transparentGradient == 16 && gradient == 16
 				&& transparentVisible + 100000 < normalVisible && transparentRgb > 10000
+				&& transparentGradientVisible + 100000 < normalVisible
+				&& transparentGradientRgb > 10000
+				&& transparentGradientColorDifference > 10000
+				&& transparentGradientAlphaDifference > 10000
 				&& gradientDifference > 10000
 				&& frames.Any(frame => frame.Name == "card_frame18")
 				&& frames.Any(frame => frame.Name == "transparent_card_frame18")
+				&& frames.Any(frame => frame.Name == "transparent_gradient_card_frame18")
 				&& frames.Any(frame => frame.Name == "gradient_card_frame18")
 				&& frames.All(BuiltInCardFrameCatalog.IsPackagedFrame)
 				&& link == "card_frame18" && pendulumEffect == "card_frame14" && normalMonster == "card_frame00"
 				&& catalogLink == "card_frame18" && catalogPendulum == "card_frame14";
-			Console.WriteLine($"frames={frames.Count}; normal={normal}:{normalVisible}; transparent={transparent}:{transparentVisible}:rgb0={transparentRgb}; gradient={gradient}:diff={gradientDifference}; artWindows={valid}; link={link}/{catalogLink}; pendulumEffect={pendulumEffect}/{catalogPendulum}; normalMonster={normalMonster}; ready={ready}");
+			Console.WriteLine($"frames={frames.Count}; normal={normal}:{normalVisible}; transparent={transparent}:{transparentVisible}:rgb0={transparentRgb}; transparentGradient={transparentGradient}:{transparentGradientVisible}:rgb0={transparentGradientRgb}:colorDiff={transparentGradientColorDifference}:alphaDiff={transparentGradientAlphaDifference}; gradient={gradient}:diff={gradientDifference}; artWindows={valid}; link={link}/{catalogLink}; pendulumEffect={pendulumEffect}/{catalogPendulum}; normalMonster={normalMonster}; ready={ready}");
 			if (!ready) Environment.ExitCode = 2;
 			return;
 		}
@@ -231,8 +252,9 @@ internal static class Program
 					SourceKind = "本地卡图",
 					CardKey = "3899"
 				};
-				int[] editorCounts = new int[3];
+				int[] editorCounts = new int[4];
 				bool editorUiReady;
+				bool alphaPreviewReady = false;
 				ImageRenderSpec movedSpec;
 				using (OverFrameFrameEditorForm editor = new(testRoot, fakeCard, packagedFrames,
 					sourcePng, "transparent_card_frame01", backgroundPng,
@@ -261,6 +283,9 @@ internal static class Program
 					FieldInfo outputField = typeof(OverFrameFrameEditorForm).GetField("_outputBytes",
 						BindingFlags.Instance | BindingFlags.NonPublic)
 						?? throw new MissingFieldException(nameof(OverFrameFrameEditorForm), "_outputBytes");
+					FieldInfo previewField = typeof(OverFrameFrameEditorForm).GetField("_previewBytes",
+						BindingFlags.Instance | BindingFlags.NonPublic)
+						?? throw new MissingFieldException(nameof(OverFrameFrameEditorForm), "_previewBytes");
 					bool initialReady = WaitFor(() => outputField.GetValue(editor) is byte[]);
 					ImageRenderSpec initialSpec = canvas.RenderSpec;
 					movedSpec = new ImageRenderSpec(FrameComposer.Width, FrameComposer.Height,
@@ -270,7 +295,7 @@ internal static class Program
 					bool movedReady = WaitFor(() => outputField.GetValue(editor) is byte[]
 						&& Math.Abs(canvas.RenderSpec.OffsetX - movedSpec.OffsetX) < 1f);
 
-					string[] expectedModes = ["透明卡框", "炫酷卡框", "普通卡框"];
+					string[] expectedModes = ["透明卡框", "透明炫彩卡框", "炫彩卡框", "普通卡框"];
 					bool modesReady = initialReady && movedReady;
 					for (int index = 0; index < expectedModes.Length; index++)
 					{
@@ -290,6 +315,25 @@ internal static class Program
 					mode.SelectedIndex = 0;
 					modesReady &= WaitFor(() => outputField.GetValue(editor) is byte[]
 						&& status.Text.StartsWith(expectedModes[0], StringComparison.Ordinal));
+					if (outputField.GetValue(editor) is byte[] alphaOutput
+						&& previewField.GetValue(editor) is byte[] alphaPreview)
+					{
+						using SixLabors.ImageSharp.Image<Rgba32> outputImage =
+							SixLabors.ImageSharp.Image.Load<Rgba32>(alphaOutput);
+						using SixLabors.ImageSharp.Image<Rgba32> previewImage =
+							SixLabors.ImageSharp.Image.Load<Rgba32>(alphaPreview);
+						int transparentPixels = 0;
+						int mismatches = 0;
+						for (int y = 0; y < outputImage.Height; y++)
+						for (int x = 0; x < outputImage.Width; x++)
+						{
+							Rgba32 outputPixel = outputImage[x, y];
+							Rgba32 previewPixel = previewImage[x, y];
+							if (outputPixel.A == 0) transparentPixels++;
+							if (outputPixel != previewPixel) mismatches++;
+						}
+						alphaPreviewReady = transparentPixels > 10000 && mismatches == 0;
+					}
 					string[] editorButtons = Descendants(editor).OfType<Button>()
 						.Select(button => button.Text).ToArray();
 					string[] modeLabels = mode.Items.Cast<object>().Select(item => item.ToString() ?? "").ToArray();
@@ -301,14 +345,25 @@ internal static class Program
 						&& editorButtons.Contains("更换卡图")
 						&& editorButtons.Contains("添加叠底背景")
 						&& editorButtons.Contains("清除背景")
-						&& editorButtons.Contains("游戏最终预览")
+						&& alphaPreviewReady
+						&& editorButtons.Contains("真实 Alpha 预览")
 						&& editorButtons.Contains("构图编辑")
-						&& editorButtons.Contains("导出游戏预览")
+						&& editorButtons.Contains("导出最终 PNG")
 						&& editorButtons.Contains("铺满插图区")
 						&& editorButtons.Contains("显示整张图");
 					string? screenshotPath = Environment.GetEnvironmentVariable("MDCT_OVERFRAME_SCREENSHOT");
 					if (!string.IsNullOrWhiteSpace(screenshotPath))
 					{
+						if (int.TryParse(Environment.GetEnvironmentVariable("MDCT_OVERFRAME_SCREENSHOT_MODE"),
+							out int screenshotMode) && screenshotMode >= 0
+							&& screenshotMode < expectedModes.Length)
+						{
+							mode.SelectedIndex = screenshotMode;
+							_ = WaitFor(() => outputField.GetValue(editor) is byte[]
+								&& status.Text.StartsWith(expectedModes[screenshotMode],
+									StringComparison.Ordinal));
+						}
+						Application.DoEvents();
 						using Bitmap screenshot = new(editor.Width, editor.Height);
 						editor.DrawToBitmap(screenshot, new System.Drawing.Rectangle(0, 0,
 							screenshot.Width, screenshot.Height));
@@ -381,7 +436,7 @@ internal static class Program
 					&& storedBackground.Height == FrameComposer.Height
 					&& storedSource?.Width == 512 && storedSource.Height == 512
 					&& !File.Exists(fakeCard.BundlePath);
-				Console.WriteLine($"singleEditor=True; reopenRestored={reopenRestored}; source={storedSource?.Width}x{storedSource?.Height}; editorModes={string.Join(',', editorCounts)}; dragScale={saved.ArtImageScale:0.000}; dragOffset={saved.ArtOffsetX:0.0},{saved.ArtOffsetY:0.0}; subjectOverFrame={subjectOverFrame.R},{subjectOverFrame.G},{subjectOverFrame.B},{subjectOverFrame.A}; backgroundThrough={backgroundThrough.R},{backgroundThrough.G},{backgroundThrough.B},{backgroundThrough.A}; gameWrites=False; ready={ready}");
+				Console.WriteLine($"singleEditor=True; reopenRestored={reopenRestored}; alphaPreview={alphaPreviewReady}; source={storedSource?.Width}x{storedSource?.Height}; editorModes={string.Join(',', editorCounts)}; dragScale={saved.ArtImageScale:0.000}; dragOffset={saved.ArtOffsetX:0.0},{saved.ArtOffsetY:0.0}; subjectOverFrame={subjectOverFrame.R},{subjectOverFrame.G},{subjectOverFrame.B},{subjectOverFrame.A}; backgroundThrough={backgroundThrough.R},{backgroundThrough.G},{backgroundThrough.B},{backgroundThrough.A}; gameWrites=False; ready={ready}");
 				if (!ready) Environment.ExitCode = 2;
 			}
 			finally
@@ -437,31 +492,29 @@ internal static class Program
 			AstellarOverFrameComposition composition = AstellarOverFrameComposer.Compose(artPng, template);
 			using SixLabors.ImageSharp.Image<Rgba32> game = SixLabors.ImageSharp.Image.Load<Rgba32>(composition.GamePng);
 			using SixLabors.ImageSharp.Image<Rgba32> preview = SixLabors.ImageSharp.Image.Load<Rgba32>(composition.PreviewPng);
+			using SixLabors.ImageSharp.Image<Rgba32> diagnostic = SixLabors.ImageSharp.Image.Load<Rgba32>(
+				AstellarOverFrameComposer.CreateVisibleRgbPreview(composition.GamePng));
 			int transparentRgb = 0;
-			int visiblePreview = 0;
+			int transparentPreview = 0;
+			int diagnosticVisible = 0;
 			int dirtyPixels = 0;
 			int dirtyAlphaFailures = 0;
-			int projectionAlphaFailures = 0;
-			int projectionRgbFailures = 0;
+			int previewMismatches = 0;
 			int visibleOutsideDirty = 0;
 			for (int y = 0; y < game.Height; y++)
 			for (int x = 0; x < game.Width; x++)
 			{
 				int index = y * game.Width + x;
 				Rgba32 pixel = game[x, y];
-				Rgba32 projected = preview[x, y];
+				Rgba32 previewPixel = preview[x, y];
 				bool carriesTransparentRgb = pixel.A == 0
 					&& (pixel.R != 0 || pixel.G != 0 || pixel.B != 0);
-				byte expectedPreviewAlpha = carriesTransparentRgb ? (byte)255 : pixel.A;
-				if (projected.A != expectedPreviewAlpha) projectionAlphaFailures++;
-				if (projected.R != pixel.R || projected.G != pixel.G || projected.B != pixel.B)
-				{
-					projectionRgbFailures++;
-				}
+				if (previewPixel != pixel) previewMismatches++;
 				if (carriesTransparentRgb)
 				{
 					transparentRgb++;
-					if (projected.A == 255) visiblePreview++;
+					if (previewPixel.A == 0) transparentPreview++;
+					if (diagnostic[x, y].A == 255) diagnosticVisible++;
 				}
 				if (dirtyMask[index])
 				{
@@ -475,14 +528,14 @@ internal static class Program
 			}
 			Rgba32 subject = game[subjectPoint.X, subjectPoint.Y];
 			bool ready = template.Layers.Count == 6 && game.Width == 704 && game.Height == 1024
-				&& transparentRgb > 10000 && visiblePreview == transparentRgb
+				&& transparentRgb > 10000 && transparentPreview == transparentRgb
+				&& diagnosticVisible == transparentRgb && previewMismatches == 0
 				&& dirtyPixels > 10000 && dirtyAlphaFailures == 0
-				&& projectionAlphaFailures == 0 && projectionRgbFailures == 0
 				&& visibleOutsideDirty > 10000
 				&& composition.TransparentEdgePixels == transparentRgb
 				&& subject.R == 239 && subject.G == 31 && subject.B == 47 && subject.A == 0
-				&& preview[subjectPoint.X, subjectPoint.Y].A == 255;
-			Console.WriteLine($"template={key}; layers={template.Layers.Count}; transparentRgb={transparentRgb}/{composition.TransparentEdgePixels}; previewVisible={visiblePreview}; dirty={dirtyPixels}; dirtyAlphaFailures={dirtyAlphaFailures}; projectionAlphaFailures={projectionAlphaFailures}; projectionRgbFailures={projectionRgbFailures}; visibleOutsideDirty={visibleOutsideDirty}; subjectOverFrame={subject.R},{subject.G},{subject.B},{subject.A}@{subjectPoint.X},{subjectPoint.Y}; gameBytes={composition.GamePng.Length}; ready={ready}");
+				&& preview[subjectPoint.X, subjectPoint.Y].A == 0;
+			Console.WriteLine($"template={key}; layers={template.Layers.Count}; transparentRgb={transparentRgb}/{composition.TransparentEdgePixels}; previewTransparent={transparentPreview}; diagnosticVisible={diagnosticVisible}; previewMismatches={previewMismatches}; dirty={dirtyPixels}; dirtyAlphaFailures={dirtyAlphaFailures}; visibleOutsideDirty={visibleOutsideDirty}; subjectOverFrame={subject.R},{subject.G},{subject.B},{subject.A}@{subjectPoint.X},{subjectPoint.Y}; gameBytes={composition.GamePng.Length}; ready={ready}");
 			if (!ready) Environment.ExitCode = 2;
 			return;
 		}
@@ -505,16 +558,20 @@ internal static class Program
 				SixLabors.ImageSharp.Image.Load<Rgba32>(composition.GamePng);
 			using SixLabors.ImageSharp.Image<Rgba32> preview =
 				SixLabors.ImageSharp.Image.Load<Rgba32>(composition.PreviewPng);
+			using SixLabors.ImageSharp.Image<Rgba32> diagnostic =
+				SixLabors.ImageSharp.Image.Load<Rgba32>(
+					AstellarOverFrameComposer.CreateVisibleRgbPreview(composition.GamePng));
 			int zeroAlpha = 0;
 			int hiddenRgb = 0;
 			int opaque = 0;
-			int previewVisibleRgb = 0;
-			int projectionFailures = 0;
+			int previewTransparentRgb = 0;
+			int diagnosticVisibleRgb = 0;
+			int previewMismatches = 0;
 			for (int y = 0; y < game.Height; y++)
 			for (int x = 0; x < game.Width; x++)
 			{
 				Rgba32 pixel = game[x, y];
-				Rgba32 projected = preview[x, y];
+				Rgba32 previewPixel = preview[x, y];
 				bool carriesTransparentRgb = pixel.A == 0
 					&& (pixel.R != 0 || pixel.G != 0 || pixel.B != 0);
 				if (pixel.A == 0)
@@ -523,19 +580,19 @@ internal static class Program
 					if (carriesTransparentRgb)
 					{
 						hiddenRgb++;
-						if (projected.A == 255) previewVisibleRgb++;
+						if (previewPixel.A == 0) previewTransparentRgb++;
+						if (diagnostic[x, y].A == 255) diagnosticVisibleRgb++;
 					}
 				}
 				if (pixel.A == 255) opaque++;
-				byte expectedAlpha = carriesTransparentRgb ? (byte)255 : pixel.A;
-				if (projected.A != expectedAlpha || projected.R != pixel.R
-					|| projected.G != pixel.G || projected.B != pixel.B) projectionFailures++;
+				if (previewPixel != pixel) previewMismatches++;
 			}
 			bool ready = game.Width == FrameComposer.Width && game.Height == FrameComposer.Height
 				&& zeroAlpha > 100000 && hiddenRgb > 100000 && opaque > 100000
-				&& previewVisibleRgb == hiddenRgb && projectionFailures == 0
+				&& previewTransparentRgb == hiddenRgb && diagnosticVisibleRgb == hiddenRgb
+				&& previewMismatches == 0
 				&& composition.TransparentEdgePixels == hiddenRgb;
-			Console.WriteLine($"draft={draftRoot}; frame={frameKey}; zeroAlpha={zeroAlpha}; hiddenRgb={hiddenRgb}/{composition.TransparentEdgePixels}; opaque={opaque}; previewVisibleRgb={previewVisibleRgb}; projectionFailures={projectionFailures}; gameBytes={composition.GamePng.Length}; ready={ready}");
+			Console.WriteLine($"draft={draftRoot}; frame={frameKey}; zeroAlpha={zeroAlpha}; hiddenRgb={hiddenRgb}/{composition.TransparentEdgePixels}; opaque={opaque}; previewTransparentRgb={previewTransparentRgb}; diagnosticVisibleRgb={diagnosticVisibleRgb}; previewMismatches={previewMismatches}; gameBytes={composition.GamePng.Length}; ready={ready}");
 			if (!ready) Environment.ExitCode = 2;
 			return;
 		}
@@ -678,7 +735,7 @@ internal static class Program
 					Application.DoEvents();
 					Thread.Sleep(20);
 				}
-				string[] expectedStatus = ["透明卡框", "炫酷卡框", "普通卡框"];
+				string[] expectedStatus = ["透明卡框", "透明炫彩卡框", "炫彩卡框", "普通卡框"];
 				int[] choiceCounts = new int[expectedStatus.Length];
 				bool defaultOverframe = outputField.GetValue(form) is byte[]
 					&& mode.SelectedIndex == 0
@@ -722,11 +779,12 @@ internal static class Program
 					.Select(button => button.Text).ToArray();
 				bool ready = decoded.Length > 0 && canvas.IsOverFrameEditing && canvas.HasFrame
 					&& canvas.ShowingRenderedPreview && modesReady
-					&& editorButtons.Contains("游戏最终预览")
+					&& editorButtons.Contains("真实 Alpha 预览")
 					&& editorButtons.Contains("构图编辑")
-					&& editorButtons.Contains("导出游戏预览")
+					&& editorButtons.Contains("导出最终 PNG")
 					&& frames.Count(BuiltInCardFrameCatalog.IsNormalFrame) == 16
 					&& frames.Count(BuiltInCardFrameCatalog.IsTransparentFrame) == 16
+					&& frames.Count(BuiltInCardFrameCatalog.IsTransparentGradientFrame) == 16
 					&& frames.Count(BuiltInCardFrameCatalog.IsGradientFrame) == 16;
 				ImageRenderSpec spec = canvas.RenderSpec;
 				Console.WriteLine($"card={cardId}; source={art.Width}x{art.Height}; decoded={decoded.Length}; defaultOverframe={defaultOverframe}; modes={string.Join(',', choiceCounts)}; status={status.Text}; directCanvas={canvas.IsOverFrameEditing}; transform={spec.ImageScale:0.000}@{spec.OffsetX:0.0},{spec.OffsetY:0.0}; gameWrites=False; ready={ready}");
@@ -847,6 +905,297 @@ internal static class Program
 			}
 			return;
 		}
+		if (args.Length == 3 && args[0] == "--test-ui-interaction-render")
+		{
+			string gameRoot = Path.GetFullPath(args[1]);
+			string outputRoot = Path.GetFullPath(args[2]);
+			Directory.CreateDirectory(outputRoot);
+			List<string> report = [];
+			bool animationReady = false;
+			bool overFrameReady = false;
+			int animationRepaintDifference = int.MaxValue;
+			int overFrameRepaintDifference = int.MaxValue;
+			Point originalCursor = Cursor.Position;
+			try
+			{
+				Cursor.Position = new Point(SystemInformation.VirtualScreen.Left + 2,
+					SystemInformation.VirtualScreen.Top + 2);
+				using (MainForm form = new MainForm
+				{
+					StartPosition = FormStartPosition.Manual,
+					Location = new Point(8, 8),
+					Size = new Size(1504, 912),
+					ShowInTaskbar = false,
+					TopMost = true
+				})
+				{
+					typeof(MainForm).GetField("_gameRoot", BindingFlags.Instance | BindingFlags.NonPublic)?.SetValue(form, gameRoot);
+					typeof(MainForm).GetField("_assetRoot", BindingFlags.Instance | BindingFlags.NonPublic)?.SetValue(form, null);
+					typeof(MainForm).GetField("_streamingRoot", BindingFlags.Instance | BindingFlags.NonPublic)?.SetValue(form, null);
+					TextBox gameFolder = GetPrivateField<TextBox>(form, "_gameFolder");
+					gameFolder.Text = gameRoot;
+					form.Show();
+					PumpMessagesFor(300);
+
+					IReadOnlyCollection<NavigationButton> navigation =
+						GetPrivateField<IReadOnlyCollection<NavigationButton>>(form, "_navigationButtons");
+					NavigationButton animationNavigation = navigation.Single(button => button.Page == WorkspacePage.Animation);
+					NavigationButton cardsNavigation = navigation.Single(button => button.Page == WorkspacePage.Cards);
+					animationNavigation.PerformClick();
+					bool embeddedReady = PumpMessagesUntil(() =>
+						typeof(MainForm).GetField("_embeddedAnimation", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form)
+							is MonsterAnimationForm, 15000);
+					MonsterAnimationForm? embedded = typeof(MainForm)
+						.GetField("_embeddedAnimation", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form)
+						as MonsterAnimationForm;
+					if (embeddedReady && embedded != null)
+					{
+						Task previewTask = embedded.PreviewCardAsync("3899");
+						bool previewCompleted = PumpTask(previewTask, 60000);
+						AnimationPreviewCanvas preview = GetPrivateField<AnimationPreviewCanvas>(embedded, "_preview");
+						Button play = GetPrivateField<Button>(embedded, "_play");
+						animationReady = previewCompleted && previewTask.IsCompletedSuccessfully
+							&& embedded.LocatedCardId == "3899" && embedded.PreviewSourceCardId == "13668"
+							&& preview.Frame != null;
+						if (animationReady)
+						{
+							play.PerformClick();
+							PumpMessagesFor(1450);
+							play.PerformClick();
+							PumpMessagesFor(120);
+							if ((bool)(typeof(MonsterAnimationForm).GetField("_playing",
+								BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(embedded) ?? false))
+							{
+								play.PerformClick();
+								PumpMessagesFor(120);
+							}
+							ExerciseRoundedButtonTransitions(form);
+							form.Size = new Size(1440, 860);
+							PumpMessagesFor(180);
+							form.Size = new Size(1504, 912);
+							PumpMessagesFor(260);
+							cardsNavigation.PerformClick();
+							PumpMessagesFor(180);
+							animationNavigation.PerformClick();
+							PumpMessagesFor(650);
+							if ((bool)(typeof(MonsterAnimationForm).GetField("_playing",
+								BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(embedded) ?? false))
+							{
+								play.PerformClick();
+								PumpMessagesFor(120);
+							}
+							play.Focus();
+							PumpMessagesFor(350);
+							using Bitmap interaction = CaptureClientFromScreen(form);
+							interaction.Save(Path.Combine(outputRoot, "animation-3899-after-interactions.png"),
+								System.Drawing.Imaging.ImageFormat.Png);
+							form.PerformLayout();
+							form.Invalidate(true);
+							form.Update();
+							PumpMessagesFor(80);
+							using Bitmap forced = CaptureClientFromScreen(form);
+							forced.Save(Path.Combine(outputRoot, "animation-3899-after-forced-repaint.png"),
+								System.Drawing.Imaging.ImageFormat.Png);
+							animationRepaintDifference = CountDifferentPixels(interaction, forced);
+						}
+					}
+					report.Add($"animationReady={animationReady}; source={embedded?.PreviewSourceCardId}; repaintDifference={animationRepaintDifference}");
+					form.Close();
+				}
+
+				string temporaryGameRoot = Path.Combine(Path.GetTempPath(),
+					"MDCardModTool-ui-interaction-" + Guid.NewGuid().ToString("N"));
+				Directory.CreateDirectory(temporaryGameRoot);
+				try
+				{
+					if (!PortableIndexService.TryLoadBundled(gameRoot, out GameIndex index, out _))
+					{
+						throw new InvalidDataException("交互回归无法读取随包卡图索引。");
+					}
+					TexRef art = index.Textures.First(texture => texture.SourceKind == "本地卡图"
+						&& texture.CardKey == "3899");
+					byte[] artBytes = new ModEngine().DecodePng(art);
+					byte[] backgroundBytes = CreateInteractionBackground();
+					TexRef[] frames = BuiltInCardFrameCatalog.Load().ToArray();
+					TexRef transparentFrame = frames.First(BuiltInCardFrameCatalog.IsTransparentFrame);
+					using OverFrameFrameEditorForm editor = new(temporaryGameRoot, art, frames,
+						artBytes, transparentFrame.Name, backgroundBytes, replaceStoredBackground: true)
+					{
+						StartPosition = FormStartPosition.Manual,
+						Location = new Point(8, 8),
+						Size = new Size(1120, 900),
+						ShowInTaskbar = false,
+						TopMost = true
+					};
+					editor.Show();
+					bool initiallyRendered = PumpMessagesUntil(() => EditorRenderSettled(editor), 60000);
+					ModernComboBox mode = GetPrivateField<ModernComboBox>(editor, "_mode");
+					ModernComboBox frame = GetPrivateField<ModernComboBox>(editor, "_frames");
+					TrackBar zoom = GetPrivateField<TrackBar>(editor, "_zoom");
+					RoundedButton finalPreview = GetPrivateField<RoundedButton>(editor, "_finalPreviewButton");
+					RoundedButton editCanvas = GetPrivateField<RoundedButton>(editor, "_editCanvasButton");
+					int initialZoom = zoom.Value;
+					int initialFrame = frame.SelectedIndex;
+					if (initiallyRendered && mode.Items.Count >= 4)
+					{
+						foreach (int modeIndex in new[] { 1, 2, 3, 0 })
+						{
+							mode.SelectedIndex = modeIndex;
+							if (!PumpMessagesUntil(() => EditorRenderSettled(editor), 60000)) break;
+						}
+						editCanvas.PerformClick();
+						zoom.Value = Math.Clamp(initialZoom + 25, zoom.Minimum, zoom.Maximum);
+						PumpMessagesFor(220);
+						if (frame.Items.Count > 1)
+						{
+							frame.SelectedIndex = (initialFrame + 1) % frame.Items.Count;
+							PumpMessagesUntil(() => EditorRenderSettled(editor), 60000);
+							frame.SelectedIndex = initialFrame;
+							PumpMessagesUntil(() => EditorRenderSettled(editor), 60000);
+						}
+						zoom.Value = initialZoom;
+						finalPreview.PerformClick();
+						PumpMessagesUntil(() => EditorRenderSettled(editor), 60000);
+						ExerciseRoundedButtonTransitions(editor);
+						editor.Size = new Size(1040, 820);
+						PumpMessagesFor(180);
+						editor.Size = new Size(1120, 900);
+						PumpMessagesFor(500);
+						finalPreview.Focus();
+						PumpMessagesFor(250);
+						overFrameReady = EditorRenderSettled(editor);
+						using Bitmap interaction = CaptureClientFromScreen(editor);
+						interaction.Save(Path.Combine(outputRoot, "overframe-3899-after-interactions.png"),
+							System.Drawing.Imaging.ImageFormat.Png);
+						editor.PerformLayout();
+						editor.Invalidate(true);
+						editor.Update();
+						PumpMessagesFor(80);
+						using Bitmap forced = CaptureClientFromScreen(editor);
+						forced.Save(Path.Combine(outputRoot, "overframe-3899-after-forced-repaint.png"),
+							System.Drawing.Imaging.ImageFormat.Png);
+						overFrameRepaintDifference = CountDifferentPixels(interaction, forced);
+					}
+					report.Add($"overFrameReady={overFrameReady}; modes={mode.Items.Count}; frames={frame.Items.Count}; background=True; repaintDifference={overFrameRepaintDifference}");
+					editor.Close();
+				}
+				finally
+				{
+					if (Directory.Exists(temporaryGameRoot)) Directory.Delete(temporaryGameRoot, recursive: true);
+				}
+			}
+			catch (Exception error)
+			{
+				report.Add("error=" + error);
+			}
+			finally
+			{
+				Cursor.Position = originalCursor;
+			}
+
+			bool ready = animationReady && overFrameReady
+				&& animationRepaintDifference <= 64 && overFrameRepaintDifference <= 64;
+			report.Add("ready=" + ready);
+			File.WriteAllLines(Path.Combine(outputRoot, "interaction-report.txt"), report);
+			foreach (string line in report) Console.WriteLine(line);
+			if (!ready) Environment.ExitCode = 2;
+			return;
+		}
+		if (args.Length == 2 && args[0] == "--test-ui-render-layout")
+		{
+			bool captureScreen = string.Equals(Environment.GetEnvironmentVariable("MDCARDMODTOOL_SCREEN_CAPTURE"), "1",
+				StringComparison.Ordinal);
+			using MainForm form = new MainForm
+			{
+				StartPosition = FormStartPosition.Manual,
+				Location = captureScreen ? new System.Drawing.Point(8, 8) : new System.Drawing.Point(-32000, -32000),
+				Size = new System.Drawing.Size(1504, 912),
+				ShowInTaskbar = false,
+				TopMost = captureScreen
+			};
+			string temporaryRoot = Path.GetTempPath();
+			typeof(MainForm).GetField("_gameRoot", BindingFlags.Instance | BindingFlags.NonPublic)?.SetValue(form, temporaryRoot);
+			typeof(MainForm).GetField("_assetRoot", BindingFlags.Instance | BindingFlags.NonPublic)?.SetValue(form, null);
+			typeof(MainForm).GetField("_streamingRoot", BindingFlags.Instance | BindingFlags.NonPublic)?.SetValue(form, null);
+			TextBox gameFolder = (TextBox)(typeof(MainForm).GetField("_gameFolder", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form)
+				?? throw new MissingFieldException(nameof(MainForm), "_gameFolder"));
+			gameFolder.Text = temporaryRoot;
+			form.Show();
+			Application.DoEvents();
+			IReadOnlyCollection<NavigationButton> navigation = (IReadOnlyCollection<NavigationButton>)(typeof(MainForm)
+				.GetField("_navigationButtons", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form)
+				?? throw new MissingFieldException(nameof(MainForm), "_navigationButtons"));
+			navigation.Single(button => button.Page == WorkspacePage.Animation).PerformClick();
+			Stopwatch wait = Stopwatch.StartNew();
+			MonsterAnimationForm? embedded = null;
+			while (wait.ElapsedMilliseconds < 5000 && embedded == null)
+			{
+				Application.DoEvents();
+				embedded = typeof(MainForm).GetField("_embeddedAnimation", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form)
+					as MonsterAnimationForm;
+				Thread.Sleep(10);
+			}
+			if (embedded == null)
+			{
+				throw new InvalidOperationException("Embedded animation workspace did not load.");
+			}
+			form.Size = new System.Drawing.Size(1460, 880);
+			Application.DoEvents();
+			form.Size = new System.Drawing.Size(1504, 912);
+			UiTheme.QueueStableRepaint(form);
+			Stopwatch settle = Stopwatch.StartNew();
+			while (settle.ElapsedMilliseconds < 350)
+			{
+				Application.DoEvents();
+				Thread.Sleep(10);
+			}
+
+			Control bannerTitle = Descendants(embedded).Single(control => control.Name == "MonsterAnimationBannerTitle");
+			Control bannerSubtitle = Descendants(embedded).Single(control => control.Name == "MonsterAnimationBannerSubtitle");
+			Button chooseMedia = (Button)(typeof(MonsterAnimationForm).GetField("_chooseMedia", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(embedded)
+				?? throw new MissingFieldException(nameof(MonsterAnimationForm), "_chooseMedia"));
+			Button play = (Button)(typeof(MonsterAnimationForm).GetField("_play", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(embedded)
+				?? throw new MissingFieldException(nameof(MonsterAnimationForm), "_play"));
+			Button apply = (Button)(typeof(MonsterAnimationForm).GetField("_apply", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(embedded)
+				?? throw new MissingFieldException(nameof(MonsterAnimationForm), "_apply"));
+			Button restore = (Button)(typeof(MonsterAnimationForm).GetField("_restore", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(embedded)
+				?? throw new MissingFieldException(nameof(MonsterAnimationForm), "_restore"));
+			Label sourceStatus = (Label)(typeof(MonsterAnimationForm).GetField("_sourceStatus", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(embedded)
+				?? throw new MissingFieldException(nameof(MonsterAnimationForm), "_sourceStatus"));
+			TableLayoutPanel buttonGrid = chooseMedia.Parent as TableLayoutPanel
+				?? throw new InvalidOperationException("Animation button grid missing.");
+			Button[] animationButtons = [chooseMedia, play, apply, restore];
+			Control? bannerParent = bannerSubtitle.Parent;
+			bool bannerClean = bannerParent != null && bannerTitle.Parent == bannerParent
+				&& bannerTitle.Bottom <= bannerSubtitle.Top
+				&& bannerSubtitle.Bottom <= bannerParent.ClientSize.Height;
+			bool actionGridClean = animationButtons.All(button => buttonGrid.ClientRectangle.Contains(button.Bounds))
+				&& sourceStatus.Parent == buttonGrid.Parent && sourceStatus.Bottom <= buttonGrid.Top;
+			bool navigationClean = navigation.All(button => button.Parent != null
+				&& button.Parent.ClientRectangle.Contains(button.Bounds) && button.Height >= 40);
+			bool buttonBuffersClean = Descendants(form).OfType<RoundedButton>()
+				.All(button => !button.UsesSharedOptimizedBuffer);
+
+			string output = Path.GetFullPath(args[1]);
+			Directory.CreateDirectory(Path.GetDirectoryName(output) ?? ".");
+			using Bitmap bitmap = new(form.ClientSize.Width, form.ClientSize.Height);
+			if (captureScreen)
+			{
+				using Graphics graphics = Graphics.FromImage(bitmap);
+				graphics.CopyFromScreen(form.PointToScreen(System.Drawing.Point.Empty), System.Drawing.Point.Empty,
+					form.ClientSize, CopyPixelOperation.SourceCopy);
+			}
+			else
+			{
+				form.DrawToBitmap(bitmap, form.ClientRectangle);
+			}
+			bitmap.Save(output, System.Drawing.Imaging.ImageFormat.Png);
+			bool ready = bannerClean && actionGridClean && navigationClean && buttonBuffersClean;
+			Console.WriteLine($"capture={output}; banner={bannerClean}:{bannerTitle.Bounds}/{bannerSubtitle.Bounds}/{bannerParent?.ClientSize}; actions={actionGridClean}; navigation={navigationClean}; button-buffers={buttonBuffersClean}; ready={ready}");
+			form.Close();
+			if (!ready) Environment.ExitCode = 2;
+			return;
+		}
 		if (args.Length == 1 && args[0] == "--test-main-form-layout")
 		{
 			using MainForm form = new MainForm
@@ -863,6 +1212,7 @@ internal static class Program
 			ComboBox profiles = (ComboBox)(typeof(MainForm).GetField("_profileSelector", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form) ?? throw new MissingFieldException("_profileSelector"));
 			ComboBox languages = (ComboBox)(typeof(MainForm).GetField("_languageSelector", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form) ?? throw new MissingFieldException("_languageSelector"));
 			Control cardSearchField = (Control)(typeof(MainForm).GetField("_cardSearchField", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form) ?? throw new MissingFieldException("_cardSearchField"));
+			PictureBox resourcePreview = (PictureBox)(typeof(MainForm).GetField("_preview", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form) ?? throw new MissingFieldException("_preview"));
 			TableLayoutPanel visualShortcuts = (TableLayoutPanel)(typeof(MainForm).GetField("_visualShortcutBar", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form) ?? throw new MissingFieldException("_visualShortcutBar"));
 			IReadOnlyCollection<NavigationButton> navigation = (IReadOnlyCollection<NavigationButton>)(typeof(MainForm).GetField("_navigationButtons", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form) ?? throw new MissingFieldException("_navigationButtons"));
 			Panel resourcePage = (Panel)(typeof(MainForm).GetField("_resourcePage", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form) ?? throw new MissingFieldException("_resourcePage"));
@@ -921,6 +1271,7 @@ internal static class Program
 			bool ready = Application.HighDpiMode == HighDpiMode.PerMonitorV2
 				&& visualButton.Parent != null && form.Text.Contains("2.0", StringComparison.Ordinal)
 				&& profiles.Parent != null && languages.Parent != null && languages.Items.Count == 4
+				&& resourcePreview is AlphaPreviewBox
 				&& navigation.Count == 4 && !navigation.Any(button => button.Page is WorkspacePage.Frames or WorkspacePage.Mods)
 				&& visualShortcuts.ColumnCount == 8 && !visualShortcuts.AutoScroll && !clipped
 				&& resourceActionGrid.ColumnCount == 2 && resourceActionGrid.RowCount == 4
@@ -932,7 +1283,7 @@ internal static class Program
 				&& firstSwitchMilliseconds < 750 && returnSwitchMilliseconds < 750
 				&& !animationActions.Any(text => text.Contains("运行时扩展", StringComparison.Ordinal))
 				&& !settingsActions.Any(text => text.Contains("运行时扩展", StringComparison.Ordinal));
-			Console.WriteLine($"title={form.Text}; dpi={Application.HighDpiMode}; visualButton={visualButton.Text}; profiles={profiles.Items.Count}; languages={languages.Items.Count}; navigation={navigation.Count}; cardSearchHiddenOnAnimation={cardSearchHiddenOnAnimation}; navigationPaletteStable={navigationPaletteStable}; shortcutColumns={visualShortcuts.ColumnCount}; shortcutScroll={visualShortcuts.AutoScroll}; resourceGrid={resourceActionGrid.ColumnCount}x{resourceActionGrid.RowCount}:{resourceActionGrid.Controls.Count}; resourceScroll={resourceActionGrid.AutoScroll}; animationSwitch={animationPageSwitch}; animationLoading={animationLoadingFrame}; animationLayout={animationLayoutReady}; firstSwitchMs={firstSwitchMilliseconds}; returnSwitchMs={returnSwitchMilliseconds}; cardsSwitch={cardsPageSwitch}; cardFrameActions={resourceActions.Count(text => text.Contains("框", StringComparison.Ordinal))}; runtimeOnAnimation={animationActions.Any(text => text.Contains("运行时扩展", StringComparison.Ordinal))}; runtimeInSettings={settingsActions.Any(text => text.Contains("运行时扩展", StringComparison.Ordinal))}; clipped={clipped}; ready={ready}");
+			Console.WriteLine($"title={form.Text}; dpi={Application.HighDpiMode}; alphaPreview={resourcePreview is AlphaPreviewBox}; visualButton={visualButton.Text}; profiles={profiles.Items.Count}; languages={languages.Items.Count}; navigation={navigation.Count}; cardSearchHiddenOnAnimation={cardSearchHiddenOnAnimation}; navigationPaletteStable={navigationPaletteStable}; shortcutColumns={visualShortcuts.ColumnCount}; shortcutScroll={visualShortcuts.AutoScroll}; resourceGrid={resourceActionGrid.ColumnCount}x{resourceActionGrid.RowCount}:{resourceActionGrid.Controls.Count}; resourceScroll={resourceActionGrid.AutoScroll}; animationSwitch={animationPageSwitch}; animationLoading={animationLoadingFrame}; animationLayout={animationLayoutReady}; firstSwitchMs={firstSwitchMilliseconds}; returnSwitchMs={returnSwitchMilliseconds}; cardsSwitch={cardsPageSwitch}; cardFrameActions={resourceActions.Count(text => text.Contains("框", StringComparison.Ordinal))}; runtimeOnAnimation={animationActions.Any(text => text.Contains("运行时扩展", StringComparison.Ordinal))}; runtimeInSettings={settingsActions.Any(text => text.Contains("运行时扩展", StringComparison.Ordinal))}; clipped={clipped}; ready={ready}");
 			form.Close();
 			if (!ready)
 			{
@@ -1015,9 +1366,35 @@ internal static class Program
 				Category = "超框卡图",
 				IsModded = true
 			});
+			string[] frameCategories =
+			[
+				BuiltInCardFrameCatalog.TransparentCategory,
+				BuiltInCardFrameCatalog.TransparentGradientCategory,
+				BuiltInCardFrameCatalog.GradientCategory,
+				BuiltInCardFrameCatalog.NormalCategory
+			];
+			for (int index = 0; index < frameCategories.Length; index++)
+			{
+				textures.Add(new TexRef
+				{
+					BundlePath = $"frame-{index}.png",
+					RelativeBundlePath = $"frame-{index}.png",
+					Name = $"diagnostic_frame_{index}",
+					Width = FrameComposer.Width,
+					Height = FrameComposer.Height,
+					SourceKind = BuiltInCardFrameCatalog.SourceKind,
+					Category = frameCategories[index]
+				});
+			}
 			MethodInfo refreshCategories = typeof(MainForm).GetMethod("RefreshCategories", BindingFlags.Instance | BindingFlags.NonPublic)
 				?? throw new MissingMethodException(nameof(MainForm), "RefreshCategories");
 			refreshCategories.Invoke(form, null);
+			TreeNode? frameSourceNode = groups.Nodes.Cast<TreeNode>().FirstOrDefault(node =>
+				node.Nodes.Cast<TreeNode>().Any(child =>
+					(child.Tag as string)?.StartsWith(BuiltInCardFrameCatalog.SourceKind + "|",
+						StringComparison.Ordinal) == true));
+			string[] actualFrameCategoryOrder = frameSourceNode?.Nodes.Cast<TreeNode>()
+				.Select(node => (node.Tag as string ?? "").Split('|').Last()).ToArray() ?? [];
 			TreeNode? overFrameNode = groups.Nodes.Cast<TreeNode>().SelectMany(node => node.Nodes.Cast<TreeNode>())
 				.FirstOrDefault(node => string.Equals(node.Tag as string, "本地卡图|超框卡图", StringComparison.Ordinal));
 			groups.SelectedNode = overFrameNode;
@@ -1043,10 +1420,11 @@ internal static class Program
 			Button[] managerActions = Descendants(manager).OfType<Button>().ToArray();
 			bool ready = navigation.Count == 4 && !navigation.Any(button => button.Page is WorkspacePage.Frames or WorkspacePage.Mods)
 				&& searchField.Visible && contextActions && overFrameContextVisible && modContextVisible && mappings.MappingCount == 90
+				&& actualFrameCategoryOrder.SequenceEqual(frameCategories)
 				&& mappings.HasVerticalScrollIndicator && !mappings.HasHorizontalScrollBar
 				&& cardId.Parent is RoundedField && managerActions.Length == 4
 				&& managerActions.All(button => button is RoundedButton);
-			Console.WriteLine($"navigation={navigation.Count}; standaloneFrames={navigation.Any(button => button.Page == WorkspacePage.Frames)}; standaloneMods={navigation.Any(button => button.Page == WorkspacePage.Mods)}; cardSearch={searchField.Visible}; overFrameContext={overFrameContextVisible}; modContext={modContextVisible}; contextActions={contextActions}; table={mappings.GetType().Name}:{mappings.MappingCount}; vertical={mappings.HasVerticalScrollIndicator}; horizontal={mappings.HasHorizontalScrollBar}; ready={ready}");
+			Console.WriteLine($"navigation={navigation.Count}; standaloneFrames={navigation.Any(button => button.Page == WorkspacePage.Frames)}; standaloneMods={navigation.Any(button => button.Page == WorkspacePage.Mods)}; cardSearch={searchField.Visible}; frameCategories={string.Join('>', actualFrameCategoryOrder)}; overFrameContext={overFrameContextVisible}; modContext={modContextVisible}; contextActions={contextActions}; table={mappings.GetType().Name}:{mappings.MappingCount}; vertical={mappings.HasVerticalScrollIndicator}; horizontal={mappings.HasHorizontalScrollBar}; ready={ready}");
 			if (!ready) Environment.ExitCode = 2;
 			return;
 		}
@@ -2528,5 +2906,130 @@ internal static class Program
 			yield return child;
 			foreach (Control nested in Descendants(child)) yield return nested;
 		}
+	}
+
+	private static T GetPrivateField<T>(object instance, string fieldName) where T : class
+	{
+		Type? type = instance.GetType();
+		while (type != null)
+		{
+			FieldInfo? field = type.GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+			if (field?.GetValue(instance) is T value) return value;
+			type = type.BaseType;
+		}
+		throw new MissingFieldException(instance.GetType().Name, fieldName);
+	}
+
+	private static bool PumpTask(Task task, int timeoutMilliseconds)
+	{
+		bool completed = PumpMessagesUntil(() => task.IsCompleted, timeoutMilliseconds);
+		if (completed) task.GetAwaiter().GetResult();
+		return completed;
+	}
+
+	private static bool PumpMessagesUntil(Func<bool> predicate, int timeoutMilliseconds)
+	{
+		Stopwatch timeout = Stopwatch.StartNew();
+		while (timeout.ElapsedMilliseconds < timeoutMilliseconds)
+		{
+			Application.DoEvents();
+			if (predicate()) return true;
+			Thread.Sleep(12);
+		}
+		Application.DoEvents();
+		return predicate();
+	}
+
+	private static void PumpMessagesFor(int milliseconds)
+	{
+		Stopwatch wait = Stopwatch.StartNew();
+		while (wait.ElapsedMilliseconds < milliseconds)
+		{
+			Application.DoEvents();
+			Thread.Sleep(12);
+		}
+		Application.DoEvents();
+	}
+
+	private static void ExerciseRoundedButtonTransitions(Control root)
+	{
+		MethodInfo transition = typeof(RoundedButton).GetMethod("BeginTransition",
+			BindingFlags.Instance | BindingFlags.NonPublic)
+			?? throw new MissingMethodException(nameof(RoundedButton), "BeginTransition");
+		RoundedButton[] buttons = Descendants(root).OfType<RoundedButton>().Where(button => button.Visible).ToArray();
+		foreach (RoundedButton button in buttons) transition.Invoke(button, [button.HoverColor]);
+		PumpMessagesFor(220);
+		foreach (RoundedButton button in buttons) transition.Invoke(button, [button.NormalColor]);
+		PumpMessagesFor(240);
+	}
+
+	private static bool EditorRenderSettled(OverFrameFrameEditorForm editor)
+	{
+		bool loading = (bool)(editor.GetType().GetField("_loading", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(editor) ?? true);
+		bool rendering = (bool)(editor.GetType().GetField("_rendering", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(editor) ?? true);
+		byte[]? output = editor.GetType().GetField("_outputBytes", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(editor) as byte[];
+		System.Windows.Forms.Timer timer = GetPrivateField<System.Windows.Forms.Timer>(editor, "_renderTimer");
+		return !loading && !rendering && !timer.Enabled && output is { Length: > 0 };
+	}
+
+	private static Bitmap CaptureClientFromScreen(Form form)
+	{
+		form.Activate();
+		Application.DoEvents();
+		Bitmap bitmap = new(form.ClientSize.Width, form.ClientSize.Height,
+			System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+		using Graphics graphics = Graphics.FromImage(bitmap);
+		graphics.CopyFromScreen(form.PointToScreen(Point.Empty), Point.Empty, form.ClientSize,
+			CopyPixelOperation.SourceCopy);
+		return bitmap;
+	}
+
+	private static int CountDifferentPixels(Bitmap first, Bitmap second)
+	{
+		if (first.Size != second.Size) return int.MaxValue;
+		Rectangle bounds = new(Point.Empty, first.Size);
+		System.Drawing.Imaging.BitmapData firstData = first.LockBits(bounds,
+			System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+		System.Drawing.Imaging.BitmapData secondData = second.LockBits(bounds,
+			System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+		try
+		{
+			int length = Math.Abs(firstData.Stride) * first.Height;
+			byte[] a = new byte[length];
+			byte[] b = new byte[length];
+			System.Runtime.InteropServices.Marshal.Copy(firstData.Scan0, a, 0, length);
+			System.Runtime.InteropServices.Marshal.Copy(secondData.Scan0, b, 0, length);
+			int different = 0;
+			for (int offset = 0; offset + 3 < length; offset += 4)
+			{
+				if (a[offset] != b[offset] || a[offset + 1] != b[offset + 1]
+					|| a[offset + 2] != b[offset + 2] || a[offset + 3] != b[offset + 3])
+				{
+					different++;
+				}
+			}
+			return different;
+		}
+		finally
+		{
+			first.UnlockBits(firstData);
+			second.UnlockBits(secondData);
+		}
+	}
+
+	private static byte[] CreateInteractionBackground()
+	{
+		using Bitmap bitmap = new(FrameComposer.Width, FrameComposer.Height,
+			System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+		Rectangle bounds = new(Point.Empty, bitmap.Size);
+		using (Graphics graphics = Graphics.FromImage(bitmap))
+		using (System.Drawing.Drawing2D.LinearGradientBrush gradient = new(bounds,
+			Color.FromArgb(255, 20, 48, 80), Color.FromArgb(255, 92, 28, 66), 35f))
+		{
+			graphics.FillRectangle(gradient, bounds);
+		}
+		using MemoryStream stream = new();
+		bitmap.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
+		return stream.ToArray();
 	}
 }

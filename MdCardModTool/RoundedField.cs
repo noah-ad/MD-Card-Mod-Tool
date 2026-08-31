@@ -35,7 +35,8 @@ public sealed class RoundedField : Panel
 
 	protected override void OnPaintBackground(PaintEventArgs e)
 	{
-		e.Graphics.Clear(Parent?.BackColor ?? UiTheme.Window);
+		using SolidBrush parentSurface = new(Parent?.BackColor ?? UiTheme.Window);
+		e.Graphics.FillRectangle(parentSurface, ClientRectangle);
 		e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 		e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
 		Rectangle bounds = new(1, 1, Math.Max(1, Width - 3), Math.Max(1, Height - 3));

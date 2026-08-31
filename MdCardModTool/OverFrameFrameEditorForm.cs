@@ -19,6 +19,7 @@ public sealed class OverFrameFrameEditorForm : Form
 	private enum FrameCompositionMode
 	{
 		AstellarTransparent,
+		TransparentGradient,
 		FloowanGradient,
 		StandardComplete
 	}
@@ -217,11 +218,14 @@ public sealed class OverFrameFrameEditorForm : Form
 		Font = new Font("Microsoft YaHei UI", 9f);
 		AutoScaleMode = AutoScaleMode.Dpi;
 		KeyPreview = true;
+		DpiChanged += delegate { UiTheme.QueueStableRepaint(this); };
+		ResizeEnd += delegate { UiTheme.QueueStableRepaint(this); };
 
 		UiTheme.StyleComboBox(_mode);
 		UiTheme.StyleComboBox(_frames);
 		_mode.Items.Add(new FrameModeChoice(FrameCompositionMode.AstellarTransparent, "透明卡框"));
-		_mode.Items.Add(new FrameModeChoice(FrameCompositionMode.FloowanGradient, "炫酷卡框"));
+		_mode.Items.Add(new FrameModeChoice(FrameCompositionMode.TransparentGradient, "透明炫彩卡框"));
+		_mode.Items.Add(new FrameModeChoice(FrameCompositionMode.FloowanGradient, "炫彩卡框"));
 		_mode.Items.Add(new FrameModeChoice(FrameCompositionMode.StandardComplete, "普通卡框"));
 		_mode.SelectedItem = _mode.Items.Cast<object>().OfType<FrameModeChoice>()
 			.First(choice => choice.Mode == ModeForFrameKey(_initialFrameKey,
@@ -242,8 +246,8 @@ public sealed class OverFrameFrameEditorForm : Form
 		Button changeArt = UiTheme.Button("更换卡图", async delegate { await ChangeArtAsync(); }, ButtonTone.Primary);
 		Button addBackground = UiTheme.Button("添加叠底背景", async delegate { await AddBackgroundAsync(); }, ButtonTone.Gold);
 		_clearBackgroundButton = Button("清除背景", async delegate { await ClearBackgroundAsync(); });
-		Button exportPreview = Button("导出游戏预览", delegate { ExportPreview(); });
-		_finalPreviewButton = (RoundedButton)UiTheme.Button("游戏最终预览", delegate
+		Button exportPreview = Button("导出最终 PNG", delegate { ExportPreview(); });
+		_finalPreviewButton = (RoundedButton)UiTheme.Button("真实 Alpha 预览", delegate
 		{
 			SetCanvasView(showRenderedPreview: true);
 		}, ButtonTone.Primary);
@@ -354,7 +358,7 @@ public sealed class OverFrameFrameEditorForm : Form
 		previewActions.Controls.Add(editCanvas);
 		previewActions.Controls.Add(new Label
 		{
-			Text = "最终预览直接投影将写入 Texture2D 的 RGB；透明 Alpha 保持不变",
+			Text = "棋盘格表示真实透明区域；Alpha=0 下的 RGB 数据仍原样保留",
 			AutoSize = true,
 			ForeColor = UiTheme.Muted,
 			Margin = new Padding(12, 9, 0, 0)
@@ -422,6 +426,10 @@ public sealed class OverFrameFrameEditorForm : Form
 
 	private static FrameCompositionMode ModeForFrameKey(string? frameKey, FrameCompositionMode fallback)
 	{
+		if (frameKey?.StartsWith("transparent_gradient_", StringComparison.OrdinalIgnoreCase) == true)
+		{
+			return FrameCompositionMode.TransparentGradient;
+		}
 		if (frameKey?.StartsWith("transparent_", StringComparison.OrdinalIgnoreCase) == true)
 		{
 			return FrameCompositionMode.AstellarTransparent;
@@ -457,6 +465,7 @@ public sealed class OverFrameFrameEditorForm : Form
 			IEnumerable<TexRef> source = CurrentMode switch
 			{
 				FrameCompositionMode.AstellarTransparent => _availableFrames.Where(BuiltInCardFrameCatalog.IsTransparentFrame),
+				FrameCompositionMode.TransparentGradient => _availableFrames.Where(BuiltInCardFrameCatalog.IsTransparentGradientFrame),
 				FrameCompositionMode.FloowanGradient => _availableFrames.Where(BuiltInCardFrameCatalog.IsGradientFrame),
 				_ => _availableFrames.Where(BuiltInCardFrameCatalog.IsNormalFrame)
 			};
@@ -562,9 +571,11 @@ public sealed class OverFrameFrameEditorForm : Form
 			FrameCompositionMode savedMode = _savedSettings.CompositionMode.Equals("StandardComplete",
 				StringComparison.OrdinalIgnoreCase)
 				? FrameCompositionMode.StandardComplete
-				: _savedSettings.CompositionMode.Equals("FloowanGradient", StringComparison.OrdinalIgnoreCase)
-					? FrameCompositionMode.FloowanGradient
-					: FrameCompositionMode.AstellarTransparent;
+				: _savedSettings.CompositionMode.Equals("TransparentGradient", StringComparison.OrdinalIgnoreCase)
+					? FrameCompositionMode.TransparentGradient
+					: _savedSettings.CompositionMode.Equals("FloowanGradient", StringComparison.OrdinalIgnoreCase)
+						? FrameCompositionMode.FloowanGradient
+						: FrameCompositionMode.AstellarTransparent;
 			if (!string.IsNullOrWhiteSpace(_initialFrameKey))
 			{
 				savedMode = ModeForFrameKey(_initialFrameKey, savedMode);
@@ -678,6 +689,16 @@ public sealed class OverFrameFrameEditorForm : Form
 				preview = composed.PreviewPng;
 				transparentPixels = composed.TransparentEdgePixels;
 			}
+			else if (mode == FrameCompositionMode.TransparentGradient)
+			{
+				AstellarOverFrameTemplate template = await GetOverFrameTemplateAsync(choice.BaseKey);
+				AstellarOverFrameComposition composed = await Task.Run(() =>
+					AstellarOverFrameComposer.ComposeTransparentFlatFrame(artBytes, frameBytes,
+						template, backgroundBytes));
+				output = composed.GamePng;
+				preview = composed.PreviewPng;
+				transparentPixels = composed.TransparentEdgePixels;
+			}
 			else
 			{
 				output = await Task.Run(() =>
@@ -704,8 +725,10 @@ public sealed class OverFrameFrameEditorForm : Form
 			{
 				FrameCompositionMode.AstellarTransparent =>
 					$"透明卡框 · {choice.DisplayName} · {background} · {transparency} · 保留 {transparentPixels:N0} 个透明 RGB 像素",
+				FrameCompositionMode.TransparentGradient =>
+					$"透明炫彩卡框 · {choice.DisplayName} · {background} · {transparency} · 保留 {transparentPixels:N0} 个透明 RGB 像素",
 				FrameCompositionMode.FloowanGradient =>
-					$"炫酷卡框 · {choice.DisplayName} · {background} · {transparency} · 704×1024",
+					$"炫彩卡框 · {choice.DisplayName} · {background} · {transparency} · 704×1024",
 				_ => $"普通卡框 · {choice.DisplayName} · {background} · {transparency} · 704×1024"
 			};
 		}
@@ -761,7 +784,7 @@ public sealed class OverFrameFrameEditorForm : Form
 		_zoom.Enabled = !showRenderedPreview;
 		if (showRenderedPreview && _previewBytes == null)
 		{
-			_status.Text = "游戏最终预览正在生成；完成前不会显示旧结果。";
+			_status.Text = "真实 Alpha 预览正在生成；完成前不会显示旧结果。";
 		}
 	}
 
@@ -1026,7 +1049,7 @@ public sealed class OverFrameFrameEditorForm : Form
 		using SaveFileDialog dialog = new()
 		{
 			Filter = "PNG 图片|*.png",
-			FileName = $"{_cardId}_游戏最终预览.png"
+			FileName = $"{_cardId}_透明最终预览.png"
 		};
 		if (dialog.ShowDialog(this) == DialogResult.OK)
 		{
@@ -1052,7 +1075,9 @@ public sealed class OverFrameFrameEditorForm : Form
 		{
 			FrameCompositionMode.AstellarTransparent =>
 				$"透明卡框（保留 {_transparentEdgePixels:N0} 个透明 RGB 像素）",
-			FrameCompositionMode.FloowanGradient => "炫酷卡框",
+			FrameCompositionMode.TransparentGradient =>
+				$"透明炫彩卡框（保留 {_transparentEdgePixels:N0} 个透明 RGB 像素）",
+			FrameCompositionMode.FloowanGradient => "炫彩卡框",
 			_ => "普通卡框"
 		};
 		string background = _backgroundBytes == null ? "未使用叠底背景" : "已包含叠底背景";

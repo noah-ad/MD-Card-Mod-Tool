@@ -584,6 +584,23 @@ public sealed class ModEngine
 
 	public byte[] DecodePng(TexRef texture, int maxSize = 0)
 	{
+		if (BuiltInCardFrameCatalog.IsTransparentGradientFrame(texture))
+		{
+			byte[] generated = BuiltInCardFrameCatalog.DecodeTransparentGradientFrame(texture);
+			if (maxSize <= 0) return generated;
+			using Image<Rgba32> image = Image.Load<Rgba32>(generated);
+			if (image.Width > maxSize || image.Height > maxSize)
+			{
+				image.Mutate(context => context.Resize(new ResizeOptions
+				{
+					Size = new Size(maxSize, maxSize),
+					Mode = ResizeMode.Max
+				}));
+			}
+			using MemoryStream output = new();
+			image.Save(output, TransparentRgbPngEncoder());
+			return output.ToArray();
+		}
 		if (BuiltInCardFrameCatalog.IsPackagedFrame(texture))
 		{
 			return DecodeLocalPng(texture.ActiveBundlePath, maxSize);

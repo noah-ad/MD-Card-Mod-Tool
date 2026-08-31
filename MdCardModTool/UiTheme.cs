@@ -53,6 +53,38 @@ public static class UiTheme
 	public static int Scale(Control control, int logicalPixels) =>
 		Math.Max(1, (int)Math.Round(logicalPixels * Math.Max(96, control.DeviceDpi) / 96d));
 
+	public static void QueueStableRepaint(Control root)
+	{
+		if (root.IsDisposed || !root.IsHandleCreated)
+		{
+			return;
+		}
+		try
+		{
+			root.BeginInvoke((MethodInvoker)delegate
+			{
+				if (root.IsDisposed || !root.IsHandleCreated)
+				{
+					return;
+				}
+				// Per-monitor DPI and nested TableLayoutPanel containers settle over more
+				// than one layout wave.  Repaint the complete descendant tree only after
+				// that wave so pixels from the former child bounds cannot survive.
+				root.PerformLayout();
+				root.Invalidate(true);
+				// Do not synchronously Update here. QueueStableRepaint is commonly called
+				// from page switches and async preview completion; forcing WM_PAINT before
+				// the remaining layout messages have drained is what allows old child
+				// bounds to be painted into the new layout. The normal message loop now
+				// performs the final paint after this callback returns.
+			});
+		}
+		catch (InvalidOperationException)
+		{
+			// The window may be closing between the handle check and BeginInvoke.
+		}
+	}
+
 	public static void StyleTextBox(TextBox box)
 	{
 		box.BackColor = SurfaceAlt;

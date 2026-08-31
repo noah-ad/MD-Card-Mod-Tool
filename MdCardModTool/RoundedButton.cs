@@ -15,12 +15,17 @@ public class RoundedButton : Button
 	private Color _fromColor;
 	private Color _targetColor;
 	private float _progress = 1f;
+	private Rectangle _pendingParentDirty = Rectangle.Empty;
+	private Control? _pendingRepaintParent;
+	private bool _parentRepaintQueued;
 
 	public int CornerRadius { get; set; } = 8;
 
 	public Color BorderColor { get; set; } = UiTheme.Border;
 
 	public int TransitionMilliseconds { get; set; } = 160;
+
+	internal bool UsesSharedOptimizedBuffer => GetStyle(ControlStyles.OptimizedDoubleBuffer);
 
 	public Color NormalColor
 	{
@@ -50,10 +55,11 @@ public class RoundedButton : Button
 
 	public RoundedButton()
 	{
-		SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
-			| ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
+		SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint
+			| ControlStyles.ResizeRedraw | ControlStyles.Selectable | ControlStyles.Opaque, true);
+		SetStyle(ControlStyles.OptimizedDoubleBuffer, false);
 		SetStyle(ControlStyles.SupportsTransparentBackColor, false);
-		DoubleBuffered = true;
+		DoubleBuffered = false;
 		FlatStyle = FlatStyle.Flat;
 		FlatAppearance.BorderSize = 0;
 		FlatAppearance.MouseDownBackColor = Color.Transparent;
@@ -66,15 +72,18 @@ public class RoundedButton : Button
 		MouseEnter += (_, _) => BeginTransition(HoverColor);
 		MouseLeave += (_, _) => BeginTransition(NormalColor);
 		EnabledChanged += (_, _) => Invalidate();
-		ParentChanged += (_, _) => Invalidate();
+		ParentChanged += (_, _) =>
+		{
+			Invalidate();
+			QueueParentRepaint(Bounds);
+		};
 	}
 
 	protected override void OnPaintBackground(PaintEventArgs e)
 	{
-		// WinForms still prepares a rectangular button background even when the
-		// foreground is custom drawn. Clearing it with the actual parent surface
-		// removes the dark square fringe around anti-aliased corners.
-		e.Graphics.Clear(Parent?.BackColor ?? UiTheme.Window);
+		// The complete rectangular surface is painted in one local-buffer blit from
+		// OnPaint.  Leaving WM_ERASEBKGND out of the pass prevents a half-erased
+		// rounded button from becoming visible while a TableLayoutPanel is settling.
 	}
 
 	protected override void OnPaint(PaintEventArgs e)
@@ -82,10 +91,30 @@ public class RoundedButton : Button
 		// Do not call Button.OnPaint here.  Native button focus/default painting can
 		// run after an owner-drawn pass and leave clipped text/focus fragments below
 		// controls hosted in a DPI-scaled TableLayoutPanel.
-		using Region oldClip = e.Graphics.Clip;
-		e.Graphics.SetClip(ClientRectangle, CombineMode.Replace);
-		e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-		e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+		// Keep the native child-window clip exactly as WinForms supplied it. Even an
+		// IntersectClip call can recreate the region in translated parent coordinates
+		// on a per-monitor-DPI TableLayoutPanel and expose a strip of sibling cells.
+		// Every primitive below is already bounded by ClientRectangle.
+		if (ClientSize.Width <= 0 || ClientSize.Height <= 0)
+		{
+			return;
+		}
+
+		// WinForms' OptimizedDoubleBuffer uses a process-wide BufferedGraphicsContext.
+		// When several owner-drawn Button windows repaint during a DPI/layout wave,
+		// that shared surface can briefly retain another button's origin/clip. Render
+		// into a control-sized bitmap instead and commit the whole client rectangle in
+		// one clipped blit. This keeps hover/playback paints inside this HWND even when
+		// siblings are moving.
+		using Bitmap surface = new(ClientSize.Width, ClientSize.Height,
+			System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+		using Graphics graphics = Graphics.FromImage(surface);
+		using (SolidBrush parentSurface = new(Parent?.BackColor ?? UiTheme.Window))
+		{
+			graphics.FillRectangle(parentSurface, new Rectangle(Point.Empty, ClientSize));
+		}
+		graphics.SmoothingMode = SmoothingMode.AntiAlias;
+		graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
 		float scale = Math.Max(1f, DeviceDpi / 96f);
 		int inset = Math.Max(1, (int)MathF.Ceiling(scale));
 		Rectangle bounds = new(inset, inset, Math.Max(1, Width - inset * 2 - 1), Math.Max(1, Height - inset * 2 - 1));
@@ -93,30 +122,54 @@ public class RoundedButton : Button
 		Color fill = Enabled ? BackColor : Color.FromArgb(90, BackColor);
 		using SolidBrush background = new(fill);
 		using Pen border = new(ContainsFocus ? UiTheme.Primary : BorderColor, (ContainsFocus ? 1.6f : 1f) * scale);
-		e.Graphics.FillPath(background, path);
-		e.Graphics.DrawPath(border, path);
+		graphics.FillPath(background, path);
+		graphics.DrawPath(border, path);
 		Rectangle textBounds = Rectangle.FromLTRB(
 			bounds.Left + Padding.Left,
 			bounds.Top + Padding.Top,
 			Math.Max(bounds.Left + Padding.Left + 1, bounds.Right - Padding.Right),
 			Math.Max(bounds.Top + Padding.Top + 1, bounds.Bottom - Padding.Bottom));
-		TextFormatFlags alignment = TextAlign switch
+		StringAlignment alignment = TextAlign switch
 		{
-			ContentAlignment.TopLeft or ContentAlignment.MiddleLeft or ContentAlignment.BottomLeft => TextFormatFlags.Left,
-			ContentAlignment.TopRight or ContentAlignment.MiddleRight or ContentAlignment.BottomRight => TextFormatFlags.Right,
-			_ => TextFormatFlags.HorizontalCenter
+			ContentAlignment.TopLeft or ContentAlignment.MiddleLeft or ContentAlignment.BottomLeft => StringAlignment.Near,
+			ContentAlignment.TopRight or ContentAlignment.MiddleRight or ContentAlignment.BottomRight => StringAlignment.Far,
+			_ => StringAlignment.Center
 		};
-		TextFormatFlags vertical = TextAlign switch
+		StringAlignment vertical = TextAlign switch
 		{
-			ContentAlignment.TopLeft or ContentAlignment.TopCenter or ContentAlignment.TopRight => TextFormatFlags.Top,
-			ContentAlignment.BottomLeft or ContentAlignment.BottomCenter or ContentAlignment.BottomRight => TextFormatFlags.Bottom,
-			_ => TextFormatFlags.VerticalCenter
+			ContentAlignment.TopLeft or ContentAlignment.TopCenter or ContentAlignment.TopRight => StringAlignment.Near,
+			ContentAlignment.BottomLeft or ContentAlignment.BottomCenter or ContentAlignment.BottomRight => StringAlignment.Far,
+			_ => StringAlignment.Center
 		};
-		TextRenderer.DrawText(e.Graphics, Text, Font, textBounds, Enabled ? ForeColor : UiTheme.Muted,
-			alignment | vertical | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine
-			| TextFormatFlags.NoPadding | TextFormatFlags.PreserveGraphicsClipping
-			| TextFormatFlags.PreserveGraphicsTranslateTransform);
-		e.Graphics.Clip = oldClip;
+		using SolidBrush textBrush = new(Enabled ? ForeColor : UiTheme.Muted);
+		using StringFormat format = new()
+		{
+			Alignment = alignment,
+			LineAlignment = vertical,
+			Trimming = StringTrimming.EllipsisCharacter,
+			FormatFlags = StringFormatFlags.NoWrap,
+			HotkeyPrefix = System.Drawing.Text.HotkeyPrefix.None
+		};
+		// TextRenderer temporarily acquires a native HDC. On a DPI-scaled nested
+		// TableLayoutPanel that HDC can lose the inherited sibling-cell clip even
+		// when PreserveGraphicsClipping is requested, producing caption fragments
+		// below and to the right of the button. GDI+ stays on the already-clipped
+		// Graphics surface for the whole pass.
+		graphics.DrawString(Text, Font, textBrush, textBounds, format);
+		e.Graphics.DrawImageUnscaled(surface, Point.Empty);
+	}
+
+	protected override CreateParams CreateParams
+	{
+		get
+		{
+			CreateParams parameters = base.CreateParams;
+			// Child controls in FlowLayoutPanel/TableLayoutPanel are native sibling
+			// windows. Explicit sibling clipping is a final guard against a delayed
+			// hover paint crossing into the neighbouring cell after a bounds change.
+			parameters.Style |= 0x04000000; // WS_CLIPSIBLINGS
+			return parameters;
+		}
 	}
 
 	public override void NotifyDefault(bool value)
@@ -137,7 +190,7 @@ public class RoundedButton : Button
 			// beneath the rounded control.  Explicitly invalidate both rectangles.
 			Rectangle dirty = Rectangle.Union(previous, Bounds);
 			dirty.Inflate(UiTheme.Scale(this, 3), UiTheme.Scale(this, 3));
-			Parent.Invalidate(dirty, true);
+			QueueParentRepaint(dirty);
 		}
 	}
 
@@ -150,22 +203,70 @@ public class RoundedButton : Button
 		// its former bounds.  The control is already fully owner-drawn, so clipping the
 		// paint path is sufficient and gives the parent a stable invalidation surface.
 		Region = null;
-		BeginInvoke((MethodInvoker)delegate
-		{
-			if (!IsDisposed && Parent != null)
-			{
-				Rectangle dirty = Bounds;
-				dirty.Inflate(UiTheme.Scale(this, 3), UiTheme.Scale(this, 3));
-				Parent.Invalidate(dirty, true);
-			}
-		});
+		Rectangle dirty = Bounds;
+		dirty.Inflate(UiTheme.Scale(this, 3), UiTheme.Scale(this, 3));
+		QueueParentRepaint(dirty);
 	}
 
 	protected override void OnSizeChanged(EventArgs e)
 	{
 		base.OnSizeChanged(e);
 		Invalidate();
-		Parent?.Invalidate(Bounds, true);
+		QueueParentRepaint(Bounds);
+	}
+
+	private void QueueParentRepaint(Rectangle dirty)
+	{
+		Control? parent = Parent;
+		if (parent == null || parent.IsDisposed || dirty.Width <= 0 || dirty.Height <= 0)
+		{
+			return;
+		}
+
+		// Immediate invalidation keeps ordinary resize feedback responsive.  The
+		// deferred pass is the important part: TableLayoutPanel can issue several
+		// bounds changes in one DPI/layout wave, and an invalidation performed in the
+		// middle of that wave may be discarded before the old child rectangle is
+		// erased.  Coalesce those rectangles and repaint once after layout settles.
+		parent.Invalidate(dirty, true);
+		if (_pendingRepaintParent != parent)
+		{
+			_pendingRepaintParent = parent;
+			_pendingParentDirty = dirty;
+		}
+		else
+		{
+			_pendingParentDirty = _pendingParentDirty.IsEmpty
+				? dirty
+				: Rectangle.Union(_pendingParentDirty, dirty);
+		}
+		if (_parentRepaintQueued || !parent.IsHandleCreated)
+		{
+			return;
+		}
+
+		_parentRepaintQueued = true;
+		try
+		{
+			parent.BeginInvoke((MethodInvoker)delegate
+			{
+				Control? repaintParent = _pendingRepaintParent;
+				Rectangle repaintArea = _pendingParentDirty;
+				_parentRepaintQueued = false;
+				_pendingRepaintParent = null;
+				_pendingParentDirty = Rectangle.Empty;
+				if (IsDisposed || repaintParent == null || repaintParent.IsDisposed
+					|| !repaintParent.IsHandleCreated || repaintArea.IsEmpty)
+				{
+					return;
+				}
+				repaintParent.Invalidate(repaintArea, true);
+			});
+		}
+		catch (InvalidOperationException)
+		{
+			_parentRepaintQueued = false;
+		}
 	}
 
 	protected override void Dispose(bool disposing)

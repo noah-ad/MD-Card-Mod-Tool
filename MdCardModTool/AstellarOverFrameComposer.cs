@@ -62,39 +62,60 @@ public static class AstellarOverFrameComposer
 		}
 		AlphaComposite(output, artPixels);
 
-		// Match Astellar's geometry sanitization: the effect-text box is not part of
-		// the transparent edge even where ArtFrame/EffFrame overlap it.
-		bool[] edgeMask = new bool[pixelCount];
-		layerMasks.TryGetValue("EffBox", out bool[]? effectBoxMask);
-		foreach (string name in TransparentEdgeLayers)
-		{
-			if (!layerMasks.TryGetValue(name, out bool[]? layerMask)) continue;
-			for (int index = 0; index < pixelCount; index++)
-			{
-				if (layerMask[index] && (name == "PeriFrame" || effectBoxMask == null || !effectBoxMask[index]))
-				{
-					edgeMask[index] = true;
-				}
-			}
-		}
+		bool[] edgeMask = CombineTransparentEdgeMasks(layerMasks);
+		int transparentPixels = ClearAlphaPreservingRgb(output, edgeMask);
+		byte[] gamePng = Encode(output);
 
-		int transparentPixels = 0;
-		for (int index = 0; index < output.Length; index++)
-		{
-			if (!edgeMask[index]) continue;
-			Rgba32 pixel = output[index];
-			bool carriesRgb = pixel.R != 0 || pixel.G != 0 || pixel.B != 0;
-			pixel.A = 0;
-			output[index] = pixel;
-			// Fully black edge pixels still need alpha cleared, but they carry no
-			// hidden RGB shader data and therefore must not inflate this diagnostic.
-			if (carriesRgb) transparentPixels++;
-		}
-		Rgba32[] preview = CreateVisibleRgbProjection(output);
+		// The default preview must show the real Alpha result. Hidden RGB remains
+		// available through CreateVisibleRgbPreview as an explicit diagnostic only.
+		return new AstellarOverFrameComposition(gamePng, (byte[])gamePng.Clone(),
+			transparentPixels);
+	}
 
-		return new AstellarOverFrameComposition(
-			Encode(output),
-			Encode(preview),
+	/// <summary>
+	/// Uses Floowan's iridescent RGB together with Astellar's more open Alpha
+	/// geometry. This is the standalone frame shown in the transparent-iridescent
+	/// frame category.
+	/// </summary>
+	public static byte[] CreateTransparentGradientFrame(byte[] gradientFramePng,
+		byte[] transparentFramePng)
+	{
+		using Image<Rgba32> gradient = Image.Load<Rgba32>(gradientFramePng);
+		using Image<Rgba32> transparent = Image.Load<Rgba32>(transparentFramePng);
+		Validate(gradient, "炫彩卡框");
+		Validate(transparent, "透明卡框");
+		int pixelCount = FrameComposer.Width * FrameComposer.Height;
+		Rgba32[] gradientPixels = new Rgba32[pixelCount];
+		Rgba32[] transparentPixels = new Rgba32[pixelCount];
+		gradient.CopyPixelDataTo(gradientPixels);
+		transparent.CopyPixelDataTo(transparentPixels);
+		for (int index = 0; index < pixelCount; index++)
+		{
+			Rgba32 color = gradientPixels[index];
+			color.A = Math.Min(color.A, transparentPixels[index].A);
+			gradientPixels[index] = color;
+		}
+		// This PNG is a read-only UI resource generated on demand. Favor responsive
+		// category switching; final game output still uses BestCompression below.
+		return Encode(gradientPixels, PngCompressionLevel.BestSpeed);
+	}
+
+	/// <summary>
+	/// Composes an iridescent frame and then applies the same Astellar Dirty Alpha
+	/// geometry used by the transparent frame mode. The result is genuinely
+	/// transparent while retaining the gradient RGB below zero Alpha.
+	/// </summary>
+	public static AstellarOverFrameComposition ComposeTransparentFlatFrame(byte[] artPng,
+		byte[] framePng, AstellarOverFrameTemplate template, byte[]? backgroundPng = null)
+	{
+		byte[] flatPng = ComposeFlatFrame(artPng, framePng, backgroundPng);
+		using Image<Rgba32> flat = Image.Load<Rgba32>(flatPng);
+		Rgba32[] pixels = new Rgba32[FrameComposer.Width * FrameComposer.Height];
+		flat.CopyPixelDataTo(pixels);
+		int transparentPixels = ClearAlphaPreservingRgb(pixels,
+			CreateTransparentEdgeMask(template));
+		byte[] gamePng = Encode(pixels);
+		return new AstellarOverFrameComposition(gamePng, (byte[])gamePng.Clone(),
 			transparentPixels);
 	}
 
@@ -130,10 +151,11 @@ public static class AstellarOverFrameComposer
 	}
 
 	/// <summary>
-	/// Creates the same RGB projection used by Master Duel's full-card shader:
+	/// Creates a diagnostic RGB projection used to inspect Master Duel's hidden
+	/// transparent color data:
 	/// zero-alpha pixels that still carry RGB are made visible for display only.
-	/// The returned PNG is never written back to Texture2D; the original alpha is
-	/// retained in <see cref="AstellarOverFrameComposition.GamePng"/>.
+	/// The returned PNG is never a default preview and is never written back to
+	/// Texture2D; the original alpha remains authoritative.
 	/// </summary>
 	public static byte[] CreateVisibleRgbPreview(byte[] texturePng)
 	{
@@ -154,6 +176,77 @@ public static class AstellarOverFrameComposer
 			preview[index] = pixel;
 		}
 		return preview;
+	}
+
+	private static bool[] CreateTransparentEdgeMask(AstellarOverFrameTemplate template)
+	{
+		Dictionary<string, bool[]> layerMasks = new(StringComparer.Ordinal);
+		foreach (string name in TransparentEdgeLayers)
+		{
+			if (!template.Layers.TryGetValue(name, out byte[]? bytes))
+			{
+				throw new InvalidDataException($"透明边缘模板 {template.Key} 缺少 {name} 图层。");
+			}
+			using Image<Rgba32> layer = Image.Load<Rgba32>(bytes);
+			Validate(layer, name);
+			Rgba32[] pixels = new Rgba32[FrameComposer.Width * FrameComposer.Height];
+			layer.CopyPixelDataTo(pixels);
+			bool[] mask = new bool[pixels.Length];
+			CollectAlphaMask(pixels, mask);
+			layerMasks[name] = mask;
+		}
+		if (!template.Layers.TryGetValue("EffBox", out byte[]? effectBoxBytes))
+		{
+			throw new InvalidDataException($"透明边缘模板 {template.Key} 缺少 EffBox 图层。");
+		}
+		using (Image<Rgba32> effectBox = Image.Load<Rgba32>(effectBoxBytes))
+		{
+			Validate(effectBox, "EffBox");
+			Rgba32[] pixels = new Rgba32[FrameComposer.Width * FrameComposer.Height];
+			effectBox.CopyPixelDataTo(pixels);
+			bool[] mask = new bool[pixels.Length];
+			CollectAlphaMask(pixels, mask);
+			layerMasks["EffBox"] = mask;
+		}
+		return CombineTransparentEdgeMasks(layerMasks);
+	}
+
+	private static bool[] CombineTransparentEdgeMasks(
+		IReadOnlyDictionary<string, bool[]> layerMasks)
+	{
+		int pixelCount = FrameComposer.Width * FrameComposer.Height;
+		bool[] edgeMask = new bool[pixelCount];
+		layerMasks.TryGetValue("EffBox", out bool[]? effectBoxMask);
+		foreach (string name in TransparentEdgeLayers)
+		{
+			if (!layerMasks.TryGetValue(name, out bool[]? layerMask)) continue;
+			for (int index = 0; index < pixelCount; index++)
+			{
+				if (layerMask[index]
+					&& (name == "PeriFrame" || effectBoxMask == null || !effectBoxMask[index]))
+				{
+					edgeMask[index] = true;
+				}
+			}
+		}
+		return edgeMask;
+	}
+
+	private static int ClearAlphaPreservingRgb(Rgba32[] pixels, bool[] edgeMask)
+	{
+		int transparentPixels = 0;
+		for (int index = 0; index < pixels.Length; index++)
+		{
+			if (!edgeMask[index]) continue;
+			Rgba32 pixel = pixels[index];
+			bool carriesRgb = pixel.R != 0 || pixel.G != 0 || pixel.B != 0;
+			pixel.A = 0;
+			pixels[index] = pixel;
+			// Fully black edge pixels still need alpha cleared, but they carry no
+			// hidden RGB shader data and therefore do not inflate this diagnostic.
+			if (carriesRgb) transparentPixels++;
+		}
+		return transparentPixels;
 	}
 
 	private static Rgba32[] CreateUnderlay(int pixelCount, byte[]? backgroundPng)
@@ -212,7 +305,13 @@ public static class AstellarOverFrameComposer
 		return Encode(pixels, FrameComposer.Width, FrameComposer.Height);
 	}
 
-	private static byte[] Encode(Rgba32[] pixels, int width, int height)
+	private static byte[] Encode(Rgba32[] pixels, PngCompressionLevel compressionLevel)
+	{
+		return Encode(pixels, FrameComposer.Width, FrameComposer.Height, compressionLevel);
+	}
+
+	private static byte[] Encode(Rgba32[] pixels, int width, int height,
+		PngCompressionLevel compressionLevel = PngCompressionLevel.BestCompression)
 	{
 		using Image<Rgba32> image = Image.LoadPixelData<Rgba32>(pixels, width, height);
 		using MemoryStream stream = new();
@@ -223,7 +322,7 @@ public static class AstellarOverFrameComposer
 			// Keep this explicit even though current ImageSharp versions default to
 			// Preserve; a future package/default change must not silently clear it.
 			TransparentColorMode = PngTransparentColorMode.Preserve,
-			CompressionLevel = PngCompressionLevel.BestCompression
+			CompressionLevel = compressionLevel
 		});
 		return stream.ToArray();
 	}
