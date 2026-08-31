@@ -151,13 +151,21 @@ public sealed class FramePreviewForm : Form
 			byte[][] sources = await Task.WhenAll<byte[]>(Task.Run(() => _engine.DecodePng(_art)), Task.Run(() => _engine.DecodePng(choice.Texture)));
 			if (generation == _generation)
 			{
-				byte[] composed = await Task.Run(() => (_art.Width != 704 || _art.Height != 1024) ? CardFrameRenderer.ComposeStoredArtPreview(sources[0], sources[1]) : FrameComposer.Compose(sources[0], sources[1]));
+				GameTextureDisplayMapping mapping = GameTextureDisplayMapping.Resolve(_art, choice.Texture.Name);
+				byte[] displayArt = mapping.RequiresMapping
+					? await Task.Run(() => mapping.DecodeForDisplay(sources[0]))
+					: sources[0];
+				byte[] composed = await Task.Run(() => (_art.Width != 704 || _art.Height != 1024)
+					? CardFrameRenderer.ComposeStoredArtPreview(displayArt, sources[1])
+					: FrameComposer.Compose(displayArt, sources[1]));
 				Bitmap output = ((_art.Width == 704 && _art.Height == 1024) ? FrameComposer.PreviewBitmap(composed) : FrameComposer.BitmapFrom(composed));
 				_art.PreviewFrameKey = choice.Texture.Name;
 				Image image = _preview.Image;
 				_preview.Image = output;
 				image?.Dispose();
-				_status.Text = $"{_art.Name}  +  {choice.Texture.Name}（{output.Width}×{output.Height}）";
+				_status.Text = mapping.RequiresMapping
+					? $"{_art.Name} + {choice.Texture.Name} · {mapping.EditorSummary}"
+					: $"{_art.Name}  +  {choice.Texture.Name}（{output.Width}×{output.Height}）";
 			}
 		}
 		catch (Exception ex)

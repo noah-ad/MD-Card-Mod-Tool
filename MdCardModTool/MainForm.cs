@@ -792,7 +792,7 @@ public sealed class MainForm : Form
 			BackColor = UiTheme.Surface,
 			Font = new Font("Segoe UI", 8f),
 			TextAlign = ContentAlignment.MiddleLeft,
-			Text = $"v2.0.3  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
+			Text = $"v2.0.4  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
 		};
 		TableLayoutPanel sidebar = new()
 		{
@@ -2592,12 +2592,15 @@ public sealed class MainForm : Form
 		{
 			byte[] data = await DecodeWithReferenceRepairAsync(x, cancellationToken);
 			cancellationToken.ThrowIfCancellationRequested();
-			// The resource workspace previews exactly what is stored in Texture2D.
-			// Card-frame composition is an explicit action; doing it automatically made
-			// Pendulum cards look as if their frame were part of the selected artwork.
-			// Default previews respect the Texture2D Alpha channel. Hidden RGB remains
-			// intact in the decoded PNG but is never forced opaque in the normal UI.
-			Bitmap display = CardPreviewRenderer.RenderRaw(data);
+			GameTextureDisplayMapping displayMapping = DisplayMappingFor(x);
+			byte[] displayData = displayMapping.RequiresMapping
+				? await Task.Run(() => displayMapping.DecodeForDisplay(data), cancellationToken)
+				: data;
+			cancellationToken.ThrowIfCancellationRequested();
+			// Card-frame composition remains an explicit action. Sleeves and Pendulum
+			// art are first restored from their game-storage canvas so the default
+			// resource preview uses the proportions users actually see in a duel.
+			Bitmap display = CardPreviewRenderer.RenderRaw(displayData);
 			if (cancellationToken.IsCancellationRequested || generation != _previewGeneration || Selected() != x)
 			{
 				display.Dispose();
@@ -2606,7 +2609,9 @@ public sealed class MainForm : Form
 			_preview.Image?.Dispose();
 			_preview.Image = display;
 			_previewHint.Visible = false;
-			string frameLine = "";
+			string frameLine = displayMapping.RequiresMapping
+				? $"\n{displayMapping.EditorSummary} · 写入时自动反向映射"
+				: "";
 			if (_gameRoot != null && x.SourceKind == "本地卡图" && x.Width == 704 && x.Height == 1024 && ushort.TryParse(x.CardKey, out var cardId))
 			{
 				frameLine = "\n预览：真实 Alpha 显示（透明像素中的 RGB 数据仍原样保留）";
@@ -2623,13 +2628,18 @@ public sealed class MainForm : Form
 			else if (x.SourceKind == "本地卡图" && x.Width == 512 && (x.Height == 512 || x.Height == 1024))
 			{
 				string recommended = PreferredFrameKeyFor(x);
-				frameLine = $"\n当前显示原始 Texture2D（未叠加卡框）  ·  推荐卡框 {recommended} · {CardFrameCatalog.FriendlyName(recommended)}";
+				frameLine += displayMapping.Kind == TextureDisplayMappingKind.PendulumCardArt
+					? $"\n当前为灵摆卡图正常比例预览（未叠加卡框） · 推荐卡框 {recommended} · {CardFrameCatalog.FriendlyName(recommended)}"
+					: $"\n当前显示原始 Texture2D（未叠加卡框） · 推荐卡框 {recommended} · {CardFrameCatalog.FriendlyName(recommended)}";
 			}
 			if (x.HasMonsterAnimation)
 			{
 				frameLine += "\n怪兽动画：双击动画分类中的卡图，或点击“原始动画资源”，查看 PNG / Atlas / JSON";
 			}
-			_info.Text = $"{x.Name}  ·  {x.Category}\n{x.Width} × {x.Height}   PathID {x.PathId}\n{x.RelativeBundlePath}{frameLine}";
+			string dimensions = displayMapping.RequiresMapping
+				? $"正常预览 {displayMapping.DisplayWidth} × {displayMapping.DisplayHeight}   ·   Texture2D {x.Width} × {x.Height}"
+				: $"{x.Width} × {x.Height}";
+			_info.Text = $"{x.Name}  ·  {x.Category}\n{dimensions}   PathID {x.PathId}\n{x.RelativeBundlePath}{frameLine}";
 		}
 		catch (Exception ex)
 		{
@@ -2689,6 +2699,23 @@ public sealed class MainForm : Form
 		}
 	}
 
+	private GameTextureDisplayMapping DisplayMappingFor(TexRef texture)
+	{
+		string? frameKey = texture.SourceKind == "本地卡图" && texture.CardKey.Length > 0
+			? PreferredFrameKeyFor(texture)
+			: null;
+		return GameTextureDisplayMapping.Resolve(texture, frameKey);
+	}
+
+	private async Task<byte[]> DecodeForDisplayAsync(TexRef texture, CancellationToken cancellationToken = default)
+	{
+		byte[] stored = await DecodeWithReferenceRepairAsync(texture, cancellationToken);
+		GameTextureDisplayMapping mapping = DisplayMappingFor(texture);
+		return mapping.RequiresMapping
+			? await Task.Run(() => mapping.DecodeForDisplay(stored), cancellationToken)
+			: stored;
+	}
+
 	private void SelectAllCategory()
 	{
 		CategoryFilter? all = _category.Items.Cast<CategoryFilter>().FirstOrDefault(x => x.Kind == CategoryFilterKind.All);
@@ -2731,16 +2758,21 @@ public sealed class MainForm : Form
 			}
 		}
 		byte[] cropped;
+		GameTextureDisplayMapping displayMapping = DisplayMappingFor(x);
 		try
 		{
 			TexRef[] frames = ((x.SourceKind == "本地卡图" && x.CardKey.Length > 0 && x.Width == 512 && (x.Height == 512 || x.Height == 1024)) ? OverFrameFrames() : null);
-			using ImageCropForm crop = new ImageCropForm(image, x.Width, x.Height, "替换 " + x.Name, frames,
-				frames == null ? null : PreferredFrameKeyFor(x));
+			using ImageCropForm crop = new ImageCropForm(image,
+				displayMapping.DisplayWidth, displayMapping.DisplayHeight,
+				"替换 " + x.Name, frames,
+				frames == null ? null : PreferredFrameKeyFor(x),
+				fullCardOverlay: false, initialBackgroundPng: null, displayMapping: displayMapping);
 			if (crop.ShowDialog(this) != DialogResult.OK || crop.OutputPng == null)
 			{
 				return;
 			}
-			cropped = crop.OutputPng;
+			byte[] normalPreview = crop.OutputPng;
+			cropped = await Task.Run(() => displayMapping.EncodeForStorage(normalPreview));
 			if (crop.SelectedFrameKey.Length > 0)
 			{
 				x.PreviewFrameKey = crop.SelectedFrameKey;
@@ -2751,7 +2783,10 @@ public sealed class MainForm : Form
 			MessageBox.Show(this, ex.Message, "无法打开裁剪器", MessageBoxButtons.OK, MessageBoxIcon.Hand);
 			return;
 		}
-		if (MessageBox.Show(this, $"裁剪结果将以 {x.Width}×{x.Height} 写入游戏 Bundle。原始文件会备份到游戏目录的 _MD卡图备份 中。继续？", "确认替换", MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation) != DialogResult.OK)
+		string mappingNotice = displayMapping.RequiresMapping
+			? $"裁剪器按正常比例 {displayMapping.DisplayWidth}×{displayMapping.DisplayHeight} 预览；写入时已自动转换为游戏存储 {x.Width}×{x.Height}。"
+			: $"裁剪结果将以 {x.Width}×{x.Height} 写入游戏 Bundle。";
+		if (MessageBox.Show(this, $"{mappingNotice}\n原始文件会备份到游戏目录的 _MD卡图备份 中。继续？", "确认替换", MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation) != DialogResult.OK)
 		{
 			return;
 		}
@@ -2878,8 +2913,11 @@ public sealed class MainForm : Form
 			try
 			{
 				string fileName = d.FileName;
-				await File.WriteAllBytesAsync(fileName, await DecodeWithReferenceRepairAsync(x));
-				_status.Text = "已导出当前游戏内卡图：" + d.FileName;
+				GameTextureDisplayMapping mapping = DisplayMappingFor(x);
+				await File.WriteAllBytesAsync(fileName, await DecodeForDisplayAsync(x));
+				_status.Text = mapping.RequiresMapping
+					? $"已按正常比例 {mapping.DisplayWidth}×{mapping.DisplayHeight} 导出：{d.FileName}"
+					: "已导出当前游戏内卡图：" + d.FileName;
 			}
 			catch (Exception ex)
 			{
@@ -2903,7 +2941,7 @@ public sealed class MainForm : Form
 			string path = Path.Combine(Path.GetTempPath(), "MDCardModTool", Safe(x.Name) + "_" + x.PathId + ".png");
 			Directory.CreateDirectory(Path.GetDirectoryName(path));
 			string path2 = path;
-			await File.WriteAllBytesAsync(path2, await DecodeWithReferenceRepairAsync(x));
+			await File.WriteAllBytesAsync(path2, await DecodeForDisplayAsync(x));
 			_list.DoDragDrop(new DataObject(DataFormats.FileDrop, new string[1] { path }), DragDropEffects.Copy);
 		}
 		catch (Exception ex)

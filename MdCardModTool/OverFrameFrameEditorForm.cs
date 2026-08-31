@@ -515,6 +515,10 @@ public sealed class OverFrameFrameEditorForm : Form
 		_status.Text = "正在读取当前卡图、构图与卡框…";
 		try
 		{
+			_savedSettings = OverFrameArtStore.ReadSettings(_gameRoot, _cardId);
+			string mappingFrameKey = !string.IsNullOrWhiteSpace(_initialFrameKey)
+				? _initialFrameKey
+				: _savedSettings.FrameKey;
 			if (_replaceStoredBackground)
 			{
 				await Task.Run(delegate
@@ -531,6 +535,8 @@ public sealed class OverFrameFrameEditorForm : Form
 			}
 
 			string sourcePath = OverFrameArtStore.SourcePath(_gameRoot, _cardId);
+			GameTextureDisplayMapping liveSourceMapping = GameTextureDisplayMapping.Resolve(_art,
+				mappingFrameKey);
 			if (_initialSource != null)
 			{
 				await Task.Run(() => OverFrameArtStore.SaveSource(_gameRoot, _cardId, _initialSource));
@@ -545,11 +551,30 @@ public sealed class OverFrameFrameEditorForm : Form
 				else
 				{
 					byte[] current = await Task.Run(() => _engine.DecodePng(_art));
+					if (liveSourceMapping.RequiresMapping)
+					{
+						current = await Task.Run(() => liveSourceMapping.DecodeForDisplay(current));
+					}
 					await Task.Run(() => OverFrameArtStore.SaveSource(_gameRoot, _cardId, current));
 				}
 			}
 
 			_sourceBytes = await File.ReadAllBytesAsync(sourcePath);
+			if (_initialSource == null)
+			{
+				SixLabors.ImageSharp.ImageInfo sourceInfo = SixLabors.ImageSharp.Image.Identify(_sourceBytes)
+					?? throw new InvalidDataException("超框源图无法识别。");
+				GameTextureDisplayMapping draftMapping = GameTextureDisplayMapping.ResolveCanvas(_art,
+					sourceInfo.Width, sourceInfo.Height, mappingFrameKey);
+				if (draftMapping.RequiresMapping)
+				{
+					// Upgrade drafts created before display/storage mapping was separated.
+					// Resolve against the draft's own dimensions so this also works after
+					// the live target has already become a 704×1024 over-frame Texture2D.
+					_sourceBytes = await Task.Run(() => draftMapping.DecodeForDisplay(_sourceBytes));
+					await Task.Run(() => OverFrameArtStore.SaveSource(_gameRoot, _cardId, _sourceBytes));
+				}
+			}
 			_sourceHasTransparency = await Task.Run(() => HasMeaningfulTransparency(_sourceBytes));
 			_suppressCanvasChanges = true;
 			try
@@ -567,7 +592,6 @@ public sealed class OverFrameFrameEditorForm : Form
 				: null;
 			SetCanvasBackground();
 
-			_savedSettings = OverFrameArtStore.ReadSettings(_gameRoot, _cardId);
 			FrameCompositionMode savedMode = _savedSettings.CompositionMode.Equals("StandardComplete",
 				StringComparison.OrdinalIgnoreCase)
 				? FrameCompositionMode.StandardComplete

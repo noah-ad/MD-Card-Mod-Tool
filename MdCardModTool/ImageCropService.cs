@@ -26,32 +26,22 @@ public static class ImageCropService
 		return new Bitmap(drawingImage);
 	}
 
-	public static byte[] RenderToTarget(string sourcePath, ImageRenderSpec spec, int targetWidth, int targetHeight, int? visibleTargetHeight = null)
+	public static byte[] RenderToTarget(string sourcePath, ImageRenderSpec spec, int targetWidth, int targetHeight)
 	{
 		if (spec.VisualWidth <= 0f || spec.VisualHeight <= 0f || spec.ImageScale <= 0f)
 		{
 			throw new ArgumentException("裁剪布局无效。", "spec");
 		}
-		int mappedHeight = visibleTargetHeight ?? targetHeight;
-		if (mappedHeight <= 0 || mappedHeight > targetHeight)
-		{
-			throw new ArgumentOutOfRangeException("visibleTargetHeight", "显示区高度必须位于输出纹理范围内。");
-		}
 		using Bitmap source = LoadPreview(sourcePath);
-		return RenderToTarget(source, spec, targetWidth, targetHeight, visibleTargetHeight);
+		return RenderToTarget(source, spec, targetWidth, targetHeight);
 	}
 
-	public static byte[] RenderToTarget(Bitmap source, ImageRenderSpec spec, int targetWidth, int targetHeight, int? visibleTargetHeight = null)
+	public static byte[] RenderToTarget(Bitmap source, ImageRenderSpec spec, int targetWidth, int targetHeight)
 	{
 		ArgumentNullException.ThrowIfNull(source);
 		if (spec.VisualWidth <= 0f || spec.VisualHeight <= 0f || spec.ImageScale <= 0f)
 		{
 			throw new ArgumentException("裁剪布局无效。", nameof(spec));
-		}
-		int mappedHeight = visibleTargetHeight ?? targetHeight;
-		if (mappedHeight <= 0 || mappedHeight > targetHeight)
-		{
-			throw new ArgumentOutOfRangeException(nameof(visibleTargetHeight), "显示区高度必须位于输出纹理范围内。");
 		}
 		using Bitmap output = new Bitmap(targetWidth, targetHeight, PixelFormat.Format32bppArgb);
 		using (Graphics graphics = Graphics.FromImage(output))
@@ -61,7 +51,7 @@ public static class ImageCropService
 			graphics.CompositingMode = CompositingMode.SourceOver;
 			CardFrameRenderer.Configure(graphics);
 			float scaleX = (float)targetWidth / spec.VisualWidth;
-			float scaleY = (float)mappedHeight / spec.VisualHeight;
+			float scaleY = (float)targetHeight / spec.VisualHeight;
 			float visualWidth = (float)source.Width * spec.ImageScale;
 			float visualHeight = (float)source.Height * spec.ImageScale;
 			float left = spec.VisualWidth / 2f + spec.OffsetX - visualWidth / 2f;

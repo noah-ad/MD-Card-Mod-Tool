@@ -1,10 +1,10 @@
-# MD Card Mod Tool 2.0.3
+# MD Card Mod Tool 2.0.4
 
-面向《游戏王 Master Duel》的 .NET 8 x64 资源查看与 Mod 制作工具。2.0.3 使用 Master Duel 风格的四栏目单窗口工作区，整合卡图、卡框／超框、视觉资源、怪兽动画预览与 Mod 管理，并修复连续操作后出现的按钮文字、导航与动画页残影。EXE 文件名仍保留“MD卡图查看替换器”，以兼容旧版启动脚本。
+面向《游戏王 Master Duel》的 .NET 8 x64 资源查看与 Mod 制作工具。2.0.4 将卡套与灵摆卡图的编辑／预览比例和游戏 Texture2D 存储比例彻底分离：用户始终按正常外观构图，写入 Bundle 前再自动执行游戏 UV 所需的反向变形。EXE 文件名仍保留“MD卡图查看替换器”，以兼容旧版启动脚本。
 
 ## 下载
 
-从 [GitHub Releases](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/latest) 下载 `MD-Card-Mod-Tool-v2.0.3-test-win-x64.zip`。解压后根目录只有 `MD卡图查看替换器.exe` 与 `data` 文件夹，直接运行 EXE 即可；若文件带有 Windows 下载标记，可先运行 `data\首次启动-解除下载封锁.bat`。
+从 [GitHub Releases](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/latest) 下载 `MD-Card-Mod-Tool-v2.0.4-test-win-x64.zip`。解压后根目录只有 `MD卡图查看替换器.exe` 与 `data` 文件夹，直接运行 EXE 即可；若文件带有 Windows 下载标记，可先运行 `data\首次启动-解除下载封锁.bat`。
 
 ## 主要功能
 
@@ -15,6 +15,8 @@
 - 现代化 Master Duel 深色工作区使用侧栏一级导航、圆角控件和按 DPI 缩放的矢量导航图标；视觉资源页顶部直接提供场地、壁纸、卡套、卡盒、硬币与头像装饰筛选。
 - 2.0.3 将圆角按钮改为控件私有离屏缓冲并整帧提交，移除页面切换和嵌入动画页中的同步重绘／嵌套消息循环；连续 hover、播放暂停、切页及窗口／DPI 缩放后不会再把旧文字或边框画到相邻区域。
 - 预览、导出和替换共用资源解析器。Bundle、serialized file、PathID 或 Texture2D 位置过期时，会按容器、名称、尺寸、逻辑路径及 Bundle 内资产重新定位；写入前会在临时副本重新验证。
+- 2.0.4 对卡套使用 `704×1024（正常显示）↔ 512×1024（游戏存储）`，对灵摆卡图使用 `512×683（正常显示）↔ 512×1024（游戏存储）`。主界面、裁剪器、卡框预览、导出、拖出与 `--export-card` 均显示正常比例；替换时完整画布非等比拉伸到存储纹理，不裁顶部、不留透明尾部。其他同为 `512×1024` 的壁纸等资源不会误套映射。
+- 旧版留下的 `512×1024` 灵摆超框源图会在重新打开统一编辑器时自动迁移为 `512×683` 正常编辑比例，即使该卡的当前 Texture2D 已经是 `704×1024` 超框资源。
 - 支持卡图、透明超框、壁纸、大厅背景、决斗场地、卡套、头像、头像框、卡盒与硬币。普通卡与已有超框卡共用同一个“制作超框”编辑器：可直接读取当前原卡图，在最终卡面上拖动主体，以滚轮／滑杆缩放，也可随时更换卡图、添加或清除叠底背景；关闭后再次打开会恢复卡图位置和缩放。
 - 卡框选择固定分成透明卡框、透明炫彩卡框、炫彩卡框和普通卡框，每类 16 套；“炫酷卡框”已统一更名为“炫彩卡框”。透明炫彩卡框使用 Floowan OfGradient 的炫彩 RGB 与 Astellar 的透明 Alpha 几何实时派生，不是给普通资源换标签。新卡首次制作默认进入透明超框并按卡片类型选择正确框种。
 - 编辑器、导出与主界面预览统一为真实 Alpha：透明区域默认显示棋盘格，不再把 Alpha=0 像素强制投影成不透明颜色；最终预览 PNG 与实际写入 Texture2D 的 RGBA 完全一致。隐藏 RGB 仍会在 PNG 编码与 Bundle 往返中原样保留，只能通过显式诊断入口查看。需要拖动或缩放时切到“构图编辑”。
@@ -37,7 +39,7 @@ dotnet build '.\MdCardModTool\MdCardModTool.csproj' -c Release -p:Platform=x64
 
 dotnet publish '.\MdCardModTool\MdCardModTool.csproj' `
   -c Release -r win-x64 -p:Platform=x64 --self-contained true `
-  -o '.\发布\MD-Card-Mod-Tool-v2.0.3-test'
+  -o '.\发布\MD-Card-Mod-Tool-v2.0.4-test'
 ```
 
 发布包根目录只允许包含 EXE 与 `data`。`data` 内必须包含 `classdata.tpk`、预绑定卡图／动画索引、Astellar 超框模板、Floowan 卡框、`tools/texconv.exe`、`tools/ffmpeg.exe`、说明与第三方许可文件。

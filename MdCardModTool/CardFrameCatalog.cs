@@ -6,8 +6,6 @@ namespace MdCardModTool;
 
 public static class CardFrameCatalog
 {
-	public const int PendulumVisibleStorageHeight = 596;
-
 	private static readonly IReadOnlyDictionary<string, string> FriendlyNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
 	{
 		["card_frame00"] = "通常怪兽",

@@ -110,6 +110,238 @@ internal static class Program
 			if (!ready) Environment.ExitCode = 2;
 			return;
 		}
+		if (args.Length == 1 && args[0] == "--test-texture-display-mapping")
+		{
+			TexRef sleeveTexture = new()
+			{
+				BundlePath = "sleeve",
+				RelativeBundlePath = "sleeve",
+				Name = "ProtectorIcon1070005",
+				Width = 512,
+				Height = 1024,
+				Category = "卡套",
+				SourceKind = "视觉资源"
+			};
+			TexRef pendulumTexture = new()
+			{
+				BundlePath = "pendulum",
+				RelativeBundlePath = "pendulum",
+				Name = "20486",
+				Width = 512,
+				Height = 1024,
+				Category = "灵摆卡图",
+				SourceKind = "本地卡图",
+				CardKey = "20486"
+			};
+			TexRef unrelatedTallTexture = new()
+			{
+				BundlePath = "wallpaper",
+				RelativeBundlePath = "wallpaper",
+				Name = "UnrelatedTallTexture",
+				Width = 512,
+				Height = 1024,
+				Category = "壁纸／大厅背景",
+				SourceKind = "视觉资源"
+			};
+
+			GameTextureDisplayMapping sleeve = GameTextureDisplayMapping.Resolve(sleeveTexture);
+			GameTextureDisplayMapping pendulum = GameTextureDisplayMapping.Resolve(pendulumTexture, "card_frame14");
+			TexRef existingOverFramePendulum = new()
+			{
+				BundlePath = "pendulum-overframe",
+				RelativeBundlePath = "pendulum-overframe",
+				Name = "20486",
+				Width = 704,
+				Height = 1024,
+				Category = "灵摆卡图",
+				SourceKind = "本地卡图",
+				CardKey = "20486"
+			};
+			GameTextureDisplayMapping legacyPendulumDraft = GameTextureDisplayMapping.ResolveCanvas(
+				existingOverFramePendulum, 512, 1024, "card_frame14");
+			GameTextureDisplayMapping native = GameTextureDisplayMapping.Resolve(unrelatedTallTexture);
+			byte[] sleeveDisplay = CreateTextureMappingPattern(sleeve.DisplayWidth, sleeve.DisplayHeight);
+			byte[] pendulumDisplay = CreateTextureMappingPattern(pendulum.DisplayWidth, pendulum.DisplayHeight);
+			byte[] sleeveStored = sleeve.EncodeForStorage(sleeveDisplay);
+			byte[] pendulumStored = pendulum.EncodeForStorage(pendulumDisplay);
+			byte[] sleeveRoundTrip = sleeve.DecodeForDisplay(sleeveStored);
+			byte[] pendulumRoundTrip = pendulum.DecodeForDisplay(pendulumStored);
+
+			bool sleeveStorage = PngHasSize(sleeveStored, 512, 1024);
+			bool pendulumStorage = PngHasSize(pendulumStored, 512, 1024);
+			bool sleeveGeometry = TextureMappingPatternReady(sleeveRoundTrip,
+				sleeve.DisplayWidth, sleeve.DisplayHeight);
+			bool pendulumGeometry = TextureMappingPatternReady(pendulumRoundTrip,
+				pendulum.DisplayWidth, pendulum.DisplayHeight);
+
+			byte[] tallArt = CreateSplitTallTexture();
+			byte[] transparentFrame;
+			using (Bitmap frame = new(704, 1024, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+			using (Graphics graphics = Graphics.FromImage(frame))
+			using (MemoryStream stream = new())
+			{
+				graphics.Clear(System.Drawing.Color.Transparent);
+				frame.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
+				transparentFrame = stream.ToArray();
+			}
+			using Bitmap composed = FrameComposer.BitmapFrom(
+				CardFrameRenderer.ComposeStoredArtPreview(tallArt, transparentFrame));
+			System.Drawing.Color composedBottom = composed.GetPixel(composed.Width / 2, composed.Height - 80);
+			bool fullCanvasUsed = composedBottom.B > 180 && composedBottom.R < 80;
+
+			using CropCanvas canvas = new(new Bitmap(512, 683), 512, 683)
+			{
+				Size = new System.Drawing.Size(900, 720)
+			};
+			canvas.CreateControl();
+			canvas.SetFrame(new Bitmap(704, 1024, System.Drawing.Imaging.PixelFormat.Format32bppArgb));
+			System.Drawing.RectangleF cardRectangle = (System.Drawing.RectangleF)(typeof(CropCanvas)
+				.GetProperty("CardRectangle", BindingFlags.Instance | BindingFlags.NonPublic)
+					?.GetValue(canvas) ?? System.Drawing.RectangleF.Empty);
+			bool frameAspect = Math.Abs(cardRectangle.Width / cardRectangle.Height - 704f / 1024f) < 0.001f;
+
+			bool cropUiReady = true;
+			string? cropScreenshotRoot = Environment.GetEnvironmentVariable("MDCT_TEXTURE_MAPPING_SCREENSHOT_ROOT");
+			if (!string.IsNullOrWhiteSpace(cropScreenshotRoot))
+			{
+				cropScreenshotRoot = Path.GetFullPath(cropScreenshotRoot);
+				Directory.CreateDirectory(cropScreenshotRoot);
+				string sourceRoot = Path.Combine(Path.GetTempPath(), "MDCardModTool",
+					"TextureMappingUi", Guid.NewGuid().ToString("N"));
+				Directory.CreateDirectory(sourceRoot);
+				try
+				{
+					string sleeveSource = Path.Combine(sourceRoot, "sleeve-display.png");
+					string pendulumSource = Path.Combine(sourceRoot, "pendulum-display.png");
+					File.WriteAllBytes(sleeveSource, sleeveDisplay);
+					File.WriteAllBytes(pendulumSource, pendulumDisplay);
+
+					bool CaptureCrop(ImageCropForm form, string outputName, bool needsFrame,
+						string expectedMappingText)
+					{
+						form.StartPosition = FormStartPosition.Manual;
+						form.Location = new System.Drawing.Point(-32000, -32000);
+						form.ShowInTaskbar = false;
+						form.Show();
+						CropCanvas cropCanvas = (CropCanvas)(typeof(ImageCropForm)
+							.GetField("_canvas", BindingFlags.Instance | BindingFlags.NonPublic)
+							?.GetValue(form) ?? throw new MissingFieldException(nameof(ImageCropForm), "_canvas"));
+						Label mappingLabel = (Label)(typeof(ImageCropForm)
+							.GetField("_mapping", BindingFlags.Instance | BindingFlags.NonPublic)
+							?.GetValue(form) ?? throw new MissingFieldException(nameof(ImageCropForm), "_mapping"));
+						Stopwatch wait = Stopwatch.StartNew();
+						while (needsFrame && !cropCanvas.HasFrame && wait.ElapsedMilliseconds < 15000)
+						{
+							Application.DoEvents();
+							Thread.Sleep(15);
+						}
+						form.PerformLayout();
+						Application.DoEvents();
+						Button[] confirmationButtons = Descendants(form).OfType<Button>()
+							.Where(button => button.Text is "取消" or "按预览效果替换")
+							.ToArray();
+						bool confirmationButtonsVisible = confirmationButtons.Length == 2
+							&& confirmationButtons.All(button => button.Visible
+								&& form.ClientRectangle.Contains(form.RectangleToClient(
+									button.RectangleToScreen(button.ClientRectangle))));
+						using Bitmap screenshot = new(form.ClientSize.Width, form.ClientSize.Height);
+						form.DrawToBitmap(screenshot, form.ClientRectangle);
+						screenshot.Save(Path.Combine(cropScreenshotRoot, outputName),
+							System.Drawing.Imaging.ImageFormat.Png);
+						bool formReady = (!needsFrame || cropCanvas.HasFrame)
+							&& mappingLabel.Visible
+							&& mappingLabel.Text.Contains(expectedMappingText,
+								StringComparison.Ordinal)
+							&& confirmationButtonsVisible
+							&& form.AutoScaleMode == AutoScaleMode.Dpi;
+						Console.WriteLine($"crop={outputName}; client={form.ClientSize}; "
+							+ $"mapping={mappingLabel.Bounds}; buttons={confirmationButtonsVisible}:"
+							+ string.Join(",", confirmationButtons.Select(button =>
+								$"{button.Text}@{form.RectangleToClient(button.RectangleToScreen(button.ClientRectangle))}")));
+						form.Close();
+						return formReady;
+					}
+
+					using (ImageCropForm sleeveForm = new(sleeveSource, sleeve.DisplayWidth,
+						sleeve.DisplayHeight, "卡套正常比例回归", displayMapping: sleeve))
+					{
+						cropUiReady &= CaptureCrop(sleeveForm, "sleeve-crop-normal-ratio.png",
+							needsFrame: false, "正常预览 704×1024");
+					}
+					using (ImageCropForm pendulumForm = new(pendulumSource, pendulum.DisplayWidth,
+						pendulum.DisplayHeight, "灵摆卡图正常比例回归",
+						BuiltInCardFrameCatalog.Load(), "card_frame14", displayMapping: pendulum))
+					{
+						cropUiReady &= CaptureCrop(pendulumForm,
+							"pendulum-crop-normal-ratio.png", needsFrame: true,
+							"正常预览 512×683");
+					}
+				}
+				finally
+				{
+					if (Directory.Exists(sourceRoot)) Directory.Delete(sourceRoot, recursive: true);
+				}
+			}
+
+			bool ready = sleeve.Kind == TextureDisplayMappingKind.CardSleeve
+				&& sleeve.DisplayWidth == 704 && sleeve.DisplayHeight == 1024
+				&& pendulum.Kind == TextureDisplayMappingKind.PendulumCardArt
+				&& pendulum.DisplayWidth == 512 && pendulum.DisplayHeight == 683
+				&& legacyPendulumDraft.Kind == TextureDisplayMappingKind.PendulumCardArt
+				&& legacyPendulumDraft.DisplayWidth == 512
+				&& legacyPendulumDraft.DisplayHeight == 683
+				&& native.Kind == TextureDisplayMappingKind.Native && !native.RequiresMapping
+				&& sleeveStorage && pendulumStorage && sleeveGeometry && pendulumGeometry
+				&& fullCanvasUsed && frameAspect && cropUiReady;
+			Console.WriteLine($"sleeve={sleeve.DisplayWidth}x{sleeve.DisplayHeight}->{sleeve.StorageWidth}x{sleeve.StorageHeight}:{sleeveGeometry}; pendulum={pendulum.DisplayWidth}x{pendulum.DisplayHeight}->{pendulum.StorageWidth}x{pendulum.StorageHeight}:{pendulumGeometry}; legacyOverFrameDraft={legacyPendulumDraft.Kind}:{legacyPendulumDraft.DisplayWidth}x{legacyPendulumDraft.DisplayHeight}; unrelated={native.Kind}; fullCanvas={fullCanvasUsed}:{composedBottom.R},{composedBottom.G},{composedBottom.B}; frameAspect={cardRectangle.Width:0.0}x{cardRectangle.Height:0.0}:{frameAspect}; cropUi={cropUiReady}; ready={ready}");
+			if (!ready) Environment.ExitCode = 2;
+			return;
+		}
+		if (args.Length == 2 && args[0] == "--test-texture-display-mapping-live")
+		{
+			string gameRoot = Path.GetFullPath(args[1]);
+			if (!PortableIndexService.TryLoadBundled(gameRoot, out GameIndex gameIndex, out string mappingBuildId))
+			{
+				throw new FileNotFoundException("程序目录没有随包预绑定索引。", PortableIndexService.BundledPath);
+			}
+			TexRef pendulumSource = gameIndex.Textures.FirstOrDefault(texture =>
+				texture.SourceKind == "本地卡图" && texture.Width == 512 && texture.Height == 1024
+				&& (texture.CardKey == "20486" || texture.Category.Contains("灵摆", StringComparison.OrdinalIgnoreCase)))
+				?? throw new InvalidDataException("预绑定索引中没有可用于只读回归的灵摆卡图。");
+			VisualAssetScanResult visualIndex = VisualAssetIndexService.Scan(gameRoot);
+			TexRef sleeveSource = visualIndex.Textures.FirstOrDefault(texture =>
+				texture.Width == 512 && texture.Height == 1024
+				&& texture.Category.Contains("卡套", StringComparison.OrdinalIgnoreCase))
+				?? throw new InvalidDataException("当前游戏资源中没有可用于只读回归的卡套。");
+
+			string testRoot = Path.Combine(Path.GetTempPath(), "MDCardModTool",
+				"TextureDisplayMappingLiveTests", Guid.NewGuid().ToString("N"));
+			Directory.CreateDirectory(testRoot);
+			try
+			{
+				TextureMappingLiveResult sleeveResult = TestTextureMappingLiveCopy(sleeveSource,
+					GameTextureDisplayMapping.Resolve(sleeveSource), Path.Combine(testRoot, "sleeve"));
+				TextureMappingLiveResult pendulumResult = TestTextureMappingLiveCopy(pendulumSource,
+					GameTextureDisplayMapping.Resolve(pendulumSource, "card_frame14"),
+					Path.Combine(testRoot, "pendulum"));
+				bool ready = sleeveResult.Ready && pendulumResult.Ready;
+				Console.WriteLine($"build={mappingBuildId}; sleeve={sleeveSource.Name}:{sleeveResult}; pendulum={pendulumSource.CardKey}:{pendulumResult}; temporaryCopies=True; gameWrites=False; ready={ready}");
+				if (!ready) Environment.ExitCode = 2;
+			}
+			finally
+			{
+				string fullTestRoot = Path.GetFullPath(testRoot);
+				string safeParent = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "MDCardModTool",
+					"TextureDisplayMappingLiveTests")).TrimEnd(Path.DirectorySeparatorChar)
+					+ Path.DirectorySeparatorChar;
+				if (fullTestRoot.StartsWith(safeParent, StringComparison.OrdinalIgnoreCase)
+					&& Directory.Exists(fullTestRoot))
+				{
+					Directory.Delete(fullTestRoot, recursive: true);
+				}
+			}
+			return;
+		}
 		if (args.Length == 1 && args[0] == "--test-packaged-card-frames")
 		{
 			IReadOnlyList<TexRef> frames = BuiltInCardFrameCatalog.Load();
@@ -392,7 +624,49 @@ internal static class Program
 						&& Math.Abs(reopenedCanvas.RenderSpec.ImageScale - movedSpec.ImageScale) < 0.02f
 						&& Math.Abs(reopenedCanvas.RenderSpec.OffsetX - movedSpec.OffsetX) < 1f
 						&& Math.Abs(reopenedCanvas.RenderSpec.OffsetY - movedSpec.OffsetY) < 1f;
-					reopened.Close();
+						reopened.Close();
+					}
+
+				// A draft saved by older builds can still be the native 512×1024
+				// Pendulum canvas even after its live card has become a 704×1024 OF
+				// texture. Reopening the unified editor must migrate that source using
+				// the card/frame metadata instead of the current live dimensions.
+				const ushort legacyPendulumCardId = 20486;
+				OverFrameArtStore.SaveSource(testRoot, legacyPendulumCardId,
+					CreateTextureMappingPattern(512, 1024));
+				OverFrameArtStore.SaveSettings(testRoot, legacyPendulumCardId,
+					new OverFrameFrameSettings("card_frame14", UserSelected: true));
+				TexRef existingPendulumOverFrame = new()
+				{
+					BundlePath = Path.Combine(testRoot, "not-written-pendulum.bundle"),
+					RelativeBundlePath = "not-written-pendulum.bundle",
+					Name = legacyPendulumCardId.ToString(),
+					Width = 704,
+					Height = 1024,
+					Category = "灵摆卡图",
+					SourceKind = "本地卡图",
+					CardKey = legacyPendulumCardId.ToString()
+				};
+				bool legacyPendulumDraftMigrated;
+				using (OverFrameFrameEditorForm legacyEditor = new(testRoot,
+					existingPendulumOverFrame, packagedFrames)
+				{
+					Opacity = 0.0,
+					ShowInTaskbar = false
+				})
+				{
+					legacyEditor.Show();
+					FieldInfo legacyOutput = typeof(OverFrameFrameEditorForm).GetField("_outputBytes",
+						BindingFlags.Instance | BindingFlags.NonPublic)
+						?? throw new MissingFieldException(nameof(OverFrameFrameEditorForm), "_outputBytes");
+					bool rendered = WaitFor(() => legacyOutput.GetValue(legacyEditor) is byte[]);
+					ImageInfo? migratedSource = SixLabors.ImageSharp.Image.Identify(
+						OverFrameArtStore.SourcePath(testRoot, legacyPendulumCardId));
+					legacyPendulumDraftMigrated = rendered
+						&& migratedSource?.Width == GameTextureDisplayMapping.PendulumDisplayWidth
+						&& migratedSource.Height == GameTextureDisplayMapping.PendulumDisplayHeight
+						&& !File.Exists(existingPendulumOverFrame.BundlePath);
+					legacyEditor.Close();
 				}
 
 				// Pixel-level order assertion: subject must win over frame chrome, while a
@@ -431,12 +705,13 @@ internal static class Program
 				bool transformSaved = Math.Abs(saved.ArtImageScale - movedSpec.ImageScale) < 0.02f
 					&& Math.Abs(saved.ArtOffsetX - movedSpec.OffsetX) < 1f
 					&& Math.Abs(saved.ArtOffsetY - movedSpec.OffsetY) < 1f;
-				bool ready = editorUiReady && reopenRestored && layeredReady && transformSaved
+				bool ready = editorUiReady && reopenRestored && legacyPendulumDraftMigrated
+					&& layeredReady && transformSaved
 					&& storedBackground?.Width == FrameComposer.Width
 					&& storedBackground.Height == FrameComposer.Height
 					&& storedSource?.Width == 512 && storedSource.Height == 512
 					&& !File.Exists(fakeCard.BundlePath);
-				Console.WriteLine($"singleEditor=True; reopenRestored={reopenRestored}; alphaPreview={alphaPreviewReady}; source={storedSource?.Width}x{storedSource?.Height}; editorModes={string.Join(',', editorCounts)}; dragScale={saved.ArtImageScale:0.000}; dragOffset={saved.ArtOffsetX:0.0},{saved.ArtOffsetY:0.0}; subjectOverFrame={subjectOverFrame.R},{subjectOverFrame.G},{subjectOverFrame.B},{subjectOverFrame.A}; backgroundThrough={backgroundThrough.R},{backgroundThrough.G},{backgroundThrough.B},{backgroundThrough.A}; gameWrites=False; ready={ready}");
+				Console.WriteLine($"singleEditor=True; reopenRestored={reopenRestored}; legacyPendulumDraftMigrated={legacyPendulumDraftMigrated}; alphaPreview={alphaPreviewReady}; source={storedSource?.Width}x{storedSource?.Height}; editorModes={string.Join(',', editorCounts)}; dragScale={saved.ArtImageScale:0.000}; dragOffset={saved.ArtOffsetX:0.0},{saved.ArtOffsetY:0.0}; subjectOverFrame={subjectOverFrame.R},{subjectOverFrame.G},{subjectOverFrame.B},{subjectOverFrame.A}; backgroundThrough={backgroundThrough.R},{backgroundThrough.G},{backgroundThrough.B},{backgroundThrough.A}; gameWrites=False; ready={ready}");
 				if (!ready) Environment.ExitCode = 2;
 			}
 			finally
@@ -2615,8 +2890,13 @@ internal static class Program
 		if (args.Length == 4 && args[0] == "--export-card")
 		{
 			TexRef texture2 = (JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(IndexService.CachePath(IndexService.FindLocalRoot(args[1]) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。"), IndexService.StreamingRoot(args[1])))) ?? new GameIndex()).Textures.FirstOrDefault((TexRef texRef) => texRef.SourceKind == "本地卡图" && texRef.CardKey == args[2]) ?? throw new FileNotFoundException("索引中没有卡号 " + args[2] + "。");
-			File.WriteAllBytes(args[3], new ModEngine().DecodePng(texture2));
-			Console.WriteLine(args[3]);
+			byte[] stored = new ModEngine().DecodePng(texture2);
+			CardCatalogEntry? card = CardCatalogService.LoadBestAvailable().Find(texture2.CardKey);
+			string frameKey = CardFrameCatalog.RecommendedKey(card, texture2.Width, texture2.Height);
+			GameTextureDisplayMapping mapping = GameTextureDisplayMapping.Resolve(texture2, frameKey);
+			byte[] exported = mapping.RequiresMapping ? mapping.DecodeForDisplay(stored) : stored;
+			File.WriteAllBytes(args[3], exported);
+			Console.WriteLine($"{args[3]}; {mapping.EditorSummary}");
 			return;
 		}
 		if (args.Length == 3 && args[0] == "--inspect-bundle")
@@ -2869,6 +3149,112 @@ internal static class Program
 		Application.Run(new MainForm());
 	}
 
+	private static byte[] CreateTextureMappingPattern(int width, int height)
+	{
+		using SixLabors.ImageSharp.Image<Rgba32> image = new(width, height, new Rgba32(14, 23, 38, 255));
+		int border = Math.Max(3, Math.Min(width, height) / 64);
+		Rgba32 gold = new(246, 196, 64, 255);
+		Rgba32 red = new(226, 47, 84, 255);
+		for (int y = 0; y < height; y++)
+		{
+			for (int x = 0; x < width; x++)
+			{
+				if (x < border || x >= width - border || y < border || y >= height - border)
+				{
+					image[x, y] = gold;
+				}
+			}
+		}
+		int marker = Math.Max(16, Math.Min(width, height) / 10);
+		int markerLeft = width / 2 - marker / 2;
+		int markerTop = height / 2 - marker / 2;
+		for (int y = markerTop; y < markerTop + marker; y++)
+		{
+			for (int x = markerLeft; x < markerLeft + marker; x++) image[x, y] = red;
+		}
+		using MemoryStream output = new();
+		image.Save(output, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+		return output.ToArray();
+	}
+
+	private static bool TextureMappingPatternReady(byte[] png, int width, int height)
+	{
+		using SixLabors.ImageSharp.Image<Rgba32> image = SixLabors.ImageSharp.Image.Load<Rgba32>(png);
+		if (image.Width != width || image.Height != height) return false;
+		Rgba32 center = image[width / 2, height / 2];
+		Rgba32 topLeft = image[1, 1];
+		Rgba32 bottomRight = image[width - 2, height - 2];
+		return center.R > 180 && center.G < 100
+			&& topLeft.R > 180 && topLeft.G > 120
+			&& bottomRight.R > 180 && bottomRight.G > 120;
+	}
+
+	private static bool PngHasSize(byte[] png, int width, int height)
+	{
+		SixLabors.ImageSharp.ImageInfo info = SixLabors.ImageSharp.Image.Identify(png);
+		return info.Width == width && info.Height == height;
+	}
+
+	private static byte[] CreateSplitTallTexture()
+	{
+		using SixLabors.ImageSharp.Image<Rgba32> image = new(512, 1024, new Rgba32(230, 32, 48, 255));
+		for (int y = 512; y < 1024; y++)
+		{
+			for (int x = 0; x < 512; x++) image[x, y] = new Rgba32(24, 72, 232, 255);
+		}
+		using MemoryStream output = new();
+		image.Save(output, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+		return output.ToArray();
+	}
+
+	private sealed record TextureMappingLiveResult(bool Ready, int StoredWidth, int StoredHeight,
+		int DisplayWidth, int DisplayHeight, bool GeometryReady, bool OriginalUnchanged)
+	{
+		public override string ToString() =>
+			$"{DisplayWidth}x{DisplayHeight}->{StoredWidth}x{StoredHeight}:geometry={GeometryReady}:original={OriginalUnchanged}";
+	}
+
+	private static TextureMappingLiveResult TestTextureMappingLiveCopy(TexRef source,
+		GameTextureDisplayMapping mapping, string outputDirectory)
+	{
+		Directory.CreateDirectory(outputDirectory);
+		byte[] originalHash = SHA256.HashData(File.ReadAllBytes(source.BundlePath));
+		string copy = Path.Combine(outputDirectory, Path.GetFileName(source.BundlePath) + ".mapping-test.bundle");
+		File.Copy(source.BundlePath, copy, overwrite: true);
+		TexRef target = new()
+		{
+			BundlePath = copy,
+			RelativeBundlePath = Path.GetFileName(copy),
+			PathId = source.PathId,
+			AssetFileName = source.AssetFileName,
+			Name = source.Name,
+			Width = source.Width,
+			Height = source.Height,
+			Category = source.Category,
+			SourceKind = source.SourceKind,
+			CardKey = source.CardKey
+		};
+
+		byte[] displayPattern = CreateTextureMappingPattern(mapping.DisplayWidth, mapping.DisplayHeight);
+		byte[] storedPattern = mapping.EncodeForStorage(displayPattern);
+		ModEngine engine = new();
+		engine.Replace(target, storedPattern, Path.Combine(outputDirectory, "backup"));
+		byte[] decodedStorage = engine.DecodePng(target);
+		ImageInfo storedInfo = SixLabors.ImageSharp.Image.Identify(decodedStorage)
+			?? throw new InvalidDataException("临时 Bundle 写回后的 Texture2D 无法识别。");
+		byte[] decodedDisplay = mapping.DecodeForDisplay(decodedStorage);
+		ImageInfo displayInfo = SixLabors.ImageSharp.Image.Identify(decodedDisplay)
+			?? throw new InvalidDataException("临时 Bundle 的正常比例预览无法识别。");
+		bool geometryReady = TextureMappingPatternReady(decodedDisplay,
+			mapping.DisplayWidth, mapping.DisplayHeight);
+		bool originalUnchanged = originalHash.SequenceEqual(SHA256.HashData(File.ReadAllBytes(source.BundlePath)));
+		bool ready = storedInfo.Width == mapping.StorageWidth && storedInfo.Height == mapping.StorageHeight
+			&& displayInfo.Width == mapping.DisplayWidth && displayInfo.Height == mapping.DisplayHeight
+			&& geometryReady && originalUnchanged;
+		return new TextureMappingLiveResult(ready, storedInfo.Width, storedInfo.Height,
+			displayInfo.Width, displayInfo.Height, geometryReady, originalUnchanged);
+	}
+
 	private static void TestVisualTextureWrite(TexRef source, string outputDirectory)
 	{
 		Directory.CreateDirectory(outputDirectory);
@@ -2974,12 +3360,33 @@ internal static class Program
 
 	private static Bitmap CaptureClientFromScreen(Form form)
 	{
+		if (form.IsDisposed || !form.IsHandleCreated)
+		{
+			throw new InvalidOperationException("交互截图窗口已经关闭或尚未建立句柄。");
+		}
+		// Desktop automation or focus-stealing by the calling terminal can minimize
+		// a taskbar-hidden test window. Restore the same form before taking the two
+		// repaint samples; otherwise the test would fail in Bitmap construction and
+		// never inspect the UI pixels it is intended to validate.
+		if (form.WindowState == FormWindowState.Minimized)
+		{
+			form.WindowState = FormWindowState.Normal;
+			form.Show();
+			PumpMessagesFor(250);
+		}
 		form.Activate();
 		Application.DoEvents();
-		Bitmap bitmap = new(form.ClientSize.Width, form.ClientSize.Height,
+		Size clientSize = form.ClientSize;
+		if (clientSize.Width <= 0 || clientSize.Height <= 0)
+		{
+			throw new InvalidOperationException($"交互截图客户区无效：client={clientSize}; "
+				+ $"bounds={form.Bounds}; restore={form.RestoreBounds}; state={form.WindowState}; "
+				+ $"visible={form.Visible}; disposed={form.IsDisposed}; handle={form.IsHandleCreated}。");
+		}
+		Bitmap bitmap = new(clientSize.Width, clientSize.Height,
 			System.Drawing.Imaging.PixelFormat.Format32bppArgb);
 		using Graphics graphics = Graphics.FromImage(bitmap);
-		graphics.CopyFromScreen(form.PointToScreen(Point.Empty), Point.Empty, form.ClientSize,
+		graphics.CopyFromScreen(form.PointToScreen(Point.Empty), Point.Empty, clientSize,
 			CopyPixelOperation.SourceCopy);
 		return bitmap;
 	}

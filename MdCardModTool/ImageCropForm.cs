@@ -45,6 +45,8 @@ public sealed class ImageCropForm : Form
 
 	private readonly int _targetHeight;
 
+	private readonly GameTextureDisplayMapping _displayMapping;
+
 	private readonly CropCanvas _canvas;
 
 	private readonly ModEngine _engine = new ModEngine();
@@ -118,7 +120,7 @@ public sealed class ImageCropForm : Form
 
 	public string SelectedFrameKey { get; private set; } = "";
 
-	public ImageCropForm(string sourcePath, int targetWidth, int targetHeight, string purpose = "替换图片", IEnumerable<TexRef>? cardFrames = null, string? preferredFrameKey = null, bool fullCardOverlay = false, byte[]? initialBackgroundPng = null)
+	public ImageCropForm(string sourcePath, int targetWidth, int targetHeight, string purpose = "替换图片", IEnumerable<TexRef>? cardFrames = null, string? preferredFrameKey = null, bool fullCardOverlay = false, byte[]? initialBackgroundPng = null, GameTextureDisplayMapping? displayMapping = null)
 	{
 		ImageCropForm imageCropForm = this;
 		if (targetWidth <= 0 || targetHeight <= 0)
@@ -128,6 +130,12 @@ public sealed class ImageCropForm : Form
 		_sourcePath = sourcePath;
 		_targetWidth = targetWidth;
 		_targetHeight = targetHeight;
+		_displayMapping = displayMapping ?? new GameTextureDisplayMapping(
+			TextureDisplayMappingKind.Native, targetWidth, targetHeight, targetWidth, targetHeight);
+		if (_displayMapping.DisplayWidth != targetWidth || _displayMapping.DisplayHeight != targetHeight)
+		{
+			throw new ArgumentException("裁剪器目标尺寸必须与正常预览映射尺寸一致。", nameof(displayMapping));
+		}
 		_fullCardOverlay = fullCardOverlay;
 		_initialBackgroundPng = initialBackgroundPng?.ToArray();
 		Bitmap preview = ImageCropService.LoadPreview(sourcePath);
@@ -167,7 +175,10 @@ public sealed class ImageCropForm : Form
 		BackColor = UiTheme.Window;
 		ForeColor = UiTheme.Text;
 		Font = new Font("Microsoft YaHei UI", 9f);
+		AutoScaleMode = AutoScaleMode.Dpi;
 		base.KeyPreview = true;
+		DpiChanged += delegate { UiTheme.QueueStableRepaint(this); };
+		ResizeEnd += delegate { UiTheme.QueueStableRepaint(this); };
 		Label title = new Label
 		{
 			Text = (fullCardOverlay ? "超框实装构图" : (hasFrames ? "卡片实装构图" : "固定比例裁剪")),
@@ -176,9 +187,10 @@ public sealed class ImageCropForm : Form
 			ForeColor = UiTheme.Text,
 			Font = new Font("Microsoft YaHei UI", 15f, FontStyle.Bold)
 		};
+		string sizeSummary = _displayMapping.EditorSummary;
 		Label subtitle = new Label
 		{
-			Text = (hasFrames ? $"{purpose} · 先按卡框实际效果构图，确认后自动转换为 {_targetWidth}×{_targetHeight} 存储纹理" : $"{purpose} · 输出 {_targetWidth}×{_targetHeight}"),
+			Text = (hasFrames ? $"{purpose} · 按卡框实际效果构图 · {sizeSummary}" : $"{purpose} · {sizeSummary}"),
 			Dock = DockStyle.Fill,
 			ForeColor = UiTheme.Gold,
 			Font = new Font("Microsoft YaHei UI", 9f)
@@ -193,7 +205,7 @@ public sealed class ImageCropForm : Form
 		header.Controls.Add(title);
 		Label help = new Label
 		{
-			Text = (fullCardOverlay ? "图层顺序：叠底背景 → 卡框 → 卡图主体。\n\n• 四类卡框可独立切换\n• 更换卡图不会移除叠底背景\n• 左键拖动卡图，滚轮／滑杆缩放\n• 方向键微调，Shift + 方向键快速移动\n• 双击画面恢复铺满\n\n确认后进入超框编辑器完成应用。" : (hasFrames ? "操作\n\n• 卡框下拉只控制实装预览与构图比例\n• 左键拖动图片，滚轮／滑杆缩放\n• 可缩到画框以内，透明处按游戏白色底板显示\n• 方向键微调，Shift + 方向键快速移动\n• 双击画面恢复铺满\n\n灵摆卡会按正常宽画面预览，保存时再自动压回 512×1024。" : "操作\n\n• 左键拖动图片\n• 滚轮／滑杆可自由放大和缩小\n• 方向键微调位置\n• 双击恢复铺满\n\n确认后自动转换为目标尺寸，透明 PNG 的 Alpha 会保留。")),
+			Text = (fullCardOverlay ? "图层顺序：叠底背景 → 卡框 → 卡图主体。\n\n• 四类卡框可独立切换\n• 更换卡图不会移除叠底背景\n• 左键拖动卡图，滚轮／滑杆缩放\n• 方向键微调，Shift + 方向键快速移动\n• 双击画面恢复铺满\n\n确认后进入超框编辑器完成应用。" : (hasFrames ? "操作\n\n• 卡框下拉只控制实装预览与构图比例\n• 左键拖动图片，滚轮／滑杆缩放\n• 可缩到画框以内，透明处按游戏白色底板显示\n• 方向键微调，Shift + 方向键快速移动\n• 双击画面恢复铺满\n\n灵摆卡使用正常比例构图；确认后才自动压缩到游戏的高画布。" : (_displayMapping.RequiresMapping ? "操作\n\n• 当前画布使用游戏中的正常显示比例\n• 左键拖动图片，滚轮／滑杆缩放\n• 方向键微调位置\n• 双击恢复铺满\n\n确认后自动转换为 Texture2D 存储比例；游戏映射后会恢复为当前预览效果。" : "操作\n\n• 左键拖动图片\n• 滚轮／滑杆可自由放大和缩小\n• 方向键微调位置\n• 双击恢复铺满\n\n确认后自动转换为目标尺寸，透明 PNG 的 Alpha 会保留。"))),
 			Dock = DockStyle.Top,
 			Height = (fullCardOverlay ? 190 : (hasFrames ? 260 : 210)),
 			ForeColor = UiTheme.Text,
@@ -220,7 +232,10 @@ public sealed class ImageCropForm : Form
 			Visible = hasFrames
 		};
 		_frames.Visible = hasFrames;
-		_mapping.Visible = hasFrames;
+		_mapping.Visible = hasFrames || _displayMapping.RequiresMapping;
+		_mapping.Text = _displayMapping.RequiresMapping
+			? $"{_displayMapping.KindLabel}\n{_displayMapping.EditorSummary}"
+			: _displayMapping.EditorSummary;
 		Label zoomTitle = new Label
 		{
 			Text = "缩放（1%–2000%）",
@@ -539,7 +554,11 @@ public sealed class ImageCropForm : Form
 			_canvas.SetFrame(frame);
 			SelectedFrameKey = choice.Texture.Name;
 			SizeF window = _canvas.VisualArtSize;
-			_mapping.Text = (_fullCardOverlay ? $"超框画布 {window.Width:0}×{window.Height:0}\n保存映射 → {_targetWidth}×{_targetHeight}" : ((_targetWidth == 512 && _targetHeight == 1024) ? $"实际插图区 {window.Width:0}×{window.Height:0}\n显示区 → 512×{596} · 完整纹理 512×1024" : $"实际插图区 {window.Width:0}×{window.Height:0}\n保存映射 → {_targetWidth}×{_targetHeight}"));
+			_mapping.Text = _fullCardOverlay
+				? $"超框画布 {window.Width:0}×{window.Height:0}\n保存映射 → {_targetWidth}×{_targetHeight}"
+				: _displayMapping.RequiresMapping
+					? $"实际插图区 {window.Width:0}×{window.Height:0}\n{_displayMapping.EditorSummary}"
+					: $"实际插图区 {window.Width:0}×{window.Height:0}\n保存映射 → {_targetWidth}×{_targetHeight}";
 		}
 		catch (Exception ex)
 		{
@@ -557,8 +576,7 @@ public sealed class ImageCropForm : Form
 		try
 		{
 			base.UseWaitCursor = true;
-			int visibleTargetHeight = ((!_fullCardOverlay && _targetWidth == 512 && _targetHeight == 1024) ? 596 : _targetHeight);
-			OutputPng = ImageCropService.RenderToTarget(_sourcePath, _canvas.RenderSpec, _targetWidth, _targetHeight, visibleTargetHeight);
+			OutputPng = ImageCropService.RenderToTarget(_sourcePath, _canvas.RenderSpec, _targetWidth, _targetHeight);
 			BackgroundPng = _backgroundPath != null
 				? ImageCropService.RenderCoverToTarget(_backgroundPath, _targetWidth, _targetHeight)
 				: _initialBackgroundPng?.ToArray();

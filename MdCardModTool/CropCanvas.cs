@@ -63,7 +63,13 @@ public sealed class CropCanvas : Control
 		{
 			float availableWidth = Math.Max(1f, (float)base.ClientSize.Width - 60f);
 			float availableHeight = Math.Max(1f, (float)base.ClientSize.Height - 60f);
-			float aspect = (float)_targetWidth / _targetHeight;
+			// A card frame is always authored in full-card coordinates (normally
+			// 704×1024). The editable Texture2D may instead be a 512×683 logical
+			// Pendulum image. Using the texture aspect here visibly squeezed the
+			// frame and made the editor preview impossible to match in game.
+			float visualWidth = _frame?.Width ?? _targetWidth;
+			float visualHeight = _frame?.Height ?? _targetHeight;
+			float aspect = visualWidth / visualHeight;
 			float height;
 			float width;
 			if (availableWidth / availableHeight > aspect)
@@ -87,8 +93,11 @@ public sealed class CropCanvas : Control
 			if (_frame != null && (_overFrameEditing || !_fullCardOverlay))
 			{
 				RectangleF card = CardRectangle;
-				float scale = card.Width / _targetWidth;
-				return new RectangleF(card.Left + _artWindow.Left * scale, card.Top + _artWindow.Top * scale, _artWindow.Width * scale, _artWindow.Height * scale);
+				float scaleX = card.Width / _frame.Width;
+				float scaleY = card.Height / _frame.Height;
+				return new RectangleF(card.Left + _artWindow.Left * scaleX,
+					card.Top + _artWindow.Top * scaleY,
+					_artWindow.Width * scaleX, _artWindow.Height * scaleY);
 			}
 			float availableWidth = Math.Max(1f, (float)base.ClientSize.Width - 92f);
 			float availableHeight = Math.Max(1f, (float)base.ClientSize.Height - 92f);
