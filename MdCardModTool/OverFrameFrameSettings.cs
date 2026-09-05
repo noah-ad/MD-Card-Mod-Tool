@@ -7,4 +7,7 @@ public sealed record OverFrameFrameSettings(
 	string CompositionMode = "AstellarTransparent",
 	float ArtImageScale = 0f,
 	float ArtOffsetX = 0f,
-	float ArtOffsetY = 0f);
+	float ArtOffsetY = 0f,
+	float BackgroundImageScale = 0f,
+	float BackgroundOffsetX = 0f,
+	float BackgroundOffsetY = 0f);

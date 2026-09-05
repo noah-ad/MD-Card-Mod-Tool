@@ -380,11 +380,21 @@ public static class Spine42PreviewRenderer
 		}
 		if (clipping) canvas.Restore();
 		clipPath?.Dispose();
-		using SKImage image = SKImage.FromBitmap(rendered);
-		using SKData png = image.Encode(SKEncodedImageFormat.Png, 100);
-		using MemoryStream stream = new(png.ToArray(), writable: false);
-		using Bitmap temp = new(stream);
-		return new Bitmap(temp);
+		// Both surfaces are BGRA premultiplied. Copy pixels, not PNG encode/decode
+		// on every animation frame. The returned bitmap owns its storage.
+		Bitmap result = new(width, height, PixelFormat.Format32bppPArgb);
+		BitmapData pixels = result.LockBits(new System.Drawing.Rectangle(0, 0, width, height), ImageLockMode.WriteOnly, PixelFormat.Format32bppPArgb);
+		try
+		{
+			unsafe
+			{
+				for (int row = 0; row < height; row++)
+					Buffer.MemoryCopy((byte*)rendered.GetPixels() + row * rendered.RowBytes,
+						(byte*)pixels.Scan0 + row * pixels.Stride, Math.Abs(pixels.Stride), width * 4L);
+			}
+		}
+		finally { result.UnlockBits(pixels); }
+		return result;
 	}
 
 	private static void DrawAttachment(SKCanvas canvas, SkeletonData data, string slotName, string attachmentName,
@@ -464,7 +474,7 @@ public static class Spine42PreviewRenderer
 			}
 		}
 		SKPoint[] texture = new SKPoint[vertexCount];
-		for (int i = 0; i < vertexCount; i++) texture[i] = UvToTexture(region, uvs[i * 2], uvs[i * 2 + 1]);
+		for (int i = 0; i < vertexCount; i++) texture[i] = MeshUvToTexture(region, uvs[i * 2], uvs[i * 2 + 1]);
 		return (world, texture, triangles);
 	}
 
@@ -529,8 +539,8 @@ public static class Spine42PreviewRenderer
 		SKPoint[] world = new SKPoint[4];
 		double regionScaleX = width / Math.Max(1, region.OriginalWidth) * sx;
 		double regionScaleY = height / Math.Max(1, region.OriginalHeight) * sy;
-		double packedWidth = region.Rotate is 90 or 270 ? region.Height : region.Width;
-		double packedHeight = region.Rotate is 90 or 270 ? region.Width : region.Height;
+		double packedWidth = region.Width;
+		double packedHeight = region.Height;
 		double left = -width * sx / 2 + region.OffsetX * regionScaleX;
 		double bottom = -height * sy / 2 + region.OffsetY * regionScaleY;
 		double right = left + packedWidth * regionScaleX;
@@ -549,12 +559,43 @@ public static class Spine42PreviewRenderer
 	{
 		SKPoint logical = region.Rotate switch
 		{
-			90 => new SKPoint(region.X + v * region.Width, region.Y + u * region.Height),
-			180 => new SKPoint(region.X + (1 - u) * region.Width, region.Y + v * region.Height),
-			270 => new SKPoint(region.X + (1 - v) * region.Width, region.Y + (1 - u) * region.Height),
+			90 => new SKPoint(region.X + v * region.Height, region.Y + (1 - u) * region.Width),
+			180 => new SKPoint(region.X + (1 - u) * region.Width, region.Y + (1 - v) * region.Height),
+			270 => new SKPoint(region.X + (1 - v) * region.Height, region.Y + u * region.Width),
 			_ => new SKPoint(region.X + u * region.Width, region.Y + v * region.Height)
 		};
 		return new SKPoint((float)(logical.X * region.TextureScaleX), (float)(logical.Y * region.TextureScaleY));
+	}
+
+	private static SKPoint MeshUvToTexture(Region region, float u, float v)
+	{
+		// Mesh UVs describe the original, untrimmed attachment, while region UVs
+		// describe the trimmed rectangle. Offsets use a bottom-left origin.
+		float trimmedU = (u * region.OriginalWidth - region.OffsetX) / Math.Max(1, region.Width);
+		float trimmedV = (v * region.OriginalHeight - (region.OriginalHeight - region.OffsetY - region.Height)) / Math.Max(1, region.Height);
+		return UvToTexture(region, trimmedU, trimmedV);
+	}
+
+	internal static void TestAtlasGeometry()
+	{
+		foreach (int rotation in new[] { 0, 90, 180, 270 })
+		{
+			Region region = new(10, 20, 80, 40, rotation, 100, 60, 5, 7);
+			SKPoint topLeft = UvToTexture(region, 0, 0), bottomRight = UvToTexture(region, 1, 1);
+			SKPoint expectedTop = rotation switch { 90 => new(10,100), 180 => new(90,60), 270 => new(50,20), _ => new(10,20) };
+			SKPoint expectedBottom = rotation switch { 90 => new(50,20), 180 => new(10,20), 270 => new(10,100), _ => new(90,60) };
+			if (topLeft != expectedTop || bottomRight != expectedBottom) throw new InvalidDataException("Atlas rotation " + rotation);
+			SKPoint trimmedTop = MeshUvToTexture(region, 5f/100, 13f/60);
+			if (Math.Abs(trimmedTop.X-topLeft.X) > .001 || Math.Abs(trimmedTop.Y-topLeft.Y) > .001) throw new InvalidDataException("Mesh whitespace offset");
+			using JsonDocument json = JsonDocument.Parse("{\"width\":100,\"height\":60}");
+			Bone bone = new() { Name="root", A=1, D=1 };
+			var (world, _, _) = BuildRegion(bone, new Attachment("region", "test", "test", json.RootElement), region);
+			if (Math.Abs(world[1].X-world[0].X-80)>.001 || Math.Abs(world[2].Y-world[1].Y-40)>.001) throw new InvalidDataException("Rotated region dimensions");
+		}
+		Bone parent = new() { Name="parent", X=10,Y=20,Rotation=90,ScaleX=2,ScaleY=2 };
+		Bone child = new() { Name="child",Parent=parent,X=30 };
+		UpdateWorldTransforms([parent,child]);
+		if (Math.Abs(child.WorldX-10)>.001 || Math.Abs(child.WorldY-80)>.001) throw new InvalidDataException("Bone joint transform");
 	}
 
 	private static void ResetBones(SkeletonData data)
@@ -1098,14 +1139,20 @@ public static class Spine42PreviewRenderer
 	{
 		left = default; right = default; hasRight = false;
 		if (timeline.ValueKind != JsonValueKind.Array) return false;
-		JsonElement[] frames = timeline.EnumerateArray().ToArray();
-		if (frames.Length == 0 || time < Number(frames[0], "time", 0)) return false;
-		int index = 0;
-		while (index + 1 < frames.Length && Number(frames[index + 1], "time", 0) <= time) index++;
-		left = frames[index];
-		if (index + 1 < frames.Length)
+		int count = timeline.GetArrayLength();
+		if (count == 0 || time < Number(timeline[0], "time", 0)) return false;
+		int low = 0, high = count - 1;
+		while (low < high)
 		{
-			right = frames[index + 1];
+			int middle = (low + high + 1) / 2;
+			if (Number(timeline[middle], "time", 0) <= time) low = middle;
+			else high = middle - 1;
+		}
+		int index = low;
+		left = timeline[index];
+		if (index + 1 < count)
+		{
+			right = timeline[index + 1];
 			hasRight = true;
 		}
 		return true;

@@ -46,14 +46,20 @@ public sealed class NavigationButton : RoundedButton
 		{
 			using SolidBrush accent = new(UiTheme.Primary);
 			e.Graphics.FillRoundedRectangle(accent, new RectangleF(5 * scale, 11 * scale, 3 * scale, Math.Max(3 * scale, Height - 22 * scale)), 1.5f * scale);
+			using Pen detail = new(UiTheme.Gold, scale);
+			e.Graphics.DrawLines(detail, [new PointF(Width-22*scale, Height-8*scale),
+				new PointF(Width-10*scale, Height-8*scale), new PointF(Width-6*scale, Height-12*scale)]);
 		}
-		using Pen icon = new(Selected ? UiTheme.Primary : UiTheme.Muted, 1.7f * scale)
+		using Pen icon = new(Selected ? UiTheme.Gold : UiTheme.Muted, 1.7f)
 		{
 			StartCap = LineCap.Round,
 			EndCap = LineCap.Round,
 			LineJoin = LineJoin.Round
 		};
-		DrawGlyph(e.Graphics, icon, new Rectangle(UiTheme.Scale(this, 17), UiTheme.Scale(this, 12), UiTheme.Scale(this, 20), UiTheme.Scale(this, 20)));
+		GraphicsState state = e.Graphics.Save();
+		e.Graphics.ScaleTransform(scale, scale);
+		DrawGlyph(e.Graphics, icon, new Rectangle(17, 12, 20, 20));
+		e.Graphics.Restore(state);
 	}
 
 	private void ApplyPalette()

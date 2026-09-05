@@ -10,6 +10,8 @@ public sealed class AnimationPreviewCanvas : Control
 	private bool _panning;
 
 	private Point _lastPointer;
+	private readonly Bitmap _checkerTile;
+	private readonly TextureBrush _checkerBrush;
 
 	public Bitmap? Frame { get; set; }
 
@@ -23,6 +25,12 @@ public sealed class AnimationPreviewCanvas : Control
 
 	public event EventHandler? ViewChanged;
 
+	protected override void Dispose(bool disposing)
+	{
+		if (disposing) { _checkerBrush.Dispose(); _checkerTile.Dispose(); }
+		base.Dispose(disposing);
+	}
+
 	public string StatusText { get; set; } = Localizer.T("animation.preview.drop");
 
 	public AnimationPreviewCanvas()
@@ -31,6 +39,15 @@ public sealed class AnimationPreviewCanvas : Control
 		BackColor = UiTheme.SurfaceAlt;
 		base.ResizeRedraw = true;
 		TabStop = true;
+		_checkerTile = new Bitmap(36, 36);
+		using (Graphics tile = Graphics.FromImage(_checkerTile))
+		{
+			tile.Clear(Color.FromArgb(24, 32, 46));
+			using SolidBrush light = new(Color.FromArgb(36, 48, 66));
+			tile.FillRectangle(light, 18, 0, 18, 18);
+			tile.FillRectangle(light, 0, 18, 18, 18);
+		}
+		_checkerBrush = new TextureBrush(_checkerTile, WrapMode.Tile);
 	}
 
 	protected override void OnMouseDown(MouseEventArgs e)
@@ -88,15 +105,7 @@ public sealed class AnimationPreviewCanvas : Control
 	{
 		base.OnPaint(e);
 		Graphics g = e.Graphics;
-		using SolidBrush dark = new SolidBrush(Color.FromArgb(24, 32, 46));
-		using SolidBrush light = new SolidBrush(Color.FromArgb(36, 48, 66));
-		for (int y = 0; y < base.Height; y += 18)
-		{
-			for (int x = 0; x < base.Width; x += 18)
-			{
-				g.FillRectangle((((x / 18 + y / 18) & 1) == 0) ? dark : light, x, y, 18, 18);
-			}
-		}
+		g.FillRectangle(_checkerBrush, ClientRectangle);
 		if (Frame == null)
 		{
 			TextRenderer.DrawText(g, StatusText, Font, base.ClientRectangle, UiTheme.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);

@@ -27,6 +27,21 @@ internal static class Program
 	private static void Main(string[] args)
 	{
 		ApplicationConfiguration.Initialize();
+		if (args.Length > 0 && args[0].StartsWith("--test-", StringComparison.Ordinal))
+		{
+			// CLI UI tests use DoEvents instead of Application.Run. Keep async form
+			// continuations on the STA message-pump thread, as in the real application.
+			// DoEvents tears down auto-installed contexts at the end of each pump.
+			// Own this one explicitly for the full CLI test, including actions between pumps.
+			WindowsFormsSynchronizationContext.AutoInstall = false;
+			SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+			Control.CheckForIllegalCrossThreadCalls = true;
+		}
+		if (args.Length == 3 && args[0] == "--test-new-animation-links") { AnimationLinkTests.Run(args[1], args[2]); return; }
+		if (args.Length == 3 && args[0] == "--test-mod-packages") { ModPackageTests.Run(args[1], args[2]); return; }
+		if (args.Length == 2 && args[0] == "--test-studio-optimizations") { StudioOptimizationTests.Run(args[1]); return; }
+		if (args.Length == 3 && args[0] == "--test-animation-transfer") { StudioOptimizationTests.Transfer(args[1],args[2]); return; }
+		if (args.Length == 3 && args[0] == "--test-animation-donor-picker") { StudioOptimizationTests.Picker(args[1],args[2]); return; }
 		if (args.Length == 3 && args[0] == "--build-card-catalog")
 		{
 			int count = CardCatalogService.GenerateFromAstellarCsv(args[1], args[2]);
@@ -535,6 +550,7 @@ internal static class Program
 						bool generated = WaitFor(() => outputField.GetValue(editor) is byte[]
 							&& status.Text.StartsWith(expectedModes[index], StringComparison.Ordinal));
 						editorCounts[index] = frameChoices.Items.Count;
+						Console.WriteLine($"mode={index}; generated={generated}; status={status.Text}");
 						byte[]? output = outputField.GetValue(editor) as byte[];
 						ImageInfo? info = output == null ? null : SixLabors.ImageSharp.Image.Identify(output);
 						ImageRenderSpec kept = canvas.RenderSpec;
@@ -544,6 +560,10 @@ internal static class Program
 							&& Math.Abs(kept.OffsetX - movedSpec.OffsetX) < 1f
 							&& Math.Abs(kept.OffsetY - movedSpec.OffsetY) < 1f;
 					}
+					// Supersede an in-flight render several times without pumping in between.
+					mode.SelectedIndex = 1;
+					mode.SelectedIndex = 2;
+					mode.SelectedIndex = 3;
 					mode.SelectedIndex = 0;
 					modesReady &= WaitFor(() => outputField.GetValue(editor) is byte[]
 						&& status.Text.StartsWith(expectedModes[0], StringComparison.Ordinal));
@@ -565,6 +585,7 @@ internal static class Program
 							if (outputPixel != previewPixel) mismatches++;
 						}
 						alphaPreviewReady = transparentPixels > 10000 && mismatches == 0;
+						Console.WriteLine($"alphaPixels={transparentPixels}; mismatches={mismatches}; status={status.Text}");
 					}
 					string[] editorButtons = Descendants(editor).OfType<Button>()
 						.Select(button => button.Text).ToArray();
@@ -1247,7 +1268,9 @@ internal static class Program
 							ExerciseRoundedButtonTransitions(form);
 							form.Size = new Size(1440, 860);
 							PumpMessagesFor(180);
-							form.Size = new Size(1504, 912);
+							// Final capture stays above shell thumbnail overlays; larger layouts
+							// were already exercised before this final resize.
+							form.Size = new Size(1504, 800);
 							PumpMessagesFor(260);
 							cardsNavigation.PerformClick();
 							PumpMessagesFor(180);
@@ -1334,7 +1357,7 @@ internal static class Program
 						ExerciseRoundedButtonTransitions(editor);
 						editor.Size = new Size(1040, 820);
 						PumpMessagesFor(180);
-						editor.Size = new Size(1120, 900);
+						editor.Size = new Size(1120, 800);
 						PumpMessagesFor(500);
 						finalPreview.Focus();
 						PumpMessagesFor(250);
@@ -2867,11 +2890,11 @@ internal static class Program
 			IndexService.AddCardFramesAndSave(args[1]);
 			return;
 		}
-		if (args.Length == 3 && args[0] == "--export-mods")
+		if (args.Length == 3 && (args[0] == "--export-mods" || args[0] == "--export-mods-direct"))
 		{
 			string cache4 = IndexService.CachePath(IndexService.FindLocalRoot(args[1]) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。"), IndexService.StreamingRoot(args[1]));
 			GameIndex index6 = (File.Exists(cache4) ? (JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(cache4)) ?? new GameIndex()) : new GameIndex());
-			ModPackageInfo info = new ModPackageService().Export(args[1], index6.Textures, args[2]);
+			ModPackageInfo info = new ModPackageService().Export(args[1], index6.Textures, args[2], args[0] == "--export-mods-direct");
 			Console.WriteLine($"{info.BundleCount} bundles; {info.TotalSize} bytes; {args[2]}");
 			return;
 		}
@@ -3375,6 +3398,9 @@ internal static class Program
 			PumpMessagesFor(250);
 		}
 		form.Activate();
+		// Keep the pointer away from the shell taskbar thumbnail strip. The test
+		// compares this window, not an unrelated application thumbnail fading above it.
+		Cursor.Position = form.PointToScreen(new Point(12, 12));
 		Application.DoEvents();
 		Size clientSize = form.ClientSize;
 		if (clientSize.Width <= 0 || clientSize.Height <= 0)

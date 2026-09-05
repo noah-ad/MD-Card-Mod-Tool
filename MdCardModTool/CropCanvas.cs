@@ -37,7 +37,40 @@ public sealed class CropCanvas : Control
 
 	private Point _lastMouse;
 
-	public float Zoom => _zoom;
+	private ImageRenderSpec _backgroundSpec;
+	public bool EditingBackground { get; private set; }
+	private float BackgroundFit => _background == null ? 1f : Math.Max((float)_targetWidth / _background.Width, (float)_targetHeight / _background.Height);
+	public ImageRenderSpec BackgroundRenderSpec => _backgroundSpec;
+	public ImageRenderSpec ActiveRenderSpec => EditingBackground ? _backgroundSpec : RenderSpec;
+	public float Zoom => EditingBackground ? _backgroundSpec.ImageScale / BackgroundFit : _zoom;
+
+	public void EditBackground(bool enabled)
+	{
+		EditingBackground = enabled && _background != null;
+		Invalidate();
+		RaiseViewChanged();
+	}
+
+	public void SetBackgroundRenderSpec(ImageRenderSpec spec)
+	{
+		if (!float.IsFinite(spec.ImageScale) || spec.ImageScale <= 0 || !float.IsFinite(spec.OffsetX) || !float.IsFinite(spec.OffsetY)) return;
+		_backgroundSpec = spec with { VisualWidth = _targetWidth, VisualHeight = _targetHeight };
+		Invalidate();
+		RaiseViewChanged();
+	}
+
+	public byte[]? RenderBackgroundToTarget() => _background == null ? null :
+		ImageCropService.RenderToTarget(_background, _backgroundSpec, _targetWidth, _targetHeight);
+
+	private void MoveActive(float dx, float dy)
+	{
+		if (EditingBackground)
+		{
+			float scale = CardRectangle.Width / _targetWidth;
+			_backgroundSpec = _backgroundSpec with { OffsetX = _backgroundSpec.OffsetX + dx / scale, OffsetY = _backgroundSpec.OffsetY + dy / scale };
+		}
+		else { _offsetX += dx; _offsetY += dy; ClampOffset(); }
+	}
 
 	public bool HasFrame => _frame != null;
 
@@ -203,7 +236,7 @@ public sealed class CropCanvas : Control
 		}
 		else
 		{
-			ResetView();
+			ResetArtView();
 		}
 	}
 
@@ -214,7 +247,7 @@ public sealed class CropCanvas : Control
 		_source = source;
 		if (resetView)
 		{
-			ResetView();
+			ResetArtView();
 		}
 		else
 		{
@@ -228,6 +261,8 @@ public sealed class CropCanvas : Control
 	{
 		_background?.Dispose();
 		_background = background;
+		_backgroundSpec = new(_targetWidth, _targetHeight, BackgroundFit, 0, 0);
+		if (background == null) EditingBackground = false;
 		Invalidate();
 	}
 
@@ -253,6 +288,11 @@ public sealed class CropCanvas : Control
 
 	public void ResetView()
 	{
+		if (EditingBackground)
+		{
+			SetBackgroundRenderSpec(new(_targetWidth, _targetHeight, BackgroundFit, 0, 0));
+			return;
+		}
 		_zoom = 1f;
 		_offsetX = 0f;
 		_offsetY = 0f;
@@ -263,6 +303,11 @@ public sealed class CropCanvas : Control
 
 	public void ShowWholeImage()
 	{
+		if (EditingBackground && _background != null)
+		{
+			SetBackgroundRenderSpec(new(_targetWidth, _targetHeight, Math.Min((float)_targetWidth / _background.Width, (float)_targetHeight / _background.Height), 0, 0));
+			return;
+		}
 		if (_source != null)
 		{
 			RectangleF work = WorkRectangle;
@@ -279,6 +324,18 @@ public sealed class CropCanvas : Control
 	public void SetZoom(float value, PointF? anchor)
 	{
 		value = Math.Clamp(value, 0.01f, 20f);
+		if (EditingBackground)
+		{
+			RectangleF card = CardRectangle;
+			float screenScale = card.Width / _targetWidth;
+			PointF point = anchor ?? new PointF(card.Left + card.Width / 2, card.Top + card.Height / 2);
+			float x = (point.X - card.Left - card.Width / 2) / screenScale;
+			float y = (point.Y - card.Top - card.Height / 2) / screenScale;
+			float ratio = value * BackgroundFit / _backgroundSpec.ImageScale;
+			SetBackgroundRenderSpec(_backgroundSpec with { ImageScale = value * BackgroundFit,
+				OffsetX = x + (_backgroundSpec.OffsetX - x) * ratio, OffsetY = y + (_backgroundSpec.OffsetY - y) * ratio });
+			return;
+		}
 		if (_source != null && !(Math.Abs(value - _zoom) < 0.0001f))
 		{
 			PointF point = anchor ?? new PointF(WorkRectangle.Left + WorkRectangle.Width / 2f, WorkRectangle.Top + WorkRectangle.Height / 2f);
@@ -297,7 +354,7 @@ public sealed class CropCanvas : Control
 		}
 	}
 
-	public void SetRenderSpec(ImageRenderSpec spec)
+	public void SetRenderSpec(ImageRenderSpec spec, bool notify = true)
 	{
 		if (_source == null || spec.ImageScale <= 0f || spec.VisualWidth <= 0f || spec.VisualHeight <= 0f)
 		{
@@ -325,7 +382,29 @@ public sealed class CropCanvas : Control
 		}
 		ClampOffset();
 		Invalidate();
+		if (notify) RaiseViewChanged();
+	}
+
+	private void ResetArtView()
+	{
+		bool background = EditingBackground;
+		EditingBackground = false;
+		ResetView();
+		EditingBackground = background;
 		RaiseViewChanged();
+	}
+
+	public System.Threading.Tasks.Task<(byte[] Art, byte[]? Background)> RenderLayersAsync()
+	{
+		Bitmap source = new(_source ?? throw new InvalidOperationException("尚未载入卡图。"));
+		Bitmap? background = _background == null ? null : new Bitmap(_background);
+		ImageRenderSpec artSpec = RenderSpec, backgroundSpec = _backgroundSpec;
+		return System.Threading.Tasks.Task.Run(() =>
+		{
+			using (source) using (background)
+				return (ImageCropService.RenderToTarget(source, artSpec, _targetWidth, _targetHeight),
+					background == null ? null : ImageCropService.RenderToTarget(background, backgroundSpec, _targetWidth, _targetHeight));
+		});
 	}
 
 	public byte[] RenderSourceToTarget()
@@ -339,10 +418,10 @@ public sealed class CropCanvas : Control
 
 	private void RaiseViewChanged()
 	{
-		ZoomChanged?.Invoke(_zoom);
+		ZoomChanged?.Invoke(Zoom);
 		if (_source != null)
 		{
-			ViewChanged?.Invoke(RenderSpec);
+			ViewChanged?.Invoke(ActiveRenderSpec);
 		}
 	}
 
@@ -368,6 +447,23 @@ public sealed class CropCanvas : Control
 		Invalidate();
 	}
 
+	protected override void SetBoundsCore(int x, int y, int width, int height, BoundsSpecified specified)
+	{
+		ImageRenderSpec? previous = _overFrameEditing && _source != null && Width > 100 && Height > 100
+			&& (width != Width || height != Height) ? RenderSpec : null;
+		base.SetBoundsCore(x, y, width, height, specified);
+		if (previous.HasValue && Width > 100 && Height > 100)
+		{
+			// Viewport resizing preserves logical composition; do not discard a valid
+			// preview and enqueue expensive PNG composition for every layout wave.
+			SetRenderSpec(previous.Value, notify: false);
+			ImageRenderSpec current = RenderSpec;
+			if (Math.Abs(current.ImageScale - previous.Value.ImageScale) > .0001f
+				|| Math.Abs(current.OffsetX - previous.Value.OffsetX) > .01f
+				|| Math.Abs(current.OffsetY - previous.Value.OffsetY) > .01f) RaiseViewChanged();
+		}
+	}
+
 	protected override void OnMouseDown(MouseEventArgs e)
 	{
 		base.OnMouseDown(e);
@@ -389,12 +485,11 @@ public sealed class CropCanvas : Control
 		if (ShowingRenderedPreview) return;
 		if (_dragging)
 		{
-			_offsetX += e.X - _lastMouse.X;
-			_offsetY += e.Y - _lastMouse.Y;
+			MoveActive(e.X - _lastMouse.X, e.Y - _lastMouse.Y);
 			_lastMouse = e.Location;
 			ClampOffset();
 			Invalidate();
-			ViewChanged?.Invoke(RenderSpec);
+			ViewChanged?.Invoke(ActiveRenderSpec);
 		}
 	}
 
@@ -413,7 +508,7 @@ public sealed class CropCanvas : Control
 	{
 		base.OnMouseWheel(e);
 		if (ShowingRenderedPreview) return;
-		SetZoom(_zoom * ((e.Delta > 0) ? 1.12f : (25f / 28f)), e.Location);
+		SetZoom(Zoom * ((e.Delta > 0) ? 1.12f : (25f / 28f)), e.Location);
 	}
 
 	protected override void OnDoubleClick(EventArgs e)
@@ -432,24 +527,24 @@ public sealed class CropCanvas : Control
 		switch (e.KeyCode)
 		{
 		case Keys.Left:
-			_offsetX -= step;
+			MoveActive(-step, 0);
 			break;
 		case Keys.Right:
-			_offsetX += step;
+			MoveActive(step, 0);
 			break;
 		case Keys.Up:
-			_offsetY -= step;
+			MoveActive(0, -step);
 			break;
 		case Keys.Down:
-			_offsetY += step;
+			MoveActive(0, step);
 			break;
 		case Keys.Add:
 		case Keys.Oemplus:
-			SetZoom(_zoom * 1.1f, null);
+			SetZoom(Zoom * 1.1f, null);
 			return;
 		case Keys.Subtract:
 		case Keys.OemMinus:
-			SetZoom(_zoom / 1.1f, null);
+			SetZoom(Zoom / 1.1f, null);
 			return;
 		default:
 			changed = false;
@@ -459,7 +554,7 @@ public sealed class CropCanvas : Control
 		{
 			ClampOffset();
 			Invalidate();
-			ViewChanged?.Invoke(RenderSpec);
+			ViewChanged?.Invoke(ActiveRenderSpec);
 			e.Handled = true;
 		}
 	}
@@ -493,7 +588,7 @@ public sealed class CropCanvas : Control
 			if (_overFrameEditing)
 			{
 				DrawCheckerboard(graphics, card);
-				DrawCover(graphics, _background, card);
+				DrawBackground(graphics, card);
 				graphics.DrawImage(_frame, card);
 				GraphicsState state = graphics.Save();
 				graphics.SetClip(card);
@@ -506,7 +601,7 @@ public sealed class CropCanvas : Control
 			else if (_fullCardOverlay)
 			{
 				graphics.FillRectangle(Brushes.White, card);
-				DrawCover(graphics, _background, card);
+				DrawBackground(graphics, card);
 				graphics.DrawImage(_frame, card);
 				GraphicsState state = graphics.Save();
 				graphics.SetClip(card);
@@ -553,14 +648,17 @@ public sealed class CropCanvas : Control
 		DrawCorners(graphics, work);
 	}
 
-	private static void DrawCover(Graphics graphics, Bitmap? image, RectangleF area)
+	private void DrawBackground(Graphics graphics, RectangleF area)
 	{
+		Bitmap? image = _background;
 		if (image == null || area.Width <= 0f || area.Height <= 0f) return;
-		float scale = Math.Max(area.Width / image.Width, area.Height / image.Height);
+		float logicalScale = area.Width / _targetWidth;
+		float scale = _overFrameEditing ? _backgroundSpec.ImageScale * logicalScale
+			: Math.Max(area.Width / image.Width, area.Height / image.Height);
 		float width = image.Width * scale;
 		float height = image.Height * scale;
-		RectangleF destination = new(area.Left + (area.Width - width) / 2f,
-			area.Top + (area.Height - height) / 2f, width, height);
+		RectangleF destination = new(area.Left + (area.Width - width) / 2f + (_overFrameEditing ? _backgroundSpec.OffsetX * logicalScale : 0),
+			area.Top + (area.Height - height) / 2f + (_overFrameEditing ? _backgroundSpec.OffsetY * logicalScale : 0), width, height);
 		GraphicsState state = graphics.Save();
 		graphics.SetClip(area);
 		graphics.DrawImage(image, destination);

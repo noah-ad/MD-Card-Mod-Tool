@@ -131,6 +131,7 @@ public sealed class MonsterAnimationForm : Form
 	private readonly Button _apply;
 
 	private readonly Button _chooseMedia;
+	private readonly Button _chooseDonor;
 
 	private readonly Button _restore;
 
@@ -324,6 +325,8 @@ public sealed class MonsterAnimationForm : Form
 			await ChooseMediaAsync();
 		}, ButtonTone.Primary), "animation.action.choose");
 		_chooseMedia.Enabled = false;
+		_chooseDonor = Bind(UiTheme.Button("", async (_, _) => await ChooseDonorAsync(), ButtonTone.Primary), "animation.donor.action");
+		_chooseDonor.Enabled = false;
 		_play = Bind(UiTheme.Button("", delegate
 		{
 			TogglePlay();
@@ -352,7 +355,7 @@ public sealed class MonsterAnimationForm : Form
 		buttons.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
 		buttons.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
 		buttons.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
-		Button[] array = new Button[4] { _chooseMedia, _play, _apply, _restore };
+		Button[] array = [_chooseMedia, _chooseDonor, _play, _apply, _restore];
 		foreach (Button obj in array)
 		{
 			obj.AutoSize = false;
@@ -360,7 +363,7 @@ public sealed class MonsterAnimationForm : Form
 			obj.Margin = new Padding(3);
 		}
 		buttons.Controls.Add(_chooseMedia, 0, 0);
-		buttons.SetColumnSpan(_chooseMedia, 2);
+		buttons.Controls.Add(_chooseDonor, 1, 0);
 		buttons.Controls.Add(_play, 0, 1);
 		buttons.SetColumnSpan(_play, 2);
 		buttons.Controls.Add(_apply, 0, 2);
@@ -775,6 +778,7 @@ public sealed class MonsterAnimationForm : Form
 			}
 			_resourceStatus.ForeColor = _previewSet.IsComplete ? UiTheme.Primary : Color.OrangeRed;
 			_chooseMedia.Enabled = canReplaceSelected;
+			_chooseDonor.Enabled = canReplaceSelected;
 			_apply.Enabled = canReplaceSelected && _media != null;
 			_restore.Enabled = _set.IsComplete || _legacyCreation;
 			if (_previewSet.IsComplete)
@@ -1047,7 +1051,7 @@ public sealed class MonsterAnimationForm : Form
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				return MonsterAnimationCurrentPreview.TryLoad(set)
-					?? Spine42PreviewRenderer.TryLoad(set, animationName, cancellationToken: cancellationToken,
+					?? Spine42PreviewRenderer.TryLoad(set, animationName, previewMaxEdge: 512, cancellationToken: cancellationToken,
 						frameRendered: ShowRenderedFrame);
 			}, cancellationToken);
 		}
@@ -1250,6 +1254,30 @@ public sealed class MonsterAnimationForm : Form
 		}
 	}
 
+	private async Task ChooseDonorAsync()
+	{
+		MonsterAnimationSet? target = _set;
+		if (_busy || target?.IsComplete != true) return;
+		try
+		{
+			SetBusy(true);
+			var ids = await Task.Run(() => MonsterAnimationIndexService.FindInstalledCardIds(_gameRoot));
+			using AnimationDonorPicker picker = new(_gameRoot, ids.Where(x => x != target.CardId));
+			if (picker.ShowDialog(this) != DialogResult.OK || picker.SelectedCardId == null) return;
+			string donorId = picker.SelectedCardId;
+			if (!EnsureGameClosed() || MessageBox.Show(this,
+				$"使用卡号 {donorId} 的完整动画替换卡号 {target.CardId}？\n\n会一起替换 HD/SD 图集、骨骼和时间线，保留目标卡的触发动画名称。原文件会首次备份，可用“还原”恢复。\n仅修改本地资源；不为无原生动画卡增加触发。",
+				"确认替换动画", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
+			var donor = await Task.Run(() => MonsterAnimationIndexService.Find(_gameRoot, donorId));
+			int count = await Task.Run(() => MonsterAnimationTransferService.Replace(_gameRoot, target, donor));
+			DisposeMedia();
+			MessageBox.Show(this, $"已替换 {count} 个动画 Bundle。请重新启动游戏查看。", "动画替换完成");
+		}
+		catch (Exception ex) { MessageBox.Show(this, ex.Message, "动画替换失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+		finally { SetBusy(false); }
+		await LocateAsync();
+	}
+
 	private void SetBusy(bool busy, string? statusResourceId = null, params object?[] statusValues)
 	{
 		_busy = busy;
@@ -1261,6 +1289,7 @@ public sealed class MonsterAnimationForm : Form
 		_cardId.Enabled = !busy;
 		bool officialAnimation = !busy && _set?.IsComplete == true;
 		_chooseMedia.Enabled = officialAnimation;
+		_chooseDonor.Enabled = officialAnimation;
 		_apply.Enabled = officialAnimation && _media != null;
 		_restore.Enabled = !busy && (_set?.IsComplete == true || _legacyCreation);
 	}

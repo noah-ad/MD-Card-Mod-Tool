@@ -138,7 +138,7 @@ public static class MonsterAnimationIndexService
 		return (High: IndexService.ResourceBundleRelativePath(basePath + "/HighEnd_HD/P" + cardId + "JS"), Sd: IndexService.ResourceBundleRelativePath(basePath + "/SD/P" + cardId + "JS"));
 	}
 
-	private static List<MonsterAnimationAssetRef> FindDeterministicCandidates(string gameRoot, string cardId)
+	private static List<MonsterAnimationAssetRef> FindDeterministicCandidates(string gameRoot, string cardId, IEnumerable<string>? discoveredScales = null)
 	{
 		string localRoot = IndexService.FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");
 		string streamingRoot = IndexService.StreamingRoot(gameRoot);
@@ -148,7 +148,7 @@ public static class MonsterAnimationIndexService
 			(streamingRoot, "StreamingAssets")
 		};
 		List<string> logicalPaths = new List<string>();
-		string[] scales = DeterministicScales;
+		string[] scales = discoveredScales?.Distinct(StringComparer.Ordinal).ToArray() ?? DeterministicScales;
 		string[] array = new string[2] { "tcg", "ocg" };
 		foreach (string region in array)
 		{
@@ -206,6 +206,25 @@ public static class MonsterAnimationIndexService
 				{
 				}
 			}
+		}
+		if (discoveredScales == null)
+		{
+			// Official SD folders may use four or more decimal digits (e.g. half
+			// of an HD scale). Derive companion scales from actual containers,
+			// not a fixed precision or a special list of card numbers.
+			HashSet<string> companionScales = new(StringComparer.Ordinal);
+			foreach (var asset in result.Where(x => x.Kind != MonsterAnimationAssetKind.Skeleton))
+			{
+				foreach (string container in engine.ReadAssetBundleContainerPaths(asset.BundlePath))
+				{
+					string[] parts = container.Replace('\\', '/').Split('/');
+					if (parts.Length < 3 || !decimal.TryParse(parts[^2], NumberStyles.Float, CultureInfo.InvariantCulture, out decimal scale)) continue;
+					decimal companion = parts[^3].Equals("sd", StringComparison.OrdinalIgnoreCase) ? scale * 2m : scale / 2m;
+					if (companion > 0) companionScales.Add(companion.ToString("0.################", CultureInfo.InvariantCulture));
+				}
+			}
+			companionScales.ExceptWith(DeterministicScales);
+			if (companionScales.Count > 0) result.AddRange(FindDeterministicCandidates(gameRoot, cardId, companionScales));
 		}
 		return result;
 	}
@@ -348,7 +367,7 @@ public static class MonsterAnimationIndexService
 				PortableMonsterAnimationIndex cached = Read(cache);
 				if (cached.FormatVersion == 1 && string.Equals(cached.GameBuildId, currentBuild, StringComparison.Ordinal))
 				{
-					return cached;
+					return RefreshMissingLinks(gameRoot, cached, progress, cancellationToken);
 				}
 			}
 			catch
@@ -363,7 +382,7 @@ public static class MonsterAnimationIndexService
 				if (bundled.FormatVersion == 1 && string.Equals(bundled.GameBuildId, currentBuild, StringComparison.Ordinal))
 				{
 					Write(cache, bundled);
-					return bundled;
+					return RefreshMissingLinks(gameRoot, bundled, progress, cancellationToken);
 				}
 			}
 			catch
@@ -371,6 +390,30 @@ public static class MonsterAnimationIndexService
 			}
 		}
 		return Rebuild(gameRoot, progress, cancellationToken);
+	}
+
+	public static PortableMonsterAnimationIndex RefreshMissingLinks(string gameRoot, PortableMonsterAnimationIndex index,
+		Action<int, int, int>? progress = null, CancellationToken cancellationToken = default)
+	{
+		string local = IndexService.FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到活动账号。");
+		List<MonsterAnimationAssetRef> assets = index.Assets.Where(asset => File.Exists(Path.Combine(
+			asset.StorageKind == "StreamingAssets" ? IndexService.StreamingRoot(gameRoot) : local, asset.RelativeBundlePath))).ToList();
+		HashSet<string> complete = CompleteCardIds(assets);
+		string[] missing = FindInstalledCardIds(gameRoot).Where(id => !complete.Contains(id)).ToArray();
+		for (int i = 0; i < missing.Length; i++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			assets.AddRange(FindDeterministicCandidates(gameRoot, missing[i]).Select(WithoutAbsolutePath));
+			progress?.Invoke(i + 1, missing.Length, assets.Count);
+		}
+		var refreshed = new PortableMonsterAnimationIndex
+		{
+			GameBuildId = index.GameBuildId,
+			Assets = assets.DistinctBy(asset => $"{asset.StorageKind}|{asset.RelativeBundlePath.Replace('\\', '/')}|{asset.AssetFileName}|{asset.PathId}", StringComparer.OrdinalIgnoreCase).ToList()
+		};
+		cancellationToken.ThrowIfCancellationRequested();
+		Write(CachePath(gameRoot), refreshed);
+		return refreshed;
 	}
 
 	public static HashSet<string> CompleteCardIds(PortableMonsterAnimationIndex index)
@@ -403,9 +446,14 @@ public static class MonsterAnimationIndexService
 	public static void Write(string path, PortableMonsterAnimationIndex index)
 	{
 		Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
-		using FileStream file = File.Create(path);
-		using BrotliStream brotli = new BrotliStream(file, CompressionLevel.SmallestSize);
-		JsonSerializer.Serialize(brotli, index);
+		string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+		try
+		{
+			using (FileStream file = File.Create(temporary))
+			using (BrotliStream brotli = new(file, CompressionLevel.SmallestSize)) JsonSerializer.Serialize(brotli, index);
+			File.Move(temporary, path, overwrite: true);
+		}
+		finally { if (File.Exists(temporary)) File.Delete(temporary); }
 	}
 
 	public static string CachePath(string gameRoot)

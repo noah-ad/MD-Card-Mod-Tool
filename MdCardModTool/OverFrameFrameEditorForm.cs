@@ -173,6 +173,7 @@ public sealed class OverFrameFrameEditorForm : Form
 	private bool _loading;
 
 	private bool _rendering;
+	private bool _renderPending;
 
 	private bool _syncingZoom;
 
@@ -313,7 +314,7 @@ public sealed class OverFrameFrameEditorForm : Form
 		TableLayoutPanel top = new()
 		{
 			Dock = DockStyle.Top,
-			Height = 310,
+			Height = 314,
 			Padding = new Padding(14, 10, 14, 8),
 			ColumnCount = 3,
 			RowCount = 8,
@@ -327,7 +328,7 @@ public sealed class OverFrameFrameEditorForm : Form
 		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
 		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
 		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
-		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
+		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
 		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 30f));
 		top.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
@@ -342,6 +343,12 @@ public sealed class OverFrameFrameEditorForm : Form
 		layerActions.Controls.Add(changeArt);
 		layerActions.Controls.Add(addBackground);
 		layerActions.Controls.Add(_clearBackgroundButton);
+		Button editArt = UiTheme.Button("移动卡图", (_, _) => { });
+		Button editBackground = UiTheme.Button("移动背景", (_, _) => { });
+		editArt.Click += (_, _) => { SetCanvasView(false); _canvas.EditBackground(false); };
+		editBackground.Click += (_, _) => { SetCanvasView(false); _canvas.EditBackground(true); };
+		layerActions.Controls.Add(editArt);
+		layerActions.Controls.Add(editBackground);
 		top.Controls.Add(layerActions, 0, 2);
 		top.SetColumnSpan(layerActions, 3);
 
@@ -367,7 +374,7 @@ public sealed class OverFrameFrameEditorForm : Form
 		top.SetColumnSpan(previewActions, 3);
 
 		FlowLayoutPanel canvasActions = ActionRow();
-		canvasActions.Controls.Add(ToolbarLabel("卡图缩放", UiTheme.Text));
+		canvasActions.Controls.Add(ToolbarLabel("当前图层缩放", UiTheme.Text));
 		canvasActions.Controls.Add(_zoom);
 		canvasActions.Controls.Add(_zoomValue);
 		canvasActions.Controls.Add(reset);
@@ -412,7 +419,8 @@ public sealed class OverFrameFrameEditorForm : Form
 			AutoSize = true,
 			WrapContents = false,
 			FlowDirection = FlowDirection.LeftToRight,
-			Padding = new Padding(0, 2, 0, 0)
+			Margin = Padding.Empty,
+			Padding = Padding.Empty
 		};
 	}
 
@@ -591,6 +599,9 @@ public sealed class OverFrameFrameEditorForm : Form
 				? await File.ReadAllBytesAsync(backgroundPath)
 				: null;
 			SetCanvasBackground();
+			if (!_replaceStoredBackground && _savedSettings.BackgroundImageScale > 0)
+				_canvas.SetBackgroundRenderSpec(new(FrameComposer.Width, FrameComposer.Height,
+					_savedSettings.BackgroundImageScale, _savedSettings.BackgroundOffsetX, _savedSettings.BackgroundOffsetY));
 
 			FrameCompositionMode savedMode = _savedSettings.CompositionMode.Equals("StandardComplete",
 				StringComparison.OrdinalIgnoreCase)
@@ -647,6 +658,16 @@ public sealed class OverFrameFrameEditorForm : Form
 		{
 			return;
 		}
+		if (_rendering)
+		{
+			_generation++;
+			_outputBytes = null;
+			_previewBytes = null;
+			_canvas.SetRenderedPreview(null);
+			_renderTimer.Stop();
+			_renderPending = true;
+			return;
+		}
 		int generation = ++_generation;
 		_renderTimer.Stop();
 		_rendering = true;
@@ -661,6 +682,7 @@ public sealed class OverFrameFrameEditorForm : Form
 		{
 			FrameCompositionMode mode = CurrentMode;
 			byte[] frameBytes = await GetFrameBytesAsync(choice);
+			if (generation != _generation || IsDisposed) return;
 			string canvasFrameKey = mode + ":" + choice.Key;
 			if (!canvasFrameKey.Equals(_canvasFrameKey, StringComparison.OrdinalIgnoreCase))
 			{
@@ -695,8 +717,8 @@ public sealed class OverFrameFrameEditorForm : Form
 				UpdateTransformStatus();
 			}
 
-			byte[] artBytes = _canvas.RenderSourceToTarget();
-			byte[]? backgroundBytes = _backgroundBytes?.ToArray();
+			(byte[] artBytes, byte[]? backgroundBytes) = await _canvas.RenderLayersAsync();
+			if (generation != _generation || IsDisposed) return;
 			byte[] output;
 			byte[] preview;
 			int transparentPixels = 0;
@@ -742,6 +764,7 @@ public sealed class OverFrameFrameEditorForm : Form
 			_previewMode = mode;
 			_transparentEdgePixels = transparentPixels;
 			await PersistDraftAsync(choice, artBytes);
+			if (generation != _generation || IsDisposed) return;
 
 			string background = backgroundBytes == null ? "无叠底背景" : "含叠底背景";
 			string transparency = _sourceHasTransparency ? "透明主体置于卡框上层" : "源图无透明区域";
@@ -764,6 +787,11 @@ public sealed class OverFrameFrameEditorForm : Form
 		{
 			_rendering = false;
 			UseWaitCursor = false;
+			if (_renderPending && !IsDisposed)
+			{
+				_renderPending = false;
+				_renderTimer.Start();
+			}
 		}
 	}
 
@@ -823,15 +851,14 @@ public sealed class OverFrameFrameEditorForm : Form
 		button.NormalColor = active ? UiTheme.PrimaryDark : UiTheme.Elevated;
 		button.HoverColor = active ? Color.FromArgb(38, 148, 203) : Color.FromArgb(34, 53, 81);
 		button.BorderColor = active ? UiTheme.Primary : UiTheme.Border;
-		button.Font = new Font("Microsoft YaHei UI", 9f, active ? FontStyle.Bold : FontStyle.Regular);
 		button.Invalidate();
 	}
 
 	private void UpdateTransformStatus(ImageRenderSpec? provided = null)
 	{
 		if (_canvas.IsDisposed) return;
-		ImageRenderSpec spec = provided ?? _canvas.RenderSpec;
-		_transformStatus.Text = $"位置 X {spec.OffsetX:0}  Y {spec.OffsetY:0}";
+		ImageRenderSpec spec = provided ?? _canvas.ActiveRenderSpec;
+		_transformStatus.Text = $"{(_canvas.EditingBackground ? "背景" : "卡图")} X {spec.OffsetX:0}  Y {spec.OffsetY:0}";
 	}
 
 	private static RectangleF ResolveArtWindow(string baseKey)
@@ -873,7 +900,9 @@ public sealed class OverFrameFrameEditorForm : Form
 		ImageRenderSpec spec = _canvas.RenderSpec;
 		OverFrameFrameSettings settings = new(choice.Key, choice.IsCustom, UserSelected: true,
 			CompositionMode: CurrentMode.ToString(), ArtImageScale: spec.ImageScale,
-			ArtOffsetX: spec.OffsetX, ArtOffsetY: spec.OffsetY);
+			ArtOffsetX: spec.OffsetX, ArtOffsetY: spec.OffsetY,
+			BackgroundImageScale: _canvas.BackgroundRenderSpec.ImageScale,
+			BackgroundOffsetX: _canvas.BackgroundRenderSpec.OffsetX, BackgroundOffsetY: _canvas.BackgroundRenderSpec.OffsetY);
 		await Task.Run(delegate
 		{
 			OverFrameArtStore.SaveArt(_gameRoot, _cardId, artBytes);
@@ -893,7 +922,9 @@ public sealed class OverFrameFrameEditorForm : Form
 			OverFrameArtStore.SaveSettings(_gameRoot, _cardId,
 				new OverFrameFrameSettings(choice.Key, choice.IsCustom, UserSelected: true,
 					CompositionMode: CurrentMode.ToString(), ArtImageScale: spec.ImageScale,
-					ArtOffsetX: spec.OffsetX, ArtOffsetY: spec.OffsetY));
+					ArtOffsetX: spec.OffsetX, ArtOffsetY: spec.OffsetY,
+					BackgroundImageScale: _canvas.BackgroundRenderSpec.ImageScale,
+					BackgroundOffsetX: _canvas.BackgroundRenderSpec.OffsetX, BackgroundOffsetY: _canvas.BackgroundRenderSpec.OffsetY));
 		}
 		catch
 		{
@@ -971,7 +1002,7 @@ public sealed class OverFrameFrameEditorForm : Form
 		using OpenFileDialog dialog = new()
 		{
 			Filter = "图片|*.png;*.jpg;*.jpeg;*.webp;*.bmp",
-			Title = "添加叠底背景图（自动居中铺满 704×1024）"
+			Title = "添加叠底背景图（保留原图，可拖动和缩放）"
 		};
 		if (dialog.ShowDialog(this) != DialogResult.OK) return;
 		try
@@ -980,13 +1011,13 @@ public sealed class OverFrameFrameEditorForm : Form
 			_status.Text = "正在处理叠底背景…";
 			_backgroundBytes = await Task.Run(() =>
 			{
-				byte[] rendered = ImageCropService.RenderCoverToTarget(dialog.FileName,
-					FrameComposer.Width, FrameComposer.Height);
-				OverFrameArtStore.SaveBackground(_gameRoot, _cardId, rendered);
-				return rendered;
+				OverFrameArtStore.SaveBackground(_gameRoot, _cardId, dialog.FileName);
+				return File.ReadAllBytes(OverFrameArtStore.BackgroundPath(_gameRoot, _cardId));
 			});
 			SetCanvasBackground();
 			UpdateLayerStatus();
+			SetCanvasView(false);
+			_canvas.EditBackground(true);
 			await RenderAsync();
 		}
 		catch (Exception ex)
@@ -1145,7 +1176,9 @@ public sealed class OverFrameFrameEditorForm : Form
 			OverFrameArtStore.SaveSettings(_gameRoot, _cardId,
 				new OverFrameFrameSettings(choice.Key, choice.IsCustom, UserSelected: true,
 					CompositionMode: CurrentMode.ToString(), ArtImageScale: spec.ImageScale,
-					ArtOffsetX: spec.OffsetX, ArtOffsetY: spec.OffsetY));
+					ArtOffsetX: spec.OffsetX, ArtOffsetY: spec.OffsetY,
+					BackgroundImageScale: _canvas.BackgroundRenderSpec.ImageScale,
+					BackgroundOffsetX: _canvas.BackgroundRenderSpec.OffsetX, BackgroundOffsetY: _canvas.BackgroundRenderSpec.OffsetY));
 			_art.Category = "超框卡图";
 			AppliedFrameName = modeLabel + " · " + choice.DisplayName;
 			DialogResult = DialogResult.OK;

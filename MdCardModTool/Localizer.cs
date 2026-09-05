@@ -7,7 +7,15 @@ public static class Localizer
 {
 	private static readonly Dictionary<string, string[]> Strings = new(StringComparer.Ordinal)
 	{
-		["app.title"] = ["MD 卡片 Mod 工具 2.0.4", "MD 卡片 Mod 工具 2.0.4", "MD カード Mod ツール 2.0.4", "MD Card Mod Tool 2.0.4"],
+		["app.title"] = ["MD 卡片 Mod 工具 2.0.6", "MD 卡片 Mod 工具 2.0.6", "MD カード Mod ツール 2.0.6", "MD Card Mod Tool 2.0.6"],
+		["animation.donor.action"] = ["使用其他卡动画", "使用其他卡動畫", "他カードの演出を使用", "Use another card's animation"],
+		["animation.donor.title"] = ["使用其他卡的动画 · 整套替换", "使用其他卡的動畫 · 整套替換", "他カードの演出 · 一括置換", "Use another card's animation · Complete rig"],
+		["animation.donor.search"] = ["搜索来源卡号 / 卡名", "搜尋來源卡號 / 卡名", "元カードID・カード名を検索", "Search source card ID / name"],
+		["animation.donor.preview"] = ["预览所选动画", "預覽所選動畫", "選択した演出をプレビュー", "Preview selected animation"],
+		["animation.donor.use"] = ["使用这套动画…", "使用這套動畫…", "この演出を使用…", "Use this animation…"],
+		["animation.donor.idle"] = ["选择来源卡，点击预览", "選擇來源卡，點擊預覽", "元カードを選び、プレビューを押してください", "Select a source card and click Preview"],
+		["animation.donor.loading"] = ["正在加载动画…", "正在載入動畫…", "演出を読み込み中…", "Loading animation…"],
+		["animation.donor.unsupported"] = ["该动画暂不支持预览；可回主页面查看资源诊断。", "此動畫暫不支援預覽；可回主頁查看資源診斷。", "プレビュー未対応です。メイン画面の診断をご確認ください。", "Preview unavailable. See resource diagnostics on the main page."],
 		["app.subtitle"] = ["MASTER DUEL · 卡图、视觉资源、超框与怪兽动画工作台", "MASTER DUEL · 卡圖、視覺資源、超框與怪獸動畫工作台", "MASTER DUEL · カード画像・ビジュアル・オーバーフレーム・演出", "MASTER DUEL · Card art, visual assets, overframe and animation studio"],
 		["nav.cards"] = ["卡片资源", "卡片資源", "カード資源", "Card Assets"],
 		["nav.visuals"] = ["视觉资源", "視覺資源", "ビジュアル", "Visual Assets"],
@@ -66,6 +74,9 @@ public static class Localizer
 		["action.mods.all"] = ["显示全部资源", "顯示全部資源", "すべての資源を表示", "Show All Assets"],
 		["action.mods.export"] = ["一键导出全部 Mod", "一鍵匯出全部 Mod", "すべての Mod を出力", "Export All Mods"],
 		["action.mods.import"] = ["导入 Mod 包", "匯入 Mod 套件", "Mod パッケージを読込", "Import Mod Package"],
+		["mods.export.filter"] = ["直接替换 ZIP（游戏目录结构）|*.zip|工具专用 Mod 包（兼容旧版）|*.mdmod.zip", "直接替換 ZIP（遊戲目錄結構）|*.zip|工具專用 Mod 套件（相容舊版）|*.mdmod.zip", "直接置換 ZIP（ゲームのフォルダー構成）|*.zip|ツール用 Mod パッケージ（旧形式）|*.mdmod.zip", "Direct replacement ZIP (game folders)|*.zip|Tool Mod package (legacy compatible)|*.mdmod.zip"],
+		["mods.import.filter"] = ["Mod 包／直接替换 ZIP|*.zip", "Mod 套件／直接替換 ZIP|*.zip", "Mod パッケージ／直接置換 ZIP|*.zip", "Mod package / direct replacement ZIP|*.zip"],
+		["mods.export.directHelp"] = ["ZIP 保留游戏目录与原文件名。手动覆盖前请备份，并把 LocalData 下的账号名改成自己的账号。也可直接用本工具导入，自动映射当前账号。", "ZIP 保留遊戲目錄與原檔名。手動覆蓋前請備份，並把 LocalData 下的帳號名改成自己的帳號。也可用本工具匯入，自動對應目前帳號。", "ZIP は元のフォルダー構成とファイル名を保持します。手動置換前にバックアップし、LocalData のアカウント名を自分のものに変更してください。ツールで読み込む場合は現在のアカウントに自動対応します。", "The ZIP keeps original game folders and filenames. Back up before manual replacement and rename the LocalData account folder to your own. Importing with this tool maps it to the selected account automatically."],
 		["context.mods.title"] = ["MOD 管理", "MOD 管理", "MOD 管理", "MOD MANAGER"],
 		["context.overframe.title"] = ["超框卡", "超框卡", "オーバーフレーム", "OVERFRAME CARDS"],
 		["context.overframe.manage"] = ["管理超框登记", "管理超框登記", "登録表を管理", "Manage Mappings"],

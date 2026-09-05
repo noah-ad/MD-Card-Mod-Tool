@@ -1,13 +1,30 @@
-# MD Card Mod Tool 2.0.4
+# MD Card Mod Tool 2.0.6
 
-面向《游戏王 Master Duel》的 .NET 8 x64 资源查看与 Mod 制作工具。2.0.4 将卡套与灵摆卡图的编辑／预览比例和游戏 Texture2D 存储比例彻底分离：用户始终按正常外观构图，写入 Bundle 前再自动执行游戏 UV 所需的反向变形。EXE 文件名仍保留“MD卡图查看替换器”，以兼容旧版启动脚本。
+面向《游戏王 Master Duel》的 .NET 8 x64 资源查看与 Mod 制作工具。2.0.5 加入超框背景独立构图、其他卡动画整套替换，修复旋转／裁边图集导致的预览肢体错位，并减少界面重绘和动画解码开销。卡套／灵摆正常比例编辑及 EXE + data 启动布局继续保留。
 
 ## 下载
 
-从 [GitHub Releases](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/latest) 下载 `MD-Card-Mod-Tool-v2.0.4-test-win-x64.zip`。解压后根目录只有 `MD卡图查看替换器.exe` 与 `data` 文件夹，直接运行 EXE 即可；若文件带有 Windows 下载标记，可先运行 `data\首次启动-解除下载封锁.bat`。
+下载 [2.0.6 发行版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.6)。解压后根目录只有 `MD卡图查看替换器.exe` 与 `data` 文件夹，直接运行 EXE 即可；若文件带有 Windows 下载标记，可先运行 `data\首次启动-解除下载封锁.bat`。
+
+## Mod 导出与导入（2.0.6）
+
+在卡片资源的“我的 Mod”中选择“导出全部 Mod”，保存类型可选：
+
+- **直接替换 ZIP（默认）**：保留实际游戏目录与原 Bundle 文件名，例如 `LocalData/<导出账号>/0000/ab/abcdefgh` 或 `masterduel_Data/StreamingAssets/AssetBundle/...`，不再是 `files/0001.bundle`。同时附带工具清单和安装说明。
+- **工具专用 Mod 包**：保留旧版 `.mdmod.zip` 格式，继续用于工具间分享。
+
+手动安装直接替换 ZIP 时先退出游戏、备份目标文件，再合并包中的资源目录。跨账号使用需将 LocalData 下的导出账号改成自己的账号；`manifest.json` 和安装说明无需复制。**推荐用“导入 Mod 包”安装**：自动绑定顶栏当前账号，先验证全部文件，再保存首次备份并写入；失败尝试回滚。
+
+导入兼容旧包、带清单的直接替换 ZIP，以及无清单但保留 `LocalData/<账号>/0000/...`、`masterduel_Data/StreamingAssets/AssetBundle/...`、`0000/<两位目录>/<八位哈希>` 或 `<两位目录>/<八位哈希>` 的 Bundle ZIP。不接受图片 ZIP、程序文件、路径越界、重复目标、符号链接或损坏 Bundle。目标 Bundle 必须已在本机下载，不替无原生动画卡建立游戏触发。请使用与自己游戏版本兼容的 Mod；同一个 Bundle 内的修改会整体覆盖。
+
+导出包含当前已启用且与备份不同的 Bundle；已经还原的文件不打包。
 
 ## 主要功能
 
+- 2.0.6 新卡动画会根据已发现资源推导配套 HD／SD 路径，支持 `0.2925` 等非三位小数目录，修复 22524 动画漏匹配；同一 Steam Build 新下载的资源也会补全关联，无须等待下次游戏更新。
+
+- 2.0.5 在“制作超框”中点击“移动卡图”或“移动背景”选择独立图层；背景保留完整原图，支持拖动、滚轮／滑杆缩放和方向键微调。两个图层的构图分别保存，切换卡框不会重置背景。
+- 2.0.5 加入静态青金色决斗场几何与导航强调，修正导航图标的 DPI 缩放；按钮复用控件私有离屏缓冲，动画棋盘格使用缓存纹理，Spine 帧直接复制 BGRA 像素，不再逐帧 PNG 编解码。超框后台合成合并连续输入，过期结果不会覆盖新选择。
 - 自动从 Steam 注册表、`libraryfolders.vdf` 与 `appmanifest_1449850.acf` 定位实际游戏目录，正确处理 `Yu-Gi-Oh!  Master Duel` 中的双空格。
 - 枚举所有 `LocalData/<账号>/0000`，记住每个游戏安装上次使用的账号，并允许在顶栏切换。
 - 四语界面：简体中文、繁体中文、日语、英语可即时切换；设置、主题与减少动画偏好独立保存。
@@ -26,7 +43,9 @@
 
 ## 怪兽动画
 
-工具可直接读取尚未替换的原版六 Bundle，并在本机预览 Spine 4.2 动画。渲染器是独立的只读实现，不捆绑官方 Spine Runtime；使用 SkiaSharp 渲染并支持本机官方资源实际出现的骨骼、槽位、皮肤、region、mesh、linkedmesh、clipping、IK／path／transform／physics 约束、deform、drawOrder、双色 tint、PMA 混合及新旧 atlas 格式。
+工具可读取尚未替换的原版六 Bundle，在本机预览 Spine 4.2 动画。渲染器是独立的只读实现，不捆绑官方 Spine Runtime。2.0.5 修复 90°／180°／270° 图集 UV、旋转区域宽高与 mesh 裁边偏移。复杂约束、物理时间线等仍需逐资源核对，不能把“能渲染非空帧”视为与游戏逐帧一致的证明。
+
+“怪兽动画 → 使用其他卡动画”可按卡号／四语卡名选择已安装的来源动画，预览后完整移植 HD/SD 图集、骨骼与时间线，不混用两张卡的关节贴图。目标卡必须已有完整官方演出；来源与目标 Spine 主次版本必须兼容。制作先在临时副本进行，重新打开检查后提交；首次备份可通过“还原该卡动画”恢复。此功能已通过临时真实 Bundle 测试，尚未执行真实游戏召唤验收。
 
 导入 GIF、视频或图片序列只用于替换一张已经拥有完整官方召唤演出的怪兽。写入前会确认同一地区的 HighEnd_HD／SD Texture、Atlas、Skeleton 均完整，并在失败时回滚；没有官方演出的怪兽不能启用导入或写入。
 
@@ -39,7 +58,7 @@ dotnet build '.\MdCardModTool\MdCardModTool.csproj' -c Release -p:Platform=x64
 
 dotnet publish '.\MdCardModTool\MdCardModTool.csproj' `
   -c Release -r win-x64 -p:Platform=x64 --self-contained true `
-  -o '.\发布\MD-Card-Mod-Tool-v2.0.4-test'
+  -o '.\发布\MD-Card-Mod-Tool-v2.0.5-test'
 ```
 
 发布包根目录只允许包含 EXE 与 `data`。`data` 内必须包含 `classdata.tpk`、预绑定卡图／动画索引、Astellar 超框模板、Floowan 卡框、`tools/texconv.exe`、`tools/ffmpeg.exe`、说明与第三方许可文件。

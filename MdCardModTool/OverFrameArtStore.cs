@@ -77,14 +77,14 @@ public static class OverFrameArtStore
 	public static void SaveBackground(string gameRoot, ushort cardId, string imagePath)
 	{
 		using Image<Rgba32> image = Image.Load<Rgba32>(imagePath);
-		Validate(image.Width, image.Height, "叠底背景");
+		image.Mutate(context => context.AutoOrient());
 		SaveBackgroundImage(gameRoot, cardId, image);
 	}
 
 	public static void SaveBackground(string gameRoot, ushort cardId, byte[] png)
 	{
 		using Image<Rgba32> image = Image.Load<Rgba32>(png);
-		Validate(image.Width, image.Height, "叠底背景");
+		image.Mutate(context => context.AutoOrient());
 		SaveBackgroundImage(gameRoot, cardId, image);
 	}
 

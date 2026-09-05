@@ -10,6 +10,7 @@ public class RoundedButton : Button
 {
 	private readonly Timer _animation = new() { Interval = 15 };
 	private readonly Stopwatch _clock = new();
+	private Bitmap? _paintSurface;
 	private Color _normalColor = UiTheme.Elevated;
 	private Color _hoverColor = UiTheme.SurfaceAlt;
 	private Color _fromColor;
@@ -106,8 +107,12 @@ public class RoundedButton : Button
 		// into a control-sized bitmap instead and commit the whole client rectangle in
 		// one clipped blit. This keeps hover/playback paints inside this HWND even when
 		// siblings are moving.
-		using Bitmap surface = new(ClientSize.Width, ClientSize.Height,
-			System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+		if (_paintSurface == null || _paintSurface.Size != ClientSize)
+		{
+			_paintSurface?.Dispose();
+			_paintSurface = new Bitmap(ClientSize.Width, ClientSize.Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+		}
+		Bitmap surface = _paintSurface;
 		using Graphics graphics = Graphics.FromImage(surface);
 		using (SolidBrush parentSurface = new(Parent?.BackColor ?? UiTheme.Window))
 		{
@@ -274,6 +279,8 @@ public class RoundedButton : Button
 		if (disposing)
 		{
 			_animation.Dispose();
+			_paintSurface?.Dispose();
+			_paintSurface = null;
 		}
 		base.Dispose(disposing);
 	}

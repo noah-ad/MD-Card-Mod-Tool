@@ -13,15 +13,25 @@ public sealed class GradientBanner : Panel
 
 	protected override void OnPaintBackground(PaintEventArgs e)
 	{
-		using LinearGradientBrush gradient = new LinearGradientBrush(base.ClientRectangle, Color.FromArgb(15, 40, 70), UiTheme.Window, 0f);
+		if (Width <= 0 || Height <= 0) return;
+		using LinearGradientBrush gradient = new LinearGradientBrush(base.ClientRectangle, Color.FromArgb(10, 34, 52), UiTheme.Window, 0f);
 		e.Graphics.FillRectangle(gradient, base.ClientRectangle);
 		e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-		using Pen cyan = new Pen(Color.FromArgb(38, UiTheme.Primary), 1f);
-		using Pen gold = new Pen(Color.FromArgb(30, UiTheme.Gold), 1f);
-		for (int x = base.Width - 440; x < base.Width + 80; x += 52)
+		float dpi = DeviceDpi / 96f;
+		using Pen cyan = new Pen(Color.FromArgb(44, UiTheme.Primary), dpi);
+		using Pen gold = new Pen(Color.FromArgb(78, UiTheme.Gold), dpi);
+		// Static dueling-field geometry keeps text readable without idle animation.
+		for (int i = 0; i < 5; i++)
 		{
-			e.Graphics.DrawLine(cyan, x, 0, x - 92, base.Height);
-			e.Graphics.DrawEllipse(gold, x - 35, 12, 52, 52);
+			float x = Width - (330 - i * 75) * dpi;
+			float y = Height * .5f;
+			float r = 30 * dpi;
+			e.Graphics.DrawPolygon(i == 2 ? gold : cyan,
+				[new PointF(x-r,y), new PointF(x-r/2,y-r), new PointF(x+r/2,y-r),
+				 new PointF(x+r,y), new PointF(x+r/2,y+r), new PointF(x-r/2,y+r)]);
+			e.Graphics.DrawLine(cyan, x + r, y, x + 45 * dpi, y);
 		}
+		e.Graphics.DrawLines(gold, [new PointF(0, Height-2*dpi), new PointF(96*dpi, Height-2*dpi), new PointF(112*dpi, Height-10*dpi)]);
+		e.Graphics.DrawLine(cyan, 118*dpi, Height-10*dpi, Width, Height-10*dpi);
 	}
 }

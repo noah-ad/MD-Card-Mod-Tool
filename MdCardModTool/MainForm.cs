@@ -792,7 +792,7 @@ public sealed class MainForm : Form
 			BackColor = UiTheme.Surface,
 			Font = new Font("Segoe UI", 8f),
 			TextAlign = ContentAlignment.MiddleLeft,
-			Text = $"v2.0.4  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
+			Text = $"v2.0.6  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
 		};
 		TableLayoutPanel sidebar = new()
 		{
@@ -3429,8 +3429,9 @@ public sealed class MainForm : Form
 		}
 		SaveFileDialog dialog = new SaveFileDialog
 		{
-			Filter = "Master Duel Mod 包|*.mdmod.zip",
-			FileName = $"MD_Mods_{DateTime.Now:yyyyMMdd_HHmm}.mdmod.zip",
+			Filter = Localizer.T("mods.export.filter"),
+			FileName = $"MD_Mods_{DateTime.Now:yyyyMMdd_HHmm}.zip",
+			DefaultExt = "zip",
 			Title = "导出全部已启用 Mod"
 		};
 		try
@@ -3443,9 +3444,12 @@ public sealed class MainForm : Form
 			{
 				base.UseWaitCursor = true;
 				_status.Text = "正在打包全部已修改 Bundle…";
-				ModPackageInfo info = await Task.Run(() => _mods.Export(_gameRoot, _textures, dialog.FileName));
+				bool directReplacement = dialog.FilterIndex == 1;
+				TexRef[] exportTextures = _textures.ToArray();
+				ModPackageInfo info = await Task.Run(() => _mods.Export(_gameRoot, exportTextures, dialog.FileName, directReplacement));
 				_status.Text = $"已导出 {info.BundleCount:N0} 个 Mod Bundle：{dialog.FileName}";
-				MessageBox.Show(this, $"导出完成。\n\nBundle：{info.BundleCount:N0} 个\n原始大小：{FormatSize(info.TotalSize)}\n文件：{dialog.FileName}", "全部 Mod 已导出", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
+				MessageBox.Show(this, $"导出完成。\n\nBundle：{info.BundleCount:N0} 个\n原始大小：{FormatSize(info.TotalSize)}\n文件：{dialog.FileName}"
+					+ (directReplacement ? "\n\n" + Localizer.T("mods.export.directHelp") : ""), "全部 Mod 已导出", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
 			}
 			catch (Exception ex)
 			{
@@ -3474,7 +3478,7 @@ public sealed class MainForm : Form
 		}
 		OpenFileDialog dialog = new OpenFileDialog
 		{
-			Filter = "Master Duel Mod 包|*.mdmod.zip|ZIP 压缩包|*.zip",
+			Filter = Localizer.T("mods.import.filter"),
 			Title = "导入 MD Mod 包"
 		};
 		try
@@ -3486,12 +3490,13 @@ public sealed class MainForm : Form
 			try
 			{
 				ModPackageInfo info = await Task.Run(() => _mods.Inspect(dialog.FileName));
-				string confirm = $"准备导入“{info.Name}”。\n\nBundle：{info.BundleCount:N0} 个\n原始大小：{FormatSize(info.TotalSize)}\n\n将直接覆盖对应游戏 Bundle；每个文件首次覆盖前都会自动保存原版备份。继续？";
+				string confirm = $"准备导入“{info.Name}”。\n\nBundle：{info.BundleCount:N0} 个\n原始大小：{FormatSize(info.TotalSize)}\n目标账号：{Path.GetFileName(Path.GetDirectoryName(IndexService.FindLocalRoot(_gameRoot)))}\n\n请先退出游戏。LocalData 将映射到当前选中账号；每个文件首次覆盖前都会保存原版备份。继续？";
 				if (MessageBox.Show(this, confirm, "确认导入 Mod", MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation) == DialogResult.OK)
 				{
 					base.UseWaitCursor = true;
 					_status.Text = "正在校验并导入 Mod 包…";
-					ModImportResult result = await Task.Run(() => _mods.Import(_gameRoot, dialog.FileName));
+					TexRef[] importTextures = _textures.ToArray();
+					ModImportResult result = await Task.Run(() => _mods.Import(_gameRoot, dialog.FileName, importTextures));
 					await ReloadChangedBundlesAsync(result.ChangedBundlePaths);
 					await ApplyOverFrameTagsAsync();
 					await RefreshModFlagsAsync();
