@@ -24,7 +24,8 @@ public static class MonsterAnimationCurrentPreview
 			return null;
 		}
 		ModEngine engine = new ModEngine();
-		byte[] skeletonBytes = engine.ReadTextAsset(set.Skeletons[0]).Data;
+		var selectedPair = MonsterAnimationAssetPairing.SelectPreview(set);
+		byte[] skeletonBytes = engine.ReadTextAsset(selectedPair.Skeleton).Data;
 		using JsonDocument document = JsonDocument.Parse(Encoding.UTF8.GetString(skeletonBytes).TrimEnd('\0', '\r', '\n', ' '));
 		JsonElement root = document.RootElement;
 		if (!root.TryGetProperty("bones", out var bones) || bones.ValueKind != JsonValueKind.Array || bones.GetArrayLength() > 2)
@@ -39,14 +40,14 @@ public static class MonsterAnimationCurrentPreview
 		{
 			return null;
 		}
-		byte[] atlasBytes = engine.ReadTextAsset(set.Atlases[0]).Data;
+		byte[] atlasBytes = engine.ReadTextAsset(selectedPair.Atlas).Data;
 		ParsedAtlas atlas = ParseAtlas(Encoding.UTF8.GetString(atlasBytes).TrimEnd('\0'));
 		if (atlas.Regions.Count == 0 || names.Any((string key) => !atlas.Regions.ContainsKey(key)))
 		{
 			return null;
 		}
 		byte[] texturePng = null;
-		foreach (MonsterAnimationAssetRef texture in set.Textures)
+		foreach (MonsterAnimationAssetRef texture in new[] { selectedPair.Texture })
 		{
 			try
 			{
@@ -120,13 +121,25 @@ public static class MonsterAnimationCurrentPreview
 				}
 			}
 			AtlasRegion first = atlas.Regions[names[0]];
-			double fullFit = Math.Min(4800.0 / (double)Math.Max(1, first.OriginalWidth), 2700.0 / (double)Math.Max(1, first.OriginalHeight));
+			double fullFit = Math.Min(MonsterAnimationBuilder.GameCanvasWidth / (double)Math.Max(1, first.OriginalWidth), MonsterAnimationBuilder.GameCanvasHeight / (double)Math.Max(1, first.OriginalHeight));
 			double fullWidth = (double)first.OriginalWidth * fullFit;
 			double fullHeight = (double)first.OriginalHeight * fullFit;
 			JsonElement value;
 			JsonElement element = (root.TryGetProperty("skeleton", out value) ? value : default(JsonElement));
 			double storedWidth = Number(element, "width", fullWidth);
 			double storedHeight = Number(element, "height", fullHeight);
+			// Bounds describe the viewport, not the user's chosen attachment size.
+			// Reading the attachment also migrates old 140% Mods to the new 100%.
+			JsonElement skinList = root.GetProperty("skins");
+			JsonElement attachmentRoot = skinList.ValueKind == JsonValueKind.Array
+				? skinList[0].GetProperty("attachments") : skinList.GetProperty("default");
+			foreach (JsonProperty slotAttachments in attachmentRoot.EnumerateObject())
+			{
+				if (!slotAttachments.Value.TryGetProperty(names[0], out JsonElement attachment)) continue;
+				storedWidth = Number(attachment, "width", storedWidth);
+				storedHeight = Number(attachment, "height", storedHeight);
+				break;
+			}
 			int scalePercent = Math.Clamp((int)Math.Round(Math.Min(storedWidth / Math.Max(1.0, fullWidth), storedHeight / Math.Max(1.0, fullHeight)) * 100.0), 10, 500);
 			return new CurrentMonsterAnimationPreview
 			{
@@ -205,7 +218,7 @@ public static class MonsterAnimationCurrentPreview
 				times.Add(seconds);
 			}
 		}
-		if (names.Count < 2)
+		if (names.Count < 1)
 		{
 			return false;
 		}
@@ -249,7 +262,7 @@ public static class MonsterAnimationCurrentPreview
 					continue;
 				}
 				Dictionary<string, string> values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-				for (int j = i + 1; j < lines.Length && (string.IsNullOrWhiteSpace(lines[j]) || char.IsWhiteSpace(lines[j][0])); j++)
+				for (int j = i + 1; j < lines.Length && (string.IsNullOrWhiteSpace(lines[j]) || lines[j].Contains(':')); j++)
 				{
 					string line = lines[j].Trim();
 					int colon = line.IndexOf(':');
@@ -265,6 +278,16 @@ public static class MonsterAnimationCurrentPreview
 				(int, int) size = Pair(values.GetValueOrDefault("size", "0,0"));
 				(int, int) original = Pair(values.GetValueOrDefault("orig", $"{size.Item1},{size.Item2}"));
 				(int, int) offset = Pair(values.GetValueOrDefault("offset", "0,0"));
+				if (values.TryGetValue("bounds", out string? bounds))
+				{
+					int[] n = bounds.Split(',').Select(int.Parse).ToArray();
+					xy = (n[0], n[1]); size = (n[2], n[3]); original = size;
+				}
+				if (values.TryGetValue("offsets", out string? offsets))
+				{
+					int[] n = offsets.Split(',').Select(int.Parse).ToArray();
+					offset = (n[0], n[1]); original = (n[2], n[3]);
+				}
 				regions[name] = new AtlasRegion(xy.Item1, xy.Item2, size.Item1, size.Item2, original.Item1, original.Item2, offset.Item1, offset.Item2, values.GetValueOrDefault("rotate", "false").Equals("true", StringComparison.OrdinalIgnoreCase));
 			}
 		}

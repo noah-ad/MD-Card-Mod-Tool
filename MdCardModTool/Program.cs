@@ -37,6 +37,9 @@ internal static class Program
 			SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
 			Control.CheckForIllegalCrossThreadCalls = true;
 		}
+		if (args.Length == 3 && args[0] == "--test-animation-write-lock") { AnimationWriteTests.Run(args[1], args[2]); return; }
+		if (args.Length == 3 && args[0] == "--test-card-catalog-refresh") { CardCatalogRefreshTests.Run(args[1], args[2]); return; }
+		if (args.Length == 2 && args[0] == "--test-sidebar-dpi") { SidebarDpiTests.Run(args[1]); return; }
 		if (args.Length == 3 && args[0] == "--test-new-animation-links") { AnimationLinkTests.Run(args[1], args[2]); return; }
 		if (args.Length == 3 && args[0] == "--test-mod-packages") { ModPackageTests.Run(args[1], args[2]); return; }
 		if (args.Length == 2 && args[0] == "--test-studio-optimizations") { StudioOptimizationTests.Run(args[1]); return; }
@@ -2763,7 +2766,7 @@ internal static class Program
 						.Value.GetProperty("attachment").GetArrayLength()).ToArray();
 				bool timelinesValid = timelineCounts.All((int num8) => num8 == media4.FramePaths.Count);
 				Console.WriteLine($"display100={built4.DisplayWidth:0.##}x{built4.DisplayHeight:0.##}; display35={built35.DisplayWidth:0.##}x{built35.DisplayHeight:0.##}; template={string.Join(',', template2.EffectiveAnimationNames)}; generated={string.Join(',', animationNames)}; timelines={string.Join(',', timelineCounts)}");
-				if (Math.Abs(built4.DisplayWidth - 4800.0) > 0.1 || Math.Abs(built4.DisplayHeight - 2700.0) > 0.1 || Math.Abs(built35.DisplayWidth - 1680.0) > 0.1 || Math.Abs(built35.DisplayHeight - 944.9999999999999) > 0.1 || !template2.EffectiveAnimationNames.SequenceEqual(animationNames) || !timelinesValid)
+				if (Math.Abs(built4.DisplayWidth - 6720.0) > 0.1 || Math.Abs(built4.DisplayHeight - 3780.0) > 0.1 || Math.Abs(built35.DisplayWidth - 2352.0) > 0.1 || Math.Abs(built35.DisplayHeight - 1323.0) > 0.1 || !template2.EffectiveAnimationNames.SequenceEqual(animationNames) || !timelinesValid)
 				{
 					Environment.ExitCode = 2;
 				}

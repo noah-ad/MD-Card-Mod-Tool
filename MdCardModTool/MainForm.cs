@@ -318,8 +318,12 @@ public sealed class MainForm : Form
 
 	private Icon? _windowIcon;
 
-	public MainForm()
+	public MainForm() : this(null) { }
+
+	internal MainForm(Action<MainForm>? beforeDpiInitialization)
 	{
+		SuspendLayout();
+		AutoScaleMode = AutoScaleMode.None;
 		Localizer.SetLanguage(_settings.Language);
 		MotionPreferences.UserReducesMotion = _settings.ReduceMotion;
 		UiTheme.ApplyDarkTitleBar(this);
@@ -330,8 +334,6 @@ public sealed class MainForm : Form
 		BackColor = UiTheme.Window;
 		ForeColor = UiTheme.Text;
 		Font = new Font("Microsoft YaHei UI", 9f);
-		base.AutoScaleMode = AutoScaleMode.Dpi;
-		base.AutoScaleDimensions = new SizeF(96f, 96f);
 		base.KeyPreview = true;
 		DoubleBuffered = true;
 		_brandImage = LoadBrandImage();
@@ -531,6 +533,13 @@ public sealed class MainForm : Form
 				await ScanAsync();
 			}
 		};
+		// Defer the initial DPI pass until ALL code-built controls exist. Otherwise
+		// an early layout consumes 96 -> system DPI before the sidebar is added.
+		// Changing None -> Dpi clears AutoScaleDimensions in WinForms. Set the
+		// mode FIRST, then the design baseline, or 150% fonts sit in 96-DPI cells.
+		beforeDpiInitialization?.Invoke(this);
+		DpiLayout.Initialize(this);
+		ResumeLayout(performLayout: true);
 	}
 
 	private void BuildInterface()
@@ -753,15 +762,17 @@ public sealed class MainForm : Form
 		};
 		Label brandTitle = new()
 		{
-			Text = "MD CARD STUDIO",
+			Text = "MD STUDIO",
 			Dock = DockStyle.Fill,
-			Font = new Font("Segoe UI Semibold", 13f),
+			Font = new Font("Segoe UI Semibold", 11f),
+			AutoEllipsis = true,
 			ForeColor = UiTheme.Text,
 			TextAlign = ContentAlignment.BottomLeft
 		};
 		Label brandSubtitle = new()
 		{
-			Text = "MASTER DUEL MOD WORKSPACE",
+			Text = "MASTER DUEL\nMOD WORKSPACE",
+			AutoEllipsis = true,
 			Dock = DockStyle.Fill,
 			Font = new Font("Segoe UI", 7.5f),
 			ForeColor = UiTheme.Primary,
@@ -792,7 +803,7 @@ public sealed class MainForm : Form
 			BackColor = UiTheme.Surface,
 			Font = new Font("Segoe UI", 8f),
 			TextAlign = ContentAlignment.MiddleLeft,
-			Text = $"v2.0.6  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
+			Text = $"v2.0.9  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
 		};
 		TableLayoutPanel sidebar = new()
 		{
@@ -3103,15 +3114,18 @@ public sealed class MainForm : Form
 		{
 			string localRoot = IndexService.FindLocalRoot(gameRoot) ?? "";
 			int newCards = 0;
-			if (GameCardCatalogUpdater.NeedsUpdate(gameRoot))
+			if (await Task.Run(() => GameCardCatalogUpdater.NeedsUpdate(gameRoot), cancellationToken))
 			{
-				PostBackgroundStatus("检测到游戏 Build 或账号变化，正在后台读取 card_name / card_indx / card_prop…");
+				PostBackgroundStatus("检测到游戏资源、Build 或账号变化，正在后台读取 card_name / card_indx / card_prop…");
 				Action<int, int, int> catalogProgress = CreateThrottledBackgroundProgress(250,
 					(done, total, found) => $"正在更新四语卡片目录：{done:N0}/{total:N0} Bundle · 已定位 {found}/9 项数据…");
 				await Task.Run(() => GameCardCatalogUpdater.UpdateIfNeeded(gameRoot, catalogProgress, cancellationToken), cancellationToken);
 				cancellationToken.ThrowIfCancellationRequested();
 				if (!IsSameWorkspace(gameRoot, localRoot, index)) return;
 				_cardCatalog = CardCatalogService.LoadBestAvailable();
+				// Show new names immediately; animation indexing can take much longer.
+				UpdatePageHeader();
+				RenderList();
 				Action<int, int, int> missingCardProgress = CreateThrottledBackgroundProgress(250,
 					(done, total, added) => $"正在合并新卡图：{done:N0}/{total:N0} · 新增 {added:N0}…");
 				MissingCardScanResult additions = await Task.Run(() => IndexService.ScanMissingLocalCard(gameRoot, index, "0",

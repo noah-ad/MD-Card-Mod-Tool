@@ -5,8 +5,10 @@ using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -14,11 +16,12 @@ namespace MdCardModTool;
 
 public static class GameCardCatalogUpdater
 {
-	private sealed record LocatedAsset(string BundlePath, string FileName);
+	private sealed record LocatedAsset(string BundlePath, string FileName, int Priority);
 
 	private sealed record UpdateState
 	{
-		public int FormatVersion { get; init; } = 2;
+		public int FormatVersion { get; init; } = 3;
+		public string ResourceFingerprint { get; init; } = "";
 		public string BuildId { get; init; } = "";
 		public string LocalDataRoot { get; init; } = "";
 		public DateTime UpdatedUtc { get; init; } = DateTime.UtcNow;
@@ -29,18 +32,21 @@ public static class GameCardCatalogUpdater
 
 	public static string ExtraCatalogPath => Path.Combine(AppSettingsStore.AppDataRoot, "card-catalog-extra-v2.json.br");
 
-	private static string StatePath => Path.Combine(AppSettingsStore.AppDataRoot, "card-catalog-game-state-v2.json");
+	public static bool NeedsUpdate(string gameRoot) => NeedsUpdate(gameRoot, AppSettingsStore.AppDataRoot);
 
-	public static bool NeedsUpdate(string gameRoot)
+	internal static bool NeedsUpdate(string gameRoot, string cacheDirectory)
 	{
+		string extraPath = Path.Combine(cacheDirectory, "card-catalog-extra-v2.json.br");
+		string statePath = Path.Combine(cacheDirectory, "card-catalog-game-state-v2.json");
 		try
 		{
-			if (!File.Exists(ExtraCatalogPath) || !File.Exists(StatePath)) return true;
-			UpdateState? state = JsonSerializer.Deserialize<UpdateState>(File.ReadAllText(StatePath));
+			if (!File.Exists(extraPath) || !File.Exists(statePath)) return true;
+			UpdateState? state = JsonSerializer.Deserialize<UpdateState>(File.ReadAllText(statePath));
 			string localRoot = IndexService.FindLocalRoot(gameRoot) ?? "";
-			return state == null || state.FormatVersion != 2
+			return state == null || state.FormatVersion != 3
 				|| !string.Equals(state.BuildId, PortableIndexService.GetGameBuildId(gameRoot), StringComparison.Ordinal)
-				|| !string.Equals(Path.GetFullPath(state.LocalDataRoot), Path.GetFullPath(localRoot), StringComparison.OrdinalIgnoreCase);
+				|| !string.Equals(Path.GetFullPath(state.LocalDataRoot), Path.GetFullPath(localRoot), StringComparison.OrdinalIgnoreCase)
+				|| state.ResourceFingerprint != CaptureResourceFingerprint(localRoot, IndexService.StreamingRoot(gameRoot));
 		}
 		catch
 		{
@@ -50,28 +56,65 @@ public static class GameCardCatalogUpdater
 
 	public static IReadOnlyList<CardCatalogEntry> UpdateIfNeeded(string gameRoot,
 		Action<int, int, int>? progress = null, CancellationToken cancellationToken = default)
+		=> UpdateIfNeeded(gameRoot, AppSettingsStore.AppDataRoot, progress, cancellationToken);
+
+	internal static IReadOnlyList<CardCatalogEntry> UpdateIfNeeded(string gameRoot, string cacheDirectory,
+		Action<int, int, int>? progress = null, CancellationToken cancellationToken = default)
 	{
-		if (!NeedsUpdate(gameRoot))
+		string extraPath = Path.Combine(cacheDirectory, "card-catalog-extra-v2.json.br");
+		string statePath = Path.Combine(cacheDirectory, "card-catalog-game-state-v2.json");
+		if (!NeedsUpdate(gameRoot, cacheDirectory))
 		{
-			return File.Exists(ExtraCatalogPath) ? CardCatalogService.Read(ExtraCatalogPath) : [];
+			return File.Exists(extraPath) ? CardCatalogService.Read(extraPath) : [];
 		}
+		string localRoot = IndexService.FindLocalRoot(gameRoot) ?? "";
+		string fingerprint = CaptureResourceFingerprint(localRoot, IndexService.StreamingRoot(gameRoot));
 		IReadOnlyList<CardCatalogEntry> entries = Extract(gameRoot, progress, cancellationToken);
 		if (entries.Count == 0)
 		{
 			throw new InvalidDataException("没有从当前游戏 Build 解析出卡片目录；保留原目录不变。" );
 		}
-		CardCatalogService.Write(ExtraCatalogPath, entries);
+		cancellationToken.ThrowIfCancellationRequested();
+		if (fingerprint != CaptureResourceFingerprint(localRoot, IndexService.StreamingRoot(gameRoot)))
+			throw new IOException("卡片资源在读取期间发生变化，请等待游戏下载结束后重新加载目录；原目录未改动。");
+		if (File.Exists(extraPath))
+		{
+			try { entries = CardCatalogService.MergeGameCatalogs(CardCatalogService.Read(extraPath), entries); }
+			catch (InvalidDataException) { }
+			catch (JsonException) { }
+		}
+		CardCatalogService.Write(extraPath, entries);
 		UpdateState state = new()
 		{
 			BuildId = PortableIndexService.GetGameBuildId(gameRoot),
 			LocalDataRoot = IndexService.FindLocalRoot(gameRoot) ?? "",
-			CardCount = entries.Count
+			CardCount = entries.Count,
+			ResourceFingerprint = fingerprint
 		};
-		Directory.CreateDirectory(AppSettingsStore.AppDataRoot);
-		string temporary = StatePath + ".tmp";
+		Directory.CreateDirectory(cacheDirectory);
+		string temporary = statePath + ".tmp";
 		File.WriteAllText(temporary, JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
-		File.Move(temporary, StatePath, overwrite: true);
+		File.Move(temporary, statePath, overwrite: true);
 		return entries;
+	}
+
+	// Steam build IDs do not change for in-game data downloads. Hash cheap file
+	// metadata, not Bundle contents; paths also detect same-count substitutions.
+	internal static string CaptureResourceFingerprint(params string[] roots)
+	{
+		using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+		foreach (string root in roots)
+		{
+			if (!Directory.Exists(root)) continue;
+			foreach (FileInfo file in new DirectoryInfo(root).EnumerateFiles("*", SearchOption.AllDirectories)
+				.Where(file => file.Name.Length == 8 && file.Name.All(char.IsAsciiHexDigit))
+				.OrderBy(file => file.FullName, StringComparer.OrdinalIgnoreCase))
+			{
+				string item = $"{file.FullName.ToUpperInvariant()}\0{file.Length}\0{file.LastWriteTimeUtc.Ticks}\n";
+				hash.AppendData(Encoding.UTF8.GetBytes(item));
+			}
+		}
+		return Convert.ToHexString(hash.GetHashAndReset());
 	}
 
 	public static IReadOnlyList<CardCatalogEntry> Extract(string gameRoot,
@@ -80,22 +123,36 @@ public static class GameCardCatalogUpdater
 		string localRoot = IndexService.FindLocalRoot(gameRoot)
 			?? throw new DirectoryNotFoundException("未找到活动 LocalData 账号。" );
 		string streamingRoot = IndexService.StreamingRoot(gameRoot);
-		List<string> files = Directory.EnumerateFiles(localRoot, "*", SearchOption.AllDirectories).ToList();
+		List<string> files = Directory.EnumerateFiles(localRoot, "*", SearchOption.AllDirectories)
+			.OrderByDescending(File.GetLastWriteTimeUtc).ThenBy(path => path, StringComparer.OrdinalIgnoreCase).ToList();
 		if (Directory.Exists(streamingRoot))
 		{
-			files.AddRange(Directory.EnumerateFiles(streamingRoot, "*", SearchOption.AllDirectories));
+			files.AddRange(Directory.EnumerateFiles(streamingRoot, "*", SearchOption.AllDirectories)
+				.OrderByDescending(File.GetLastWriteTimeUtc).ThenBy(path => path, StringComparer.OrdinalIgnoreCase));
 		}
 		ConcurrentDictionary<string, LocatedAsset> located = new(StringComparer.OrdinalIgnoreCase);
 		int done = 0;
-		Parallel.ForEach(files, new ParallelOptions
+		bool[] completed = new bool[files.Count];
+		int completedPrefix = 0;
+		object completionGate = new();
+		Dictionary<string, LocatedAsset>? completeFamily = null;
+		int familyPriority = int.MaxValue;
+		Parallel.ForEach(Enumerable.Range(0, files.Count), new ParallelOptions
 		{
 			// AssetsTools parsing is allocation and storage heavy. Leaving CPU capacity
 			// for WinForms prevents Windows from marking the app unresponsive while a
 			// first-run catalog refresh scans tens of thousands of Bundles.
 			MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 4, 2, 4),
 			CancellationToken = cancellationToken
-		}, (file, state) =>
+		}, (priority, loop) =>
 		{
+			string file = files[priority];
+			void Locate(string key, string name)
+			{
+				System.Diagnostics.Trace.WriteLine($"Card dictionary {key}: {file}");
+				LocatedAsset incoming = new(file, name, priority);
+				located.AddOrUpdate(key, incoming, (_, current) => priority < current.Priority ? incoming : current);
+			}
 			try
 			{
 				if (!IsUnityBundle(file)) return;
@@ -104,9 +161,20 @@ public static class GameCardCatalogUpdater
 				{
 					string normalized = container.Replace('\\', '/').ToLowerInvariant();
 					string name = Path.GetFileName(normalized);
+					if (name is "card_prop.bytes" or "card_name.bytes" or "card_indx.bytes")
+					{
+						lock (completionGate)
+						{
+							if (priority < familyPriority)
+							{
+								var family = TryLocateDictionaryFamily(file, normalized, localRoot, streamingRoot);
+								if (family != null) { completeFamily = family; familyPriority = priority; }
+							}
+						}
+					}
 					if (name == "card_prop.bytes")
 					{
-						located.TryAdd("prop", new LocatedAsset(file, name));
+						Locate("prop", name);
 					}
 					else if (name is "card_name.bytes" or "card_indx.bytes")
 					{
@@ -115,7 +183,7 @@ public static class GameCardCatalogUpdater
 							if (normalized.Contains("/" + language + "/", StringComparison.Ordinal)
 								|| normalized.Contains("_" + language, StringComparison.Ordinal))
 							{
-								located.TryAdd(language + "|" + (name.StartsWith("card_name", StringComparison.Ordinal) ? "name" : "index"), new LocatedAsset(file, name));
+								Locate(language + "|" + (name.StartsWith("card_name", StringComparison.Ordinal) ? "name" : "index"), name);
 							}
 						}
 					}
@@ -131,9 +199,21 @@ public static class GameCardCatalogUpdater
 				{
 					progress?.Invoke(current, files.Count, located.Count);
 				}
-				if (located.Count >= Languages.Length * 2 + 1) state.Stop();
+				lock (completionGate)
+				{
+					completed[priority] = true;
+					while (completedPrefix < completed.Length && completed[completedPrefix]) completedPrefix++;
+					// Stop only once every higher-priority candidate was checked. Plain
+					// first-wins is nondeterministic; scanning the entire texture library
+					// after all nine best dictionary assets are found is unnecessary.
+					if (located.Count == Languages.Length * 2 + 1
+						&& completedPrefix > located.Values.Max(asset => asset.Priority)) loop.Stop();
+					if (completeFamily != null && completedPrefix > familyPriority) loop.Stop();
+				}
 			}
 		});
+		if (completeFamily != null)
+			located = new ConcurrentDictionary<string, LocatedAsset>(completeFamily, StringComparer.OrdinalIgnoreCase);
 
 		if (!located.TryGetValue("prop", out LocatedAsset? propertyLocation))
 		{
@@ -154,6 +234,42 @@ public static class GameCardCatalogUpdater
 			MergeLanguage(result, language, names, indexes, properties);
 		}
 		return result.Values.Where(HasAnyName).OrderBy(entry => entry.CardId).ToArray();
+	}
+
+	private static Dictionary<string, LocatedAsset>? TryLocateDictionaryFamily(string observedFile,
+		string container, string localRoot, string streamingRoot)
+	{
+		// The version folder is discovered from the actual Bundle, never hard-coded.
+		// Confirm its CRC mapping before using it to probe other language packs.
+		Match match = Regex.Match(container,
+			@"^assets/resourcesassetbundle/card/data/([^/]+)/(zh-cn|zh-tw|ja-jp|en-us)/(card_name|card_indx|card_prop)\.bytes$");
+		if (!match.Success) return null;
+		string family = match.Groups[1].Value;
+		string stem = "CARD_" + CultureInfo.InvariantCulture.TextInfo.ToTitleCase(match.Groups[3].Value[5..]);
+		string language = CultureInfo.GetCultureInfo(match.Groups[2].Value).Name;
+		string relative = IndexService.ResourceBundleRelativePath($"Card/Data/{family}/{language}/{stem}");
+		if (!Path.GetFileName(relative).Equals(Path.GetFileName(observedFile), StringComparison.OrdinalIgnoreCase)) return null;
+		Dictionary<string, LocatedAsset> found = new(StringComparer.OrdinalIgnoreCase);
+		foreach (string code in Languages)
+		{
+			language = CultureInfo.GetCultureInfo(code).Name;
+			foreach (string assetName in new[] { "CARD_Name", "CARD_Indx", "CARD_Prop" })
+			{
+				relative = IndexService.ResourceBundleRelativePath($"Card/Data/{family}/{language}/{assetName}");
+				string expected = $"assets/resourcesassetbundle/card/data/{family}/{code}/{assetName.ToLowerInvariant()}.bytes";
+				foreach (string root in new[] { localRoot, streamingRoot })
+				{
+					string path = Path.Combine(root, relative);
+					if (!File.Exists(path)) continue;
+					if (!new ModEngine().ReadAssetBundleContainerPaths(path).Any(p => p.Replace('\\', '/').Equals(expected, StringComparison.OrdinalIgnoreCase))) continue;
+					string key = assetName == "CARD_Prop" ? "prop" : code + (assetName == "CARD_Name" ? "|name" : "|index");
+					found.TryAdd(key, new(path, assetName.ToLowerInvariant() + ".bytes", 0));
+					break;
+				}
+			}
+		}
+		return found.ContainsKey("prop") && Languages.Any(code => found.ContainsKey(code + "|name") && found.ContainsKey(code + "|index"))
+			? found : null;
 	}
 
 	private static void MergeLanguage(Dictionary<int, CardCatalogEntry> result, string language,

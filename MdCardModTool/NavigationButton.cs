@@ -58,7 +58,7 @@ public sealed class NavigationButton : RoundedButton
 		};
 		GraphicsState state = e.Graphics.Save();
 		e.Graphics.ScaleTransform(scale, scale);
-		DrawGlyph(e.Graphics, icon, new Rectangle(17, 12, 20, 20));
+		DrawGlyph(e.Graphics, icon, new Rectangle(17, (int)Math.Round(Height / scale / 2f - 10f), 20, 20));
 		e.Graphics.Restore(state);
 	}
 

@@ -1185,6 +1185,7 @@ public sealed class MonsterAnimationForm : Form
 			try
 			{
 				SetBusy(busy: true, "animation.status.building");
+				await Task.Run(() => AnimationWriteLease.Preflight(set));
 				MonsterAnimationTemplate template = await Task.Run(() => _service.ReadTemplate(_gameRoot, set));
 				MonsterAnimationBuildResult built = await Task.Run(() => MonsterAnimationBuilder.Build(_media.FramePaths, set.CardId, (int)_fps.Value, (int)_scale.Value, template, int.Parse(_atlasEdge.Text)));
 				try

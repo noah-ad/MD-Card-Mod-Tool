@@ -1079,9 +1079,11 @@ public sealed class ModEngine
 				RedirectStandardError = true,
 				RedirectStandardOutput = true
 			};
-			string[] array = new string[11]
+			// Use the encoder's default BC7 search instead of forcing exhaustive
+			// search for every HD/SD atlas. Format and alpha handling are unchanged.
+			string[] array = new string[9]
 			{
-				"-nologo", "-y", "-f", "BC7_UNORM", "-bc", "x", "-m", "1", "-o", temporary,
+				"-nologo", "-y", "-f", "BC7_UNORM", "-m", "1", "-o", temporary,
 				input
 			};
 			foreach (string arg in array)

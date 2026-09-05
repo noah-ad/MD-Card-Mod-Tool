@@ -7,7 +7,7 @@ public static class Localizer
 {
 	private static readonly Dictionary<string, string[]> Strings = new(StringComparer.Ordinal)
 	{
-		["app.title"] = ["MD 卡片 Mod 工具 2.0.6", "MD 卡片 Mod 工具 2.0.6", "MD カード Mod ツール 2.0.6", "MD Card Mod Tool 2.0.6"],
+		["app.title"] = ["MD 卡片 Mod 工具 2.0.9", "MD 卡片 Mod 工具 2.0.9", "MD カード Mod ツール 2.0.9", "MD Card Mod Tool 2.0.9"],
 		["animation.donor.action"] = ["使用其他卡动画", "使用其他卡動畫", "他カードの演出を使用", "Use another card's animation"],
 		["animation.donor.title"] = ["使用其他卡的动画 · 整套替换", "使用其他卡的動畫 · 整套替換", "他カードの演出 · 一括置換", "Use another card's animation · Complete rig"],
 		["animation.donor.search"] = ["搜索来源卡号 / 卡名", "搜尋來源卡號 / 卡名", "元カードID・カード名を検索", "Search source card ID / name"],
@@ -102,7 +102,7 @@ public static class Localizer
 		["animation.field.scale"] = ["全游戏画面占比（实时）%", "全遊戲畫面占比（即時）%", "ゲーム画面比率（リアルタイム）%", "Game Canvas Scale (live) %"],
 		["animation.field.chroma"] = ["绿幕背景透明化", "綠幕背景透明化", "グリーンバック透過", "Green-screen Transparency"],
 		["animation.option.chroma"] = ["自动去绿幕", "自動去綠幕", "グリーンバックを自動除去", "Remove green screen automatically"],
-		["animation.note"] = ["100% 对应 Master Duel 完整 16:9 游戏画布（4800×2700），比例调整会即时反映在左侧。\n\n“自动高清”会先探测帧数，再选择图集可容纳的最高画质；绿幕选项会保留柔化后的透明边缘。\n\n仅支持预览与替换已有官方召唤演出的怪兽。研究确认：单独创建六个 Bundle 和强制资格判断仍缺少官方时间轴／内部登记，实机会卡顿且不播放，因此已下架。", "100% 對應 Master Duel 完整 16:9 遊戲畫布（4800×2700），比例調整會即時反映於左側。\n\n「自動高清」會先偵測影格數，再選擇圖集可容納的最高畫質；綠幕選項會保留柔化後的透明邊緣。\n\n僅支援預覽與替換既有官方召喚演出的怪獸。研究確認：單獨建立六個 Bundle 並強制資格判定仍缺少官方時間軸／內部登記，實機會停頓且不播放，因此已下架。", "100% は Master Duel の16:9全画面（4800×2700）に相当し、比率変更は左側へ即時反映されます。\n\n「自動高画質」はフレーム数を調べ、アトラスに収まる最高画質を選びます。グリーンバック除去は滑らかな透過境界を保持します。\n\n公式召喚演出が既にあるモンスターのプレビューと置換のみ対応します。6 Bundleの新規作成と判定強制だけでは公式タイムライン／内部登録が不足し、実機で停止後に再生されないため廃止しました。", "100% represents Master Duel's full 16:9 canvas (4800×2700); scale changes update the preview immediately.\n\nAutomatic HD probes the frame count, then chooses the highest quality that fits the atlas. Green-screen removal preserves softened transparent edges.\n\nOnly monsters with an existing official summon cut-in can be previewed and replaced. Research confirmed that six new Bundles plus a forced eligibility check still lack the official timeline/internal registration and stall without playing, so creation was removed."],
+		["animation.note"] = ["100% 使用校准后的 16:9 画布（6720×3780），等于 2.0.8 的 140%。这是手动校准，不保证所有卡在游戏中完全铺满。非 16:9 素材等比留边。仅支持替换已有官方动画的怪兽。", "100% 使用校準後的 16:9 畫布（6720×3780），等於 2.0.8 的 140%。這是手動校準，不保證所有卡在遊戲中完全鋪滿。非 16:9 素材等比留邊。僅支援替換已有官方動畫的怪獸。", "100% は補正後の16:9キャンバス（6720×3780）で、2.0.8の140%に相当します。手動補正のため、すべてのカードでゲーム全画面表示を保証しません。公式演出のあるモンスターのみ置換できます。", "100% uses a calibrated 16:9 canvas (6720×3780), equivalent to 140% in 2.0.8. This manual calibration does not guarantee fullscreen coverage for every card. Other aspect ratios retain borders. Only existing official monster animations can be replaced."],
 		["animation.preview.drop"] = ["拖入 GIF、视频或图片序列开始预览", "拖入 GIF、影片或圖片序列開始預覽", "GIF・動画・画像連番をドロップしてプレビュー", "Drop a GIF, video, or image sequence to preview"],
 		["animation.preview.canvas"] = ["全游戏画布 16:9 · {0}%", "全遊戲畫布 16:9 · {0}%", "ゲーム全画面 16:9 · {0}%", "Full game canvas 16:9 · {0}%"],
 		["animation.preview.rendering"] = ["正在边渲染边播放：{0}/{1} 帧…", "正在邊渲染邊播放：{0}/{1} 幀…", "レンダリングしながら再生中：{0}/{1} フレーム…", "Rendering while playing: {0}/{1} frames…"],
@@ -153,7 +153,7 @@ public static class Localizer
 		["animation.message.completed.title"] = ["动画写入完成", "動畫寫入完成", "アニメーション書込み完了", "Animation Write Complete"],
 		["animation.message.completed"] = ["两套召唤动画资源已经全部写入、验证并纳入恢复记录。{0}", "兩套召喚動畫資源已全部寫入、驗證並納入復原記錄。{0}", "両画質の召喚アニメーション資源を書込み、検証して復元記録へ追加しました。{0}", "Both summon animation tiers were written, validated, and added to the restore record.{0}"],
 		["animation.message.launch.restart"] = ["\n\n请完全退出并重新启动 Master Duel 后测试。", "\n\n請完全結束並重新啟動 Master Duel 後測試。", "\n\nMaster Duel を完全に終了して再起動後、確認してください。", "\n\nExit Master Duel completely, restart it, and then test."],
-		["animation.error.replace"] = ["动画替换失败（已回滚）", "動畫替換失敗（已回復）", "アニメーション置換に失敗（ロールバック済み）", "Animation Replacement Failed (Rolled Back)"],
+		["animation.error.replace"] = ["动画替换未完成", "動畫替換未完成", "アニメーション置換が完了しませんでした", "Animation Replacement Incomplete"],
 		["animation.prompt.restore"] = ["请先输入卡号并定位动画资源。", "請先輸入卡號並定位動畫資源。", "カード番号を入力してアニメーション資源を検索してください。", "Enter a card ID and locate its animation assets first."],
 		["animation.confirm.restore.title"] = ["还原动画", "還原動畫", "アニメーションを復元", "Restore Animation"],
 		["animation.confirm.restore.message"] = ["确认把卡号 {0} 的动画 Bundle 全部还原为首次替换前的版本？", "確定將卡號 {0} 的動畫 Bundle 全部還原為首次替換前的版本？", "カード番号 {0} の全アニメーションBundleを初回置換前へ戻しますか？", "Restore every animation Bundle for card {0} to its state before the first replacement?"],

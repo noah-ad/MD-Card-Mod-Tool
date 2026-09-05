@@ -229,7 +229,7 @@ public static class MonsterAnimationCompatibilityValidator
 			|| Math.Abs(skeleton.GetProperty("width").GetDouble() - MonsterAnimationBuilder.GameCanvasWidth) > 0.1
 			|| Math.Abs(skeleton.GetProperty("height").GetDouble() - MonsterAnimationBuilder.GameCanvasHeight) > 0.1)
 		{
-			throw new InvalidDataException("Skeleton 不是 4800×2700 的 Spine 4.2 JSON。" );
+			throw new InvalidDataException($"Skeleton 不是 {MonsterAnimationBuilder.GameCanvasWidth}×{MonsterAnimationBuilder.GameCanvasHeight} 的 Spine 4.2 JSON。" );
 		}
 		JsonElement slot = root.GetProperty("slots").EnumerateArray()
 			.FirstOrDefault(item => item.TryGetProperty("attachment", out JsonElement attachment)

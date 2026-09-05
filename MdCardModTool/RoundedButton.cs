@@ -107,10 +107,11 @@ public class RoundedButton : Button
 		// into a control-sized bitmap instead and commit the whole client rectangle in
 		// one clipped blit. This keeps hover/playback paints inside this HWND even when
 		// siblings are moving.
-		if (_paintSurface == null || _paintSurface.Size != ClientSize)
+		if (_paintSurface == null || _paintSurface.Size != ClientSize || Math.Abs(_paintSurface.HorizontalResolution - DeviceDpi) > .1f)
 		{
 			_paintSurface?.Dispose();
 			_paintSurface = new Bitmap(ClientSize.Width, ClientSize.Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+			_paintSurface.SetResolution(DeviceDpi, DeviceDpi);
 		}
 		Bitmap surface = _paintSurface;
 		using Graphics graphics = Graphics.FromImage(surface);

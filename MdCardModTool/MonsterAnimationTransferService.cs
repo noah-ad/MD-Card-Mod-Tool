@@ -17,6 +17,7 @@ public static class MonsterAnimationTransferService
 	public static int Replace(string gameRoot, MonsterAnimationSet target, MonsterAnimationSet donor, Action<int>? afterCommit = null)
 	{
 		EnsureGameClosed();
+		AnimationWriteLease.Preflight(target);
 		if (target.CardId == donor.CardId) throw new InvalidOperationException("来源卡与目标卡不能相同。");
 		var targets = MonsterAnimationAssetPairing.FindComplete(target);
 		var sources = MonsterAnimationAssetPairing.FindComplete(donor);
@@ -78,11 +79,15 @@ public static class MonsterAnimationTransferService
 				if (!File.Exists(backup)) File.Copy(item.Snapshot, backup);
 			}
 			var committed = new List<(string Path, string Snapshot)>();
+			using var lease = AnimationWriteLease.Acquire(pending.Keys);
+			foreach (var item in pending.Values)
+				if (Convert.ToHexString(SHA256.HashData(lease.Streams[item.Original.BundlePath])) != item.Hash)
+					throw new IOException("目标动画在制作期间已改变，未提交，请重新载入。");
 			try
 			{
 				foreach (var item in pending.Values)
 				{
-					File.Move(item.Staged.BundlePath, item.Original.BundlePath, overwrite: true);
+					File.Replace(item.Staged.BundlePath, item.Original.BundlePath, null);
 					committed.Add((item.Original.BundlePath, item.Snapshot));
 					afterCommit?.Invoke(committed.Count);
 				}

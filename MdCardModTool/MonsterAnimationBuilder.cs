@@ -46,9 +46,10 @@ public static class MonsterAnimationBuilder
 
 	private static readonly int[] AutomaticFrameEdges = new int[10] { 1920, 1600, 1280, 1024, 896, 768, 640, 512, 384, 256 };
 
-	public const double GameCanvasWidth = 4800.0;
+	// User-requested calibration: new 100% equals the old 140% geometry.
+	public const double GameCanvasWidth = 4800.0 * 1.4;
 
-	public const double GameCanvasHeight = 2700.0;
+	public const double GameCanvasHeight = 2700.0 * 1.4;
 
 	public static int ChooseAutomaticFrameEdge(int frameCount, int sourceWidth, int sourceHeight, int maxAtlasEdge)
 	{
@@ -482,7 +483,7 @@ public static class MonsterAnimationBuilder
 			["hash"] = "MDCardModTool",
 			["spine"] = template.SpineVersion.StartsWith("4.2", StringComparison.Ordinal) ? template.SpineVersion : "4.2.43",
 			["x"] = -GameCanvasWidth / 2d,
-			["y"] = -1470d,
+			["y"] = -GameCanvasHeight / 2d - 120d,
 			["width"] = GameCanvasWidth,
 			["height"] = GameCanvasHeight,
 			["fps"] = framesPerSecond,
@@ -491,7 +492,7 @@ public static class MonsterAnimationBuilder
 		};
 		jsonObject["bones"] = new JsonArray(
 			new JsonObject { ["name"] = "root" },
-			new JsonObject { ["name"] = "Body", ["parent"] = "root" });
+			new JsonObject { ["name"] = "Body", ["parent"] = "root", ["y"] = -120d });
 		jsonObject["slots"] = new JsonArray(new JsonObject
 		{
 			["name"] = slotName,
@@ -527,23 +528,17 @@ public static class MonsterAnimationBuilder
 		{
 			new JsonObject
 			{
-				["time"] = 0d, ["x"] = 0.7d, ["y"] = 0.7d,
-				["curve"] = new JsonArray(0.08d, 0.816d, 0.176d, 0.931d, 0.08d, 0.816d, 0.176d, 0.931d)
+				["time"] = 0d, ["x"] = 1d, ["y"] = 1d
 			},
-			new JsonObject { ["time"] = Math.Min(0.367d, duration), ["x"] = 0.95d, ["y"] = 0.95d },
-			new JsonObject { ["time"] = duration, ["x"] = 1.1d, ["y"] = 1.1d }
+			new JsonObject { ["time"] = duration, ["x"] = 1d, ["y"] = 1d }
 		};
-		JsonArray translate = new()
-		{
-			new JsonObject { ["time"] = 0d, ["x"] = 0d, ["y"] = -65.52d },
-			new JsonObject { ["time"] = duration, ["x"] = 0d, ["y"] = 47.65d }
-		};
+		// Imported video already contains its own motion. A hidden 70% -> 110%
+		// popup and vertical drift made the result disagree with the flat preview.
 		return new JsonObject
 		{
 			["bones"] = new JsonObject
 			{
-				["root"] = new JsonObject { ["scale"] = scale },
-				["Body"] = new JsonObject { ["translate"] = translate }
+				["root"] = new JsonObject { ["scale"] = scale }
 			},
 			["slots"] = new JsonObject { [slotName] = new JsonObject { ["attachment"] = keyframes } }
 		};
