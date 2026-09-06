@@ -108,7 +108,8 @@ public sealed class ModEngine
 							Width = width,
 							Height = height,
 							Category = CategoryForSource(name, width, height, sourceKind),
-							CardKey = CardKey(name),
+							CardKey = sourceKind == "本地卡图" && CardBundleIdentity.Find(bundlePath) is { Length: > 0 } targetId
+								? targetId : CardKey(name),
 							SourceKind = sourceKind
 						});
 					}

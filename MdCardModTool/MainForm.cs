@@ -702,7 +702,29 @@ public sealed class MainForm : Form
 			Padding = new Padding(7, 14, 14, 14),
 			BackColor = UiTheme.Window
 		};
-		right.Controls.Add(previewLayout);
+		DarkScrollPanel previewScroll = new()
+		{
+			Name = "ResourcePreviewScroll",
+			UseExplicitContentHeight = true,
+			Dock = DockStyle.Fill,
+			BackColor = UiTheme.Window
+		};
+		previewScroll.ContentPanel.Controls.Add(previewLayout);
+		void ResizePreviewContent()
+		{
+			// Reserve a real image viewport BEFORE the fixed detail/action rows.
+			// Use scaled row heights, never the remaining (possibly zero) height.
+			int fixedRows = (int)Math.Ceiling(previewLayout.RowStyles[0].Height
+				+ previewLayout.RowStyles[2].Height + previewLayout.RowStyles[3].Height);
+			previewScroll.ContentHeight = Math.Max(previewScroll.ClientSize.Height,
+				fixedRows + (int)Math.Ceiling(320 * previewLayout.RowStyles[0].Height / 46f)
+				+ previewLayout.Margin.Vertical);
+		}
+		previewScroll.SizeChanged += (_, _) => ResizePreviewContent();
+		previewScroll.DpiChangedAfterParent += (_, _) => ResizePreviewContent();
+		previewLayout.Layout += (_, _) => ResizePreviewContent();
+		right.Controls.Add(previewScroll);
+		ResizePreviewContent();
 		_workspaceSplit = new SplitContainer
 		{
 			Dock = DockStyle.Fill,
@@ -803,7 +825,7 @@ public sealed class MainForm : Form
 			BackColor = UiTheme.Surface,
 			Font = new Font("Segoe UI", 8f),
 			TextAlign = ContentAlignment.MiddleLeft,
-			Text = $"v2.0.9  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
+			Text = $"v2.0.10  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
 		};
 		TableLayoutPanel sidebar = new()
 		{
@@ -3519,10 +3541,10 @@ public sealed class MainForm : Form
 						IndexService.Save(_gameRoot, _textures);
 					});
 					RefreshCategories();
-					SetModsOnly(enabled: true);
+					SetModsOnly(enabled: false);
 					SelectAllCategory();
 					RenderList();
-					_status.Text = $"已导入 {result.BundleCount:N0} 个 Mod Bundle，并加入“我的 Mod”。";
+					_status.Text = $"已导入 {result.BundleCount:N0} 个 Mod Bundle；保留全部资源显示，可在“我的 Mod”筛选。";
 					MessageBox.Show(this, $"已导入 {result.BundleCount:N0} 个 Bundle。\n\n现在可在“我的 Mod”中集中查看和还原。请完全退出并重启 Master Duel。", "导入完成", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
 				}
 			}
@@ -3569,15 +3591,7 @@ public sealed class MainForm : Form
 			TexRef[] array = existing;
 			foreach (TexRef texture in array)
 			{
-				TexRef updated = scanned.FirstOrDefault((TexRef x) => x.PathId == texture.PathId && x.AssetFileName == texture.AssetFileName);
-				if (updated != null)
-				{
-					texture.Width = updated.Width;
-					texture.Height = updated.Height;
-					texture.Category = updated.Category;
-					texture.OverrideBundlePath = null;
-					IndexService.NormalizeLocalCardCategory(texture);
-				}
+				CardBundleIdentity.Refresh(texture, scanned);
 			}
 		}
 	}

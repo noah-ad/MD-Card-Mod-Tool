@@ -27,6 +27,8 @@ internal static class Program
 	private static void Main(string[] args)
 	{
 		ApplicationConfiguration.Initialize();
+		if (args.Length == 3 && args[0] == "--test-mod-card-identity") { ModCardIdentityTests.Run(args[1],args[2]); return; }
+		if (args.Length == 2 && args[0] == "--test-resource-preview-scroll") { ResourcePreviewScrollTests.Run(args[1]); return; }
 		if (args.Length > 0 && args[0].StartsWith("--test-", StringComparison.Ordinal))
 		{
 			// CLI UI tests use DoEvents instead of Application.Run. Keep async form

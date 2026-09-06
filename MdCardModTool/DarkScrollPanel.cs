@@ -30,12 +30,14 @@ public sealed class DarkScrollPanel : UserControl
 	private int _contentHeight;
 
 	public Panel ContentPanel => _content;
+	public bool UseExplicitContentHeight { get; set; }
 
 	public int ContentHeight
 	{
 		get => _contentHeight;
 		set
 		{
+			if (_contentHeight == Math.Max(0, value)) return;
 			_contentHeight = Math.Max(0, value);
 			PerformLayout();
 		}
@@ -58,7 +60,7 @@ public sealed class DarkScrollPanel : UserControl
 	{
 		base.OnLayout(e);
 		int viewportHeight = Math.Max(0, ClientSize.Height);
-		int measured = Math.Max(_contentHeight, MeasureContentHeight());
+		int measured = UseExplicitContentHeight ? _contentHeight : Math.Max(_contentHeight, MeasureContentHeight());
 		bool needsScroll = measured > viewportHeight;
 		_scroll.Visible = needsScroll;
 		_scroll.ViewportSize = viewportHeight;
@@ -93,8 +95,18 @@ public sealed class DarkScrollPanel : UserControl
 	private void AttachWheel(Control control)
 	{
 		control.MouseWheel += OnWheel;
+		control.Enter += (_, _) => Reveal(control);
 		control.ControlAdded += (_, e) => AttachWheel(e.Control);
 		foreach (Control child in control.Controls) AttachWheel(child);
+	}
+
+	private void Reveal(Control control)
+	{
+		if (!_scroll.Visible || !control.IsHandleCreated) return;
+		Rectangle bounds = _content.RectangleToClient(control.RectangleToScreen(control.ClientRectangle));
+		if (bounds.Top < _scroll.Value) _scroll.Value = bounds.Top;
+		else if (bounds.Bottom > _scroll.Value + ClientSize.Height)
+			_scroll.Value = bounds.Bottom - ClientSize.Height;
 	}
 }
 
