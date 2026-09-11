@@ -10,7 +10,7 @@ namespace MdCardModTool;
 
 internal static class AnimationWriteTests
 {
-    public static void Run(string gameRoot, string output)
+    public static void Run(string gameRoot, string output, bool largeAtlas = false)
     {
         Directory.CreateDirectory(output);
         var original = MonsterAnimationIndexService.Find(gameRoot, "22524");
@@ -33,9 +33,14 @@ internal static class AnimationWriteTests
         if (timer.Elapsed.TotalSeconds > 4) throw new Exception("Locked target did not fail promptly");
         long lockMs = timer.ElapsedMilliseconds;
         string[] frames = [Path.Combine(output, "a.png"), Path.Combine(output, "b.png")];
-        using (Image<Rgba32> a = new(160,90,new Rgba32(200,30,40,255))) a.SaveAsPng(frames[0]);
-        using (Image<Rgba32> b = new(160,90,new Rgba32(20,130,220,255))) b.SaveAsPng(frames[1]);
-        using var built = MonsterAnimationBuilder.Build(frames, "22524", 12, 100, service.ReadTemplate(target), 4096);
+        int frameWidth = largeAtlas ? 4096 : 160;
+        int frameHeight = largeAtlas ? 2304 : 90;
+        using (Image<Rgba32> a = new(frameWidth,frameHeight,new Rgba32(200,30,40,255))) a.SaveAsPng(frames[0]);
+        using (Image<Rgba32> b = new(frameWidth,frameHeight,new Rgba32(20,130,220,255))) b.SaveAsPng(frames[1]);
+        using var built = MonsterAnimationBuilder.Build(frames, "22524", 12, 100, service.ReadTemplate(target), largeAtlas ? 8192 : 4096);
+        if (largeAtlas && (built.Hd.AtlasImage.Width != 8192 || built.Hd.AtlasImage.Height != 8192))
+            throw new Exception("Large atlas test must exercise a real 8192 x 8192 texture");
+        Console.WriteLine($"atlas={built.Hd.AtlasImage.Width}x{built.Hd.AtlasImage.Height}; generated=True");
         if (Math.Abs(built.DisplayWidth - 6720) > .001 || Math.Abs(built.DisplayHeight - 3780) > .001)
             throw new Exception("New 100% must equal old 140% geometry");
         var before = target.Assets.ToDictionary(a => a.BundlePath, a => Hash(a.BundlePath));
@@ -50,6 +55,10 @@ internal static class AnimationWriteTests
         service.Apply(output, target, built);
         long applyMs = timer.ElapsedMilliseconds;
         MonsterAnimationCompatibilityValidator.Validate(target, false);
+        var hdPair = MonsterAnimationAssetPairing.FindComplete(target).First(p => p.Tier == "HighEnd_HD");
+        var writtenMetadata = new ModEngine().ReadAnimationTextureMetadata(hdPair.Texture);
+        if (writtenMetadata.Width != built.Hd.AtlasImage.Width || writtenMetadata.Height != built.Hd.AtlasImage.Height)
+            throw new Exception("Written atlas dimensions changed");
         using (var current = MonsterAnimationCurrentPreview.TryLoad(target)
             ?? throw new Exception("Written calibrated animation cannot be read"))
             if (current.ScalePercent != 100) throw new Exception("Calibrated scale does not round-trip");

@@ -40,6 +40,7 @@ internal static class Program
 			Control.CheckForIllegalCrossThreadCalls = true;
 		}
 		if (args.Length == 3 && args[0] == "--test-animation-write-lock") { AnimationWriteTests.Run(args[1], args[2]); return; }
+		if (args.Length == 3 && args[0] == "--test-animation-atlas-8192") { AnimationWriteTests.Run(args[1], args[2], largeAtlas: true); return; }
 		if (args.Length == 3 && args[0] == "--test-card-catalog-refresh") { CardCatalogRefreshTests.Run(args[1], args[2]); return; }
 		if (args.Length == 2 && args[0] == "--test-sidebar-dpi") { SidebarDpiTests.Run(args[1]); return; }
 		if (args.Length == 3 && args[0] == "--test-new-animation-links") { AnimationLinkTests.Run(args[1], args[2]); return; }

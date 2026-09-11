@@ -89,7 +89,7 @@ public static class MonsterAnimationCompatibilityValidator
 		MonsterAnimationAssetTriplet pair)
 	{
 		AnimationTextureMetadata texture = engine.ReadAnimationTextureMetadata(pair.Texture);
-		if (texture.Width <= 0 || texture.Height <= 0 || texture.Width > 4096 || texture.Height > 4096)
+		if (texture.Width <= 0 || texture.Height <= 0 || texture.Width > 8192 || texture.Height > 8192)
 		{
 			throw new InvalidDataException($"{pair.Tier} 动画图集尺寸 {texture.Width}×{texture.Height} 无效。" );
 		}

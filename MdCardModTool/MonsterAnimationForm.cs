@@ -210,7 +210,7 @@ public sealed class MonsterAnimationForm : Form
 		UiTheme.StyleComboBox(_animationSelector);
 		_frameEdge.Items.AddRange(new object[8] { Localizer.T("animation.quality.auto"), "512", "768", "1024", "1280", "1600", "1920", "2048" });
 		_frameEdge.SelectedIndex = 0;
-		_atlasEdge.Items.AddRange(new object[2] { "2048", "4096" });
+		_atlasEdge.Items.AddRange(new object[3] { "2048", "4096", "8192" });
 		_atlasEdge.SelectedItem = "4096";
 		_animationSelector.Items.Add("animation");
 		_animationSelector.SelectedIndex = 0;

@@ -7,7 +7,7 @@ public static class Localizer
 {
 	private static readonly Dictionary<string, string[]> Strings = new(StringComparer.Ordinal)
 	{
-		["app.title"] = ["MD 卡片 Mod 工具 2.0.10", "MD 卡片 Mod 工具 2.0.10", "MD カード Mod ツール 2.0.10", "MD Card Mod Tool 2.0.10"],
+		["app.title"] = ["MD 卡片 Mod 工具 2.0.11", "MD 卡片 Mod 工具 2.0.11", "MD カード Mod ツール 2.0.11", "MD Card Mod Tool 2.0.11"],
 		["animation.donor.action"] = ["使用其他卡动画", "使用其他卡動畫", "他カードの演出を使用", "Use another card's animation"],
 		["animation.donor.title"] = ["使用其他卡的动画 · 整套替换", "使用其他卡的動畫 · 整套替換", "他カードの演出 · 一括置換", "Use another card's animation · Complete rig"],
 		["animation.donor.search"] = ["搜索来源卡号 / 卡名", "搜尋來源卡號 / 卡名", "元カードID・カード名を検索", "Search source card ID / name"],
