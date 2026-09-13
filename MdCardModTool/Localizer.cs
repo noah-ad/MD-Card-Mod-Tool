@@ -7,7 +7,7 @@ public static class Localizer
 {
 	private static readonly Dictionary<string, string[]> Strings = new(StringComparer.Ordinal)
 	{
-		["app.title"] = ["MD 卡片 Mod 工具 2.0.11", "MD 卡片 Mod 工具 2.0.11", "MD カード Mod ツール 2.0.11", "MD Card Mod Tool 2.0.11"],
+		["app.title"] = ["MD 卡片 Mod 工具 2.0.12", "MD 卡片 Mod 工具 2.0.12", "MD カード Mod ツール 2.0.12", "MD Card Mod Tool 2.0.12"],
 		["animation.donor.action"] = ["使用其他卡动画", "使用其他卡動畫", "他カードの演出を使用", "Use another card's animation"],
 		["animation.donor.title"] = ["使用其他卡的动画 · 整套替换", "使用其他卡的動畫 · 整套替換", "他カードの演出 · 一括置換", "Use another card's animation · Complete rig"],
 		["animation.donor.search"] = ["搜索来源卡号 / 卡名", "搜尋來源卡號 / 卡名", "元カードID・カード名を検索", "Search source card ID / name"],
@@ -109,7 +109,7 @@ public static class Localizer
 		["animation.status.locating"] = ["正在按卡号计算 SD / HighEnd_HD 的 6 个资源路径…", "正在依卡號計算 SD / HighEnd_HD 的 6 個資源路徑…", "カード番号から SD / HighEnd_HD の6資源パスを計算中…", "Resolving the six SD / HighEnd_HD resource paths…"],
 		["animation.status.located.complete"] = ["{0} · 可替换{1} · 动画名 {2}", "{0} · 可替換{1} · 動畫名稱 {2}", "{0} · 置換可能{1} · アニメーション {2}", "{0} · Replaceable{1} · Animations {2}"],
 		["animation.status.located.fallback"] = ["本卡资源未完整下载 · 正在只读播放同名官方演出 P{0}{1} · 动画名 {2}", "本卡資源未完整下載 · 正在唯讀播放同名官方演出 P{0}{1} · 動畫名稱 {2}", "このカードの素材は未完備 · 同名の公式演出 P{0} を読み取り専用で再生中{1} · {2}", "This card's assets are incomplete · playing equivalent official cut-in P{0} read-only{1} · {2}"],
-		["animation.status.located.unsupported"] = ["没有官方召唤演出 · 不支持新增动画{0}", "沒有官方召喚演出 · 不支援新增動畫{0}", "公式召喚演出なし · 新規作成は非対応{0}", "No official summon cut-in · creating a new one is unsupported{0}"],
+		["animation.status.located.unsupported"] = ["未定位到完整动画资源 · 暂不能替换（不代表没有官方演出）{0}", "未定位到完整動畫資源 · 暫不能替換（不代表沒有官方演出）{0}", "アニメーション素材が未検出または不完全 · 置換不可（公式演出なしとは限りません）{0}", "Animation assets missing or incomplete · replacement unavailable (official cut-in may exist){0}"],
 		["animation.status.located.legacy"] = ["检测到旧测试版创建的动画事务 · 仅允许预览和还原删除{0}", "偵測到舊測試版建立的動畫交易 · 僅允許預覽與還原刪除{0}", "旧テスト版の作成トランザクションを検出 · プレビューと復元削除のみ可能{0}", "Legacy test-build creation transaction detected · preview and restore/delete only{0}"],
 		["animation.status.located.none"] = ["没有完整召唤演出资源{0}", "沒有完整召喚演出資源{0}", "完全な召喚演出資源がありません{0}", "No complete summon animation assets{0}"],
 		["animation.source.unsupported"] = ["这张怪兽没有官方演出；新增动画功能已下架", "此怪獸沒有官方演出；新增動畫功能已下架", "このモンスターに公式演出はありません。新規作成機能は廃止されました", "This monster has no official cut-in; new animation creation has been removed"],

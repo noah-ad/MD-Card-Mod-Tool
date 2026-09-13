@@ -71,7 +71,8 @@ public static class Spine42PreviewRenderer
 
 	private sealed record Slot(string Name, string Bone, string? Attachment, string Color, string Blend);
 	private sealed record Region(int X, int Y, int Width, int Height, int Rotate, int OriginalWidth,
-		int OriginalHeight, int OffsetX, int OffsetY, double TextureScaleX = 1, double TextureScaleY = 1);
+		int OriginalHeight, int OffsetX, int OffsetY, double TextureScaleX = 1, double TextureScaleY = 1,
+		double TextureOffsetX = 0, double TextureOffsetY = 0);
 	private sealed record Attachment(string Type, string Name, string Path, JsonElement Data);
 	private sealed record Skin(Dictionary<string, Dictionary<string, Attachment>> Attachments);
 	private sealed record AtlasPage(string Name, int Width, int Height, bool Pma, Dictionary<string, Region> Regions);
@@ -264,9 +265,7 @@ public static class Spine42PreviewRenderer
 					NullableString(item, "attachment"), String(item, "color", "ffffffff"), String(item, "blend", "normal")));
 			}
 			Skin skin = ParseSkin(root);
-			AtlasPage atlas = ParseAtlas(Encoding.UTF8.GetString(engine.ReadTextAsset(pair.Atlas).Data).TrimEnd('\0'));
-			byte[] texturePng = engine.DecodePng(pair.Texture.AsTexture());
-			SKBitmap texture = DecodeAtlasTexture(texturePng, atlas.Pma);
+			(AtlasPage atlas, SKBitmap texture) = LoadAtlasPages(engine, pair);
 			if (atlas.Width > 0 && atlas.Height > 0 && (texture.Width != atlas.Width || texture.Height != atlas.Height))
 			{
 				double textureScaleX = texture.Width / (double)atlas.Width;
@@ -564,7 +563,7 @@ public static class Spine42PreviewRenderer
 			270 => new SKPoint(region.X + (1 - v) * region.Height, region.Y + u * region.Width),
 			_ => new SKPoint(region.X + u * region.Width, region.Y + v * region.Height)
 		};
-		return new SKPoint((float)(logical.X * region.TextureScaleX), (float)(logical.Y * region.TextureScaleY));
+		return new SKPoint((float)(logical.X * region.TextureScaleX + region.TextureOffsetX), (float)(logical.Y * region.TextureScaleY + region.TextureOffsetY));
 	}
 
 	private static SKPoint MeshUvToTexture(Region region, float u, float v)
@@ -1286,6 +1285,47 @@ public static class Spine42PreviewRenderer
 			}
 		}
 		return new Skin(result);
+	}
+
+	private static (AtlasPage Atlas, SKBitmap Texture) LoadAtlasPages(ModEngine engine, MonsterAnimationAssetTriplet pair)
+	{
+		string text = Encoding.UTF8.GetString(engine.ReadTextAsset(pair.Atlas).Data).TrimEnd('\0').Replace("\r", "").Trim();
+		string[] sections = System.Text.RegularExpressions.Regex.Split(text, @"\n+(?=[^\n:]+\.png\s*\n)");
+		var pages = sections.Select(ParseAtlas).ToArray();
+		if (pages.Length == 1) return (pages[0], DecodeAtlasTexture(engine.DecodePng(pair.Texture.AsTexture()), pages[0].Pma));
+		int columns = (int)Math.Ceiling(Math.Sqrt(pages.Length));
+		int cellWidth = pages.Max(p => p.Width), cellHeight = pages.Max(p => p.Height);
+		if (cellWidth <= 0 || cellHeight <= 0) throw new InvalidDataException("多页图集尺寸无效。");
+		// Bound the preview-only combined canvas to 8192 per axis; game textures are unchanged.
+		double previewScale = Math.Min(1d, Math.Min(8192d / (cellWidth * columns),
+			8192d / (cellHeight * ((pages.Length + columns - 1) / columns))));
+		cellWidth = Math.Max(1, (int)Math.Floor(cellWidth * previewScale));
+		cellHeight = Math.Max(1, (int)Math.Floor(cellHeight * previewScale));
+		int width = checked(cellWidth * columns), height = checked(cellHeight * ((pages.Length + columns - 1) / columns));
+		if (width <= 0 || height <= 0 || width > 16384 || height > 16384)
+			throw new InvalidDataException("多页图集超出安全预览尺寸。");
+		var merged = new SKBitmap(width, height, SKColorType.Bgra8888, SKAlphaType.Premul);
+		try
+		{
+			using var canvas = new SKCanvas(merged);
+			canvas.Clear(SKColors.Transparent);
+			var regions = new Dictionary<string, Region>(StringComparer.Ordinal);
+			int pageIndex = 0;
+			foreach (var page in pages)
+			{
+				var asset = pair.Textures.FirstOrDefault(t => (t.Name + ".png").Equals(page.Name, StringComparison.OrdinalIgnoreCase))
+					?? throw new InvalidDataException("缺少图集页：" + page.Name);
+				using var bitmap = DecodeAtlasTexture(engine.DecodePng(asset.AsTexture()), page.Pma);
+				int x = pageIndex % columns * cellWidth, y = pageIndex / columns * cellHeight;
+				float pageWidth = (float)(page.Width * previewScale), pageHeight = (float)(page.Height * previewScale);
+				canvas.DrawBitmap(bitmap, new SKRect(x, y, x + pageWidth, y + pageHeight));
+				foreach (var region in page.Regions) regions.Add(region.Key, region.Value with {
+					TextureScaleX = previewScale, TextureScaleY = previewScale, TextureOffsetX = x, TextureOffsetY = y });
+				pageIndex++;
+			}
+			return (new AtlasPage(pages[0].Name, width, height, pages[0].Pma, regions), merged);
+		}
+		catch { merged.Dispose(); throw; }
 	}
 
 	private static AtlasPage ParseAtlas(string text)

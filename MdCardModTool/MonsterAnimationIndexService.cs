@@ -31,6 +31,8 @@ public static class MonsterAnimationIndexService
 			throw new ArgumentException("卡号必须是纯数字。", "cardId");
 		}
 		List<MonsterAnimationAssetRef> assets = FindDeterministicCandidates(gameRoot, cardId);
+		// Even a complete first-page pair may omit official extra atlas pages.
+		assets.AddRange(FindPrefabDependencies(gameRoot, cardId));
 		try
 		{
 			assets.AddRange(from x in LoadBestAvailable(gameRoot, out string _)
@@ -40,7 +42,8 @@ public static class MonsterAnimationIndexService
 		catch
 		{
 		}
-		assets = (from x in assets.GroupBy<MonsterAnimationAssetRef, string>((MonsterAnimationAssetRef x) => $"{x.BundlePath}\0{x.AssetFileName}\0{x.PathId}", StringComparer.OrdinalIgnoreCase)
+		assets.AddRange(FindCompanionPaths(gameRoot, cardId, assets));
+		assets = (from x in assets.GroupBy<MonsterAnimationAssetRef, string>((MonsterAnimationAssetRef x) => $"{Path.GetFullPath(x.BundlePath)}\0{x.AssetFileName}\0{x.PathId}", StringComparer.OrdinalIgnoreCase)
 			select x.First() into x
 			orderby x.Kind
 			select x).ThenBy<MonsterAnimationAssetRef, string>((MonsterAnimationAssetRef x) => x.RelativeBundlePath, StringComparer.OrdinalIgnoreCase).ToList();
@@ -49,6 +52,67 @@ public static class MonsterAnimationIndexService
 			CardId = cardId,
 			Assets = assets
 		};
+	}
+
+	// Follow official prefab dependencies; asset names may differ from the owner card ID.
+	internal static List<MonsterAnimationAssetRef> FindCompanionPaths(string gameRoot, string cardId, System.Collections.Generic.IEnumerable<MonsterAnimationAssetRef> assets)
+	{
+		var paths = new HashSet<string>(StringComparer.Ordinal);
+		var engine = new ModEngine();
+		foreach (var asset in assets.Where(a => a.Kind != MonsterAnimationAssetKind.Skeleton))
+		foreach (string container in engine.ReadAssetBundleContainerPaths(asset.BundlePath))
+		{
+			var match = System.Text.RegularExpressions.Regex.Match(container.Replace('\\', '/'),
+				"/monstercutin/(?<region>tcg|ocg)/p" + cardId + "/(?:highend_hd|sd)/(?<folder>[^/]+)/[^/]+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+			if (!match.Success) continue;
+			foreach (string tier in new[] { "HighEnd_HD", "SD" })
+				paths.Add(IndexService.ResourceBundleRelativePath($"Duel/Timeline/Duel/MonsterCutIn/{match.Groups["region"].Value.ToLowerInvariant()}/P{cardId}/{tier}/{match.Groups["folder"].Value}/{asset.Name}"));
+		}
+		var found = new List<MonsterAnimationAssetRef>();
+		foreach (string relative in paths)
+		foreach (string root in AnimationRoots(gameRoot))
+		{
+			string file = Path.Combine(root, relative);
+			if (!File.Exists(file)) continue;
+			foreach (var a in engine.ScanAnimationAssetsFast(file, root, cardId))
+				found.Add(new MonsterAnimationAssetRef { BundlePath = file, RelativeBundlePath = a.RelativeBundlePath, AssetFileName = a.AssetFileName,
+					PathId = a.PathId, Name = a.Name, CardId = cardId, Kind = a.Kind, StorageKind = root == IndexService.StreamingRoot(gameRoot) ? "StreamingAssets" : "LocalData" });
+		}
+		return found;
+	}
+
+	internal static List<MonsterAnimationAssetRef> FindPrefabDependencies(string gameRoot, string cardId)
+	{
+		string[] roots = AnimationRoots(gameRoot);
+		var queue = new Queue<string>();
+		foreach (string region in new[] { "tcg", "ocg" })
+		foreach (string tier in new[] { "HighEnd_HD", "SD" })
+			queue.Enqueue(IndexService.ResourceBundleRelativePath($"Duel/Timeline/Duel/MonsterCutIn/{region}/P{cardId}/{tier}/P{cardId}"));
+		var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var result = new List<MonsterAnimationAssetRef>();
+		var engine = new ModEngine();
+		while (queue.Count > 0 && visited.Count < 256)
+		{
+			string relative = queue.Dequeue().Replace('\\', '/');
+			if (!System.Text.RegularExpressions.Regex.IsMatch(relative, "^[0-9a-fA-F]{2}/[0-9a-fA-F]{8}$") || !visited.Add(relative)) continue;
+			string? root = roots.FirstOrDefault(r => File.Exists(Path.Combine(r, relative)));
+			if (root == null) continue;
+			string file = Path.Combine(root, relative);
+			try
+			{
+				bool owned = engine.ReadAssetBundleContainerPaths(file).Any(p =>
+					p.Replace('\\', '/').Contains("/monstercutin/tcg/p" + cardId + "/", StringComparison.OrdinalIgnoreCase)
+					|| p.Replace('\\', '/').Contains("/monstercutin/ocg/p" + cardId + "/", StringComparison.OrdinalIgnoreCase));
+				if (!owned) continue; // Do not traverse shared shaders or another card's resources.
+				foreach (var a in engine.ScanAnimationAssetsFast(file, root, cardId))
+					result.Add(new MonsterAnimationAssetRef { BundlePath = file, RelativeBundlePath = a.RelativeBundlePath,
+						AssetFileName = a.AssetFileName, PathId = a.PathId, Name = a.Name, CardId = cardId, Kind = a.Kind,
+						StorageKind = root == IndexService.StreamingRoot(gameRoot) ? "StreamingAssets" : "LocalData" });
+				foreach (string dependency in engine.ReadAssetBundleContainerPaths(file, dependencies: true)) queue.Enqueue(dependency);
+			}
+			catch (IOException) { }
+		}
+		return result;
 	}
 
 	public static HashSet<string> LoadBundledCardIds()
@@ -331,7 +395,9 @@ public static class MonsterAnimationIndexService
 		{
 			try
 			{
-				foreach (MonsterAnimationAssetRef current in FindDeterministicCandidates(gameRoot, cardId)) found.Add(current);
+				var candidates = FindDeterministicCandidates(gameRoot, cardId).Concat(FindPrefabDependencies(gameRoot, cardId)).ToList();
+				candidates.AddRange(FindCompanionPaths(gameRoot, cardId, candidates));
+				foreach (MonsterAnimationAssetRef current in candidates) found.Add(current);
 			}
 			catch
 			{
@@ -403,7 +469,9 @@ public static class MonsterAnimationIndexService
 		for (int i = 0; i < missing.Length; i++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			assets.AddRange(FindDeterministicCandidates(gameRoot, missing[i]).Select(WithoutAbsolutePath));
+			var candidates = FindDeterministicCandidates(gameRoot, missing[i]).Concat(FindPrefabDependencies(gameRoot, missing[i])).ToList();
+			candidates.AddRange(FindCompanionPaths(gameRoot, missing[i], candidates));
+			assets.AddRange(candidates.Select(WithoutAbsolutePath));
 			progress?.Invoke(i + 1, missing.Length, assets.Count);
 		}
 		var refreshed = new PortableMonsterAnimationIndex

@@ -27,5 +27,5 @@ public sealed class MonsterAnimationSet
 		}
 	}
 
-	public string CountSummary => $"Texture2D {Textures.Count}/2 · Atlas {Atlases.Count}/2 · JS {Skeletons.Count}/2";
+	public string CountSummary => $"Texture2D ×{Textures.Count} · Atlas ×{Atlases.Count} · JS ×{Skeletons.Count}";
 }

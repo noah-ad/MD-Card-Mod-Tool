@@ -146,8 +146,11 @@ public sealed class ModEngine
 		}
 	}
 
-	public List<MonsterAnimationAssetRef> ScanAnimationAssetsFast(string bundlePath, string root)
+	public List<MonsterAnimationAssetRef> ScanAnimationAssetsFast(string bundlePath, string root, string? ownerCardId = null)
 	{
+		var ownedPaths = ownerCardId == null ? new List<string>() : ReadAssetBundleContainerPaths(bundlePath)
+			.Where(p => System.Text.RegularExpressions.Regex.IsMatch(p.Replace('\\', '/'),
+				"/monstercutin/(?:tcg|ocg)/p" + Regex.Escape(ownerCardId) + "/", RegexOptions.IgnoreCase)).ToList();
 		List<MonsterAnimationAssetRef> result = new List<MonsterAnimationAssetRef>();
 		AssetsManager manager = NewManager();
 		try
@@ -171,7 +174,17 @@ public sealed class ModEngine
 							long end = info.GetAbsoluteByteStart(assets.file) + info.ByteSize;
 							reader.Position = info.GetAbsoluteByteStart(assets.file);
 							string name = ReadAlignedString(reader, end);
-							if (TryAnimationName(name, type, out string cardId, out MonsterAnimationAssetKind kind))
+							bool recognized = TryAnimationName(name, type, out string cardId, out MonsterAnimationAssetKind kind);
+							if (ownerCardId != null)
+							{
+								recognized = ownedPaths.Any(p => p.EndsWith("/" + name + ".json", StringComparison.OrdinalIgnoreCase)) && kind == MonsterAnimationAssetKind.Skeleton;
+								string extension = type == AssetClassID.Texture2D ? ".png" : ".txt";
+								bool textureOrAtlas = ownedPaths.Any(p => p.EndsWith("/" + name + extension, StringComparison.OrdinalIgnoreCase))
+									&& (type == AssetClassID.Texture2D || name.EndsWith(".atlas", StringComparison.OrdinalIgnoreCase));
+								if (textureOrAtlas) { recognized = true; kind = type == AssetClassID.Texture2D ? MonsterAnimationAssetKind.Texture : MonsterAnimationAssetKind.Atlas; }
+								if (recognized) cardId = ownerCardId;
+							}
+							if (recognized)
 							{
 								result.Add(new MonsterAnimationAssetRef
 								{
@@ -206,7 +219,7 @@ public sealed class ModEngine
 		Match match;
 		if (type == AssetClassID.Texture2D)
 		{
-			match = Regex.Match(name, "^P(?<id>\\d+)$", RegexOptions.IgnoreCase);
+			match = Regex.Match(name, "^P(?<id>\\d+)(?:_\\d+)?$", RegexOptions.IgnoreCase);
 			kind = MonsterAnimationAssetKind.Texture;
 		}
 		else
@@ -307,7 +320,7 @@ public sealed class ModEngine
 		}
 	}
 
-	public List<string> ReadAssetBundleContainerPaths(string bundlePath)
+	public List<string> ReadAssetBundleContainerPaths(string bundlePath, bool dependencies = false)
 	{
 		List<string> result = new List<string>();
 		AssetsManager manager = NewManager();
@@ -322,6 +335,12 @@ public sealed class ModEngine
 					EnsureDatabase(manager, assets);
 					foreach (AssetFileInfo info in assets.file.GetAssetsOfType(AssetClassID.AssetBundle))
 					{
+						if (dependencies)
+						{
+							foreach (var dependency in manager.GetBaseField(assets, info)["m_Dependencies"]["Array"].Children)
+								result.Add(dependency.AsString);
+							continue;
+						}
 						foreach (AssetTypeValueField child in manager.GetBaseField(assets, info)["m_Container"]["Array"].Children)
 						{
 							string path = child["first"].AsString;

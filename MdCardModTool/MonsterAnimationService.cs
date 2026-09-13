@@ -149,7 +149,7 @@ public sealed class MonsterAnimationService
 					}
 					if (written.Add(pair.Atlas.BundlePath))
 					{
-						_engine.ReplaceTextAsset(_engine.ReadTextAsset(pair.Atlas), Encoding.UTF8.GetBytes(tier.AtlasText),
+						_engine.ReplaceTextAsset(_engine.ReadTextAsset(pair.Atlas), Encoding.UTF8.GetBytes(tier.AtlasText.Replace("P" + set.CardId + ".png", pair.Texture.Name + ".png", StringComparison.Ordinal)),
 							Path.Combine(gameRoot, "_MD卡图备份", pair.Atlas.ModSourceKind));
 					}
 					if (written.Add(pair.Skeleton.BundlePath))

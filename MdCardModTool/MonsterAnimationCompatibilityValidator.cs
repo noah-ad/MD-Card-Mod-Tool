@@ -116,7 +116,7 @@ public static class MonsterAnimationCompatibilityValidator
 		}
 
 		AtlasDocument atlas = ParseAtlas(engine.ReadTextAsset(pair.Atlas).Data);
-		if (!atlas.Page.Equals("P" + cardId + ".png", StringComparison.OrdinalIgnoreCase)
+		if (!atlas.Page.Equals(pair.Texture.Name + ".png", StringComparison.OrdinalIgnoreCase)
 			|| atlas.Width != texture.Width || atlas.Height != texture.Height || atlas.Regions.Count == 0)
 		{
 			throw new InvalidDataException($"{pair.Tier} Atlas 页名、尺寸或区域列表与 Texture2D 不一致。" );

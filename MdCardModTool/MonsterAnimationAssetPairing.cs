@@ -16,6 +16,7 @@ public sealed record MonsterAnimationAssetTriplet
 	public string Scale { get; init; } = "";
 
 	public required MonsterAnimationAssetRef Texture { get; init; }
+	public IReadOnlyList<MonsterAnimationAssetRef> Textures { get; init; } = [];
 
 	public required MonsterAnimationAssetRef Atlas { get; init; }
 
@@ -42,7 +43,7 @@ public static class MonsterAnimationAssetPairing
 		if (string.IsNullOrWhiteSpace(set.CardId)) return [];
 		Regex pathPattern = new(
 			"(?:^|/)monstercutin/(?<region>tcg|ocg)/p" + Regex.Escape(set.CardId)
-			+ "/(?<tier>highend_hd|sd)(?:/(?<scale>[^/]+))?/p" + Regex.Escape(set.CardId)
+			+ "/(?<tier>highend_hd|sd)(?:/(?<scale>[^/]+))?/[^/]+?"
 			+ "(?:\\.png|\\.atlas\\.txt|js\\.json)$",
 			RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 		List<Candidate> candidates = [];
@@ -88,7 +89,8 @@ public static class MonsterAnimationAssetPairing
 				Region = group.Region,
 				Tier = group.Tier,
 				Scale = group.Scale,
-				Texture = Best(group.Textures),
+				Texture = PrimaryTexture(group, engine),
+				Textures = group.Textures,
 				Atlas = Best(group.Atlases),
 				Skeleton = Best(skeletons[group.Region + "|" + group.Tier])
 			})
@@ -96,6 +98,14 @@ public static class MonsterAnimationAssetPairing
 			.ThenByDescending(pair => ParseScale(pair.Scale))
 			.ThenBy(pair => pair.Region, StringComparer.OrdinalIgnoreCase)
 			.ToArray();
+	}
+
+	private static MonsterAnimationAssetRef PrimaryTexture(ScaleGroup group, ModEngine engine)
+	{
+		string page = System.Text.Encoding.UTF8.GetString(engine.ReadTextAsset(Best(group.Atlases)).Data)
+			.TrimStart().Split('\n')[0].Trim();
+		return group.Textures.FirstOrDefault(t => (t.Name + ".png").Equals(page, StringComparison.OrdinalIgnoreCase))
+			?? throw new InvalidDataException("Atlas 首页面没有对应纹理：" + page);
 	}
 
 	public static MonsterAnimationAssetTriplet SelectPreview(MonsterAnimationSet set)

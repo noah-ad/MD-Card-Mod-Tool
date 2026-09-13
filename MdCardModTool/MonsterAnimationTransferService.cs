@@ -44,9 +44,11 @@ public static class MonsterAnimationTransferService
 				}
 				string atlas = Encoding.UTF8.GetString(engine.ReadTextAsset(source.Atlas).Data).TrimEnd('\0').Replace("\r", "");
 				string[] lines = atlas.Split('\n');
+				if (lines.Count(line => line.Trim().EndsWith(".png", StringComparison.OrdinalIgnoreCase)) != 1)
+					throw new InvalidDataException("来源动画使用多页图集，当前不能整套移植；可预览，或向该卡导入视频替换。");
 				int page = Array.FindIndex(lines, x => !string.IsNullOrWhiteSpace(x));
 				if (page < 0) throw new InvalidDataException("来源 Atlas 为空。");
-				lines[page] = "P" + target.CardId + ".png";
+				lines[page] = pair.Texture.Name + ".png";
 				var sourceJson = JsonNode.Parse(Encoding.UTF8.GetString(engine.ReadTextAsset(source.Skeleton).Data).TrimEnd('\0'))!.AsObject();
 				var targetTemplate = MonsterAnimationTemplate.Parse(engine.ReadTextAsset(pair.Skeleton).Data);
 				var sourceTemplate = MonsterAnimationTemplate.Parse(Encoding.UTF8.GetBytes(sourceJson.ToJsonString()));
@@ -67,7 +69,7 @@ public static class MonsterAnimationTransferService
 			{
 				using Image image = Image.Load(engine.DecodePng(pair.Texture.AsTexture()));
 				string atlas = Encoding.UTF8.GetString(engine.ReadTextAsset(pair.Atlas).Data).TrimStart('\r', '\n');
-				if (!atlas.StartsWith("P" + target.CardId + ".png", StringComparison.Ordinal)) throw new InvalidDataException("图集页名不匹配。");
+				if (!atlas.StartsWith(pair.Texture.Name + ".png", StringComparison.Ordinal)) throw new InvalidDataException("图集页名不匹配。");
 				_ = MonsterAnimationTemplate.Parse(engine.ReadTextAsset(pair.Skeleton).Data);
 			}
 			EnsureGameClosed();

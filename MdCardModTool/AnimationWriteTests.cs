@@ -10,10 +10,10 @@ namespace MdCardModTool;
 
 internal static class AnimationWriteTests
 {
-    public static void Run(string gameRoot, string output, bool largeAtlas = false)
+    public static void Run(string gameRoot, string output, bool largeAtlas = false, string cardId = "22524")
     {
         Directory.CreateDirectory(output);
-        var original = MonsterAnimationIndexService.Find(gameRoot, "22524");
+        var original = MonsterAnimationIndexService.Find(gameRoot, cardId);
         var hashes = original.Assets.ToDictionary(a => a.BundlePath, a => Hash(a.BundlePath));
         var target = new MonsterAnimationSet { CardId = original.CardId, Assets = original.Assets.Select(a =>
         {
@@ -37,7 +37,19 @@ internal static class AnimationWriteTests
         int frameHeight = largeAtlas ? 2304 : 90;
         using (Image<Rgba32> a = new(frameWidth,frameHeight,new Rgba32(200,30,40,255))) a.SaveAsPng(frames[0]);
         using (Image<Rgba32> b = new(frameWidth,frameHeight,new Rgba32(20,130,220,255))) b.SaveAsPng(frames[1]);
-        using var built = MonsterAnimationBuilder.Build(frames, "22524", 12, 100, service.ReadTemplate(target), largeAtlas ? 8192 : 4096);
+        if (cardId == "6969")
+        {
+            var pairs = MonsterAnimationAssetPairing.FindComplete(target);
+            if (pairs.Count != 2 || pairs.Any(p => p.Texture.Name != "P9696" || p.Textures.Count != 2))
+                throw new Exception("Official alias or second atlas page was not resolved");
+            var probe = Spine42PreviewRenderer.Probe(target, 160);
+            if (!probe.Success || probe.OpaquePixels <= 0) throw new Exception("Original multi-page preview failed: " + probe.Message);
+            Console.WriteLine("officialAlias=P9696; pagesPerTier=2; originalPreview=True");
+            using var originalPreview = Spine42PreviewRenderer.TryLoad(target, framesPerSecond: 6, maxFrames: 20, previewMaxEdge: 512)
+                ?? throw new Exception("Original preview did not load");
+            originalPreview.Frames[originalPreview.Frames.Count / 2].Save(Path.Combine(output, "original-multipage.png"));
+        }
+        using var built = MonsterAnimationBuilder.Build(frames, cardId, 12, 100, service.ReadTemplate(target), largeAtlas ? 8192 : 4096);
         if (largeAtlas && (built.Hd.AtlasImage.Width != 8192 || built.Hd.AtlasImage.Height != 8192))
             throw new Exception("Large atlas test must exercise a real 8192 x 8192 texture");
         Console.WriteLine($"atlas={built.Hd.AtlasImage.Width}x{built.Hd.AtlasImage.Height}; generated=True");
@@ -100,7 +112,7 @@ internal static class AnimationWriteTests
             File.Copy(backup,asset.BundlePath,true);
         }
         if(hashes.Any(x=>Hash(x.Key)!=x.Value)) throw new Exception("Real game changed");
-        Console.WriteLine($"card=22524; lockFailMs={lockMs}; applyMs={applyMs}; sixBundleApply=True; flatVideoGeometryHD_SD=True; renderedCorners=True; rollback=True; restore=True; gameWrites=False; ready=True");
+        Console.WriteLine($"card={cardId}; lockFailMs={lockMs}; applyMs={applyMs}; sixBundleApply=True; flatVideoGeometryHD_SD=True; renderedCorners=True; rollback=True; restore=True; gameWrites=False; ready=True");
     }
     private static string Hash(string path) {using var s=File.OpenRead(path);return Convert.ToHexString(SHA256.HashData(s));}
 }

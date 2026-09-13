@@ -109,10 +109,10 @@ internal static class StudioOptimizationTests
 		Console.WriteLine("donorSearchLanguages=4; sourcePreview=True; close=True; gameWrites=False; ready=True");
 	}
 
-	public static void Transfer(string gameRoot, string output)
+	public static void Transfer(string gameRoot, string output, string targetCardId = "10001")
 	{
 		Directory.CreateDirectory(output);
-		var original = MonsterAnimationIndexService.Find(gameRoot,"10001");
+		var original = MonsterAnimationIndexService.Find(gameRoot,targetCardId);
 		var donor = MonsterAnimationIndexService.Find(gameRoot,"3413");
 		var originals = original.Assets.Concat(donor.Assets).DistinctBy(x=>x.BundlePath).ToDictionary(x=>x.BundlePath,x=>Hash(x.BundlePath));
 		var target = new MonsterAnimationSet { CardId=original.CardId, Assets=original.Assets.Select(asset=>

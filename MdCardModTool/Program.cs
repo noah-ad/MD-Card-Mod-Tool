@@ -27,6 +27,15 @@ internal static class Program
 	private static void Main(string[] args)
 	{
 		ApplicationConfiguration.Initialize();
+		if (args.Length == 3 && args[0] == "--audit-animation-resources") { AnimationResourceAudit.Run(args[1], args[2]); return; }
+		if (args.Length == 4 && args[0] == "--test-animation-write-card") { AnimationWriteTests.Run(args[1], args[3], cardId: args[2]); return; }
+		if (args.Length == 3 && args[0] == "--test-animation-preview-card")
+		{
+			var result = Spine42PreviewRenderer.Probe(MonsterAnimationIndexService.Find(args[1], args[2]), 160);
+			Console.WriteLine(JsonSerializer.Serialize(result));
+			if (!result.Success || result.OpaquePixels == 0) Environment.ExitCode = 2;
+			return;
+		}
 		if (args.Length == 3 && args[0] == "--test-mod-card-identity") { ModCardIdentityTests.Run(args[1],args[2]); return; }
 		if (args.Length == 2 && args[0] == "--test-resource-preview-scroll") { ResourcePreviewScrollTests.Run(args[1]); return; }
 		if (args.Length > 0 && args[0].StartsWith("--test-", StringComparison.Ordinal))
@@ -41,6 +50,13 @@ internal static class Program
 		}
 		if (args.Length == 3 && args[0] == "--test-animation-write-lock") { AnimationWriteTests.Run(args[1], args[2]); return; }
 		if (args.Length == 3 && args[0] == "--test-animation-atlas-8192") { AnimationWriteTests.Run(args[1], args[2], largeAtlas: true); return; }
+		if (args.Length == 3 && args[0] == "--test-animation-alias-6969") { AnimationWriteTests.Run(args[1], args[2], cardId: "6969"); return; }
+		if (args.Length == 3 && args[0] == "--test-animation-transfer-6969") { StudioOptimizationTests.Transfer(args[1], args[2], "6969"); return; }
+		if (args.Length == 2 && args[0] == "--bundle-dependencies")
+		{
+			foreach (string dependency in new ModEngine().ReadAssetBundleContainerPaths(args[1], true)) Console.WriteLine(dependency);
+			return;
+		}
 		if (args.Length == 3 && args[0] == "--test-card-catalog-refresh") { CardCatalogRefreshTests.Run(args[1], args[2]); return; }
 		if (args.Length == 2 && args[0] == "--test-sidebar-dpi") { SidebarDpiTests.Run(args[1]); return; }
 		if (args.Length == 3 && args[0] == "--test-new-animation-links") { AnimationLinkTests.Run(args[1], args[2]); return; }
@@ -2404,9 +2420,7 @@ internal static class Program
 				bool realtimeScale = preview != null && preview.ScalePercent == 35 && Math.Abs(preview.AnimationScale - 0.35f) < 0.001f;
 				bool autoLocated = string.Equals(form3.LocatedCardId, args[2], StringComparison.Ordinal);
 				bool equivalent3899 = args[2] != "3899"
-					|| string.Equals(form3.PreviewSourceCardId, "13668", StringComparison.Ordinal)
-						&& (resourceStatus?.Text.Contains("P13668", StringComparison.Ordinal) ?? false)
-						&& chooseMedia?.Enabled == false;
+					|| string.Equals(form3.PreviewSourceCardId, "3899", StringComparison.Ordinal) && chooseMedia?.Enabled == true;
 				bool num3 = num2 && realtimeScale && autoLocated && equivalent3899
 					&& (preview?.Frame != null || (label?.Text.Contains("原版多骨骼", StringComparison.Ordinal) ?? false));
 				Console.WriteLine($"status={resourceStatus?.Text.Replace(Environment.NewLine, " | ")}; source={label?.Text.Replace(Environment.NewLine, " | ")}; frame={preview?.Frame != null}; located={form3.LocatedCardId}; previewSource={form3.PreviewSourceCardId}; replaceEnabled={chooseMedia?.Enabled}; initialScale={initialScale}; realtimeScale={preview?.ScalePercent}");
