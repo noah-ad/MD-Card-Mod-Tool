@@ -949,7 +949,7 @@ public sealed class MainForm : Form
 			BackColor = UiTheme.Surface,
 			Font = new Font("Segoe UI", 8f),
 			TextAlign = ContentAlignment.MiddleLeft,
-			Text = $"v2.0.15  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
+			Text = $"v2.0.16  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
 		};
 		TableLayoutPanel tableLayoutPanel8 = new TableLayoutPanel
 		{
@@ -2100,8 +2100,13 @@ public sealed class MainForm : Form
 		return IndexService.CachePath(_assetRoot ?? throw new InvalidOperationException("尚未选择 LocalData 账号。"), _streamingRoot ?? throw new InvalidOperationException("尚未定位 StreamingAssets。"));
 	}
 
+	private int _scanGeneration;
 	private async Task ScanAsync(bool forceRebuild = false)
 	{
+		int generation = ++_scanGeneration;
+		string? _gameRoot = this._gameRoot;
+		string? localSnapshot = _assetRoot;
+		bool Current() => !IsDisposed && generation == _scanGeneration && this._gameRoot == _gameRoot && _assetRoot == localSnapshot;
 		if (_assetRoot == null || !Directory.Exists(_assetRoot))
 		{
 			MessageBox.Show(this, "未找到 LocalData\\<用户哈希>\\0000。请选择 Master Duel 游戏根目录。", Text);
@@ -2121,13 +2126,15 @@ public sealed class MainForm : Form
 			{
 				try
 				{
-					cached = JsonSerializer.Deserialize<GameIndex>(await File.ReadAllTextAsync(cache));
+						cached = JsonSerializer.Deserialize<GameIndex>(await File.ReadAllTextAsync(cache));
+						if (cached != null) cached = await Task.Run(() => IndexWorkspaceGuard.Repair(_gameRoot!, cached, cache));
 				}
 				catch
 				{
-					File.Delete(cache);
+					cached = null; // Keep the original cache available for recovery.
 				}
 			}
+			if (!Current()) return;
 			if (cached == null && !forceRebuild)
 			{
 				try
@@ -2168,6 +2175,7 @@ public sealed class MainForm : Form
 				});
 				cached = JsonSerializer.Deserialize<GameIndex>(await File.ReadAllTextAsync(cache)) ?? new GameIndex();
 			}
+			if (!Current()) return;
 			int num = cached.Textures.RemoveAll((TexRef x) => x.SourceKind == "卡框资源");
 			IReadOnlyList<TexRef> readOnlyList = BuiltInCardFrameCatalog.Load();
 			cached.Textures.AddRange(readOnlyList);
@@ -2180,6 +2188,7 @@ public sealed class MainForm : Form
 					IndexService.Save(_gameRoot, cached);
 				});
 			}
+			if (!Current()) return;
 			_index = cached;
 			_textures.AddRange(cached.Textures);
 			string text = (loadedFromPrebuilt ? PortableIndexService.GetGameBuildId(_gameRoot) : "");
@@ -2191,6 +2200,7 @@ public sealed class MainForm : Form
 				try
 				{
 					await YgoCdbCardCatalog.ClassifyAlternateArtsAsync(cached);
+					if (!Current()) return;
 					_textures.Clear();
 					_textures.AddRange(cached.Textures);
 					await Task.Run(delegate
@@ -2205,19 +2215,21 @@ public sealed class MainForm : Form
 				}
 			}
 			await ApplyOverFrameTagsAsync();
+			if (!Current()) return;
 			ApplyMonsterAnimationTags();
 			await RefreshModFlagsAsync();
+			if (!Current()) return;
 			RefreshCategories();
 			RenderList();
 			StartGameBuildRefresh();
 		}
 		catch (Exception ex3)
 		{
-			MessageBox.Show(this, ex3.Message, "扫描失败", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+			if (Current()) MessageBox.Show(this, ex3.Message, "扫描失败", MessageBoxButtons.OK, MessageBoxIcon.Hand);
 		}
 		finally
 		{
-			base.UseWaitCursor = false;
+			if (Current()) base.UseWaitCursor = false;
 		}
 	}
 
@@ -2735,13 +2747,18 @@ public sealed class MainForm : Form
 
 	private async Task RefreshModFlagsAsync()
 	{
-		if (_gameRoot != null)
+		string? root = _gameRoot;
+		string? local = _assetRoot;
+		int generation = _scanGeneration;
+		var textures = _textures.ToList();
+		if (root != null)
 		{
 			ModChangeSummary modChangeSummary = await Task.Run(delegate
 			{
-				_mods.RefreshFlags(_gameRoot, _textures);
-				return _mods.GetChangeSummary(_gameRoot, _textures);
+				_mods.RefreshFlags(root, textures);
+				return _mods.GetChangeSummary(root, textures);
 			});
+			if (IsDisposed || generation != _scanGeneration || root != _gameRoot || local != _assetRoot) return;
 			_changedModBundleCount = modChangeSummary.BundleCount;
 			_changedAnimationBundleCount = modChangeSummary.AnimationBundleCount;
 			UpdateModSummary();
@@ -3162,13 +3179,17 @@ public sealed class MainForm : Form
 
 	private async Task ApplyOverFrameTagsAsync()
 	{
-		if (_gameRoot == null)
+		string? root = _gameRoot;
+		string? local = _assetRoot;
+		int generation = _scanGeneration;
+		if (root == null)
 		{
 			return;
 		}
 		try
 		{
-			HashSet<string> hashSet = (await Task.Run(() => _overFrames.ReadCached(_gameRoot))).Select((OverFrameMapping overFrameMapping) => overFrameMapping.CardId.ToString()).ToHashSet<string>(StringComparer.Ordinal);
+			HashSet<string> hashSet = (await Task.Run(() => _overFrames.ReadCached(root))).Select((OverFrameMapping overFrameMapping) => overFrameMapping.CardId.ToString()).ToHashSet<string>(StringComparer.Ordinal);
+			if (IsDisposed || generation != _scanGeneration || root != _gameRoot || local != _assetRoot) return;
 			foreach (TexRef item in _textures.Where((TexRef texRef) => texRef.SourceKind == "本地卡图" && texRef.CardKey.Length > 0))
 			{
 				if (hashSet.Contains(item.CardKey))

@@ -164,7 +164,7 @@ public static class IndexService
 	public static void BuildAndSave(string gameRoot, Action<int, int, int>? progress = null)
 	{
 		GameIndex value = Build(gameRoot, progress);
-		File.WriteAllText(CachePath(FindLocalRoot(gameRoot), StreamingRoot(gameRoot)), JsonSerializer.Serialize(value));
+		Save(gameRoot, value);
 	}
 
 	public static void Save(string gameRoot, IEnumerable<TexRef> textures)
@@ -181,7 +181,12 @@ public static class IndexService
 
 	public static void Save(string gameRoot, GameIndex index)
 	{
-		File.WriteAllText(CachePath(FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000"), StreamingRoot(gameRoot)), JsonSerializer.Serialize(index));
+		if (index.Textures.Any(t => !IndexWorkspaceGuard.Belongs(gameRoot, t)))
+			throw new InvalidDataException("索引包含其他目录或账号的资源，已拒绝覆盖当前账号索引。");
+		string path = CachePath(FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000"), StreamingRoot(gameRoot));
+		string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+		try { File.WriteAllText(temporary, JsonSerializer.Serialize(index)); File.Move(temporary, path, true); }
+		finally { if (File.Exists(temporary)) File.Delete(temporary); }
 	}
 
 	public static void AddCardFramesAndSave(string gameRoot)
@@ -203,7 +208,7 @@ public static class IndexService
 		gameIndex.Textures.RemoveAll((TexRef x) => x.SourceKind == "卡框资源");
 		gameIndex.Textures.AddRange(GetCardFrames(gameRoot));
 		gameIndex.Textures.Sort((TexRef a, TexRef b) => string.Compare($"{a.SourceKind}\0{a.Category}\0{a.Name}\0{a.Width:D8}", $"{b.SourceKind}\0{b.Category}\0{b.Name}\0{b.Width:D8}", StringComparison.Ordinal));
-		File.WriteAllText(path, JsonSerializer.Serialize(gameIndex));
+		Save(gameRoot, gameIndex);
 	}
 
 	private static IEnumerable<TexRef> GetCardFrames(string gameRoot)

@@ -132,6 +132,11 @@ internal static class Program
 			AnimationLinkTests.Run(args[1], args[2]);
 			return;
 		}
+		if (args.Length == 4 && args[0] == "--test-index-recovery")
+		{
+			IndexRecoveryTests.Run(args[1], args[2], args[3]);
+			return;
+		}
 		if (args.Length == 3 && args[0] == "--test-mod-packages")
 		{
 			ModPackageTests.Run(args[1], args[2]);
