@@ -5,11 +5,21 @@ namespace MdCardModTool;
 
 public static class MotionPreferences
 {
-	private const uint SpiGetClientAreaAnimation = 0x1042;
+	private const uint SpiGetClientAreaAnimation = 4162u;
 
 	public static bool UserReducesMotion { get; set; }
 
-	public static bool ReduceMotion => UserReducesMotion || WindowsReducesMotion;
+	public static bool ReduceMotion
+	{
+		get
+		{
+			if (!UserReducesMotion)
+			{
+				return WindowsReducesMotion;
+			}
+			return true;
+		}
+	}
 
 	public static bool WindowsReducesMotion
 	{
@@ -19,8 +29,12 @@ public static class MotionPreferences
 			{
 				return false;
 			}
-			bool enabled = true;
-			return SystemParametersInfo(SpiGetClientAreaAnimation, 0, ref enabled, 0) && !enabled;
+			bool value = true;
+			if (SystemParametersInfo(4162u, 0u, ref value, 0u))
+			{
+				return !value;
+			}
+			return false;
 		}
 	}
 

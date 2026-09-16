@@ -7,6 +7,8 @@ public sealed class ModPackageManifest
 {
 	public int FormatVersion { get; init; } = 1;
 
+	public string Platform { get; init; } = "";
+
 	public string Name { get; init; } = "Master Duel Mod";
 
 	public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.Now;

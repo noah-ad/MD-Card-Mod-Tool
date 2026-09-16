@@ -7,47 +7,64 @@ namespace MdCardModTool;
 
 internal static class CardBundleIdentity
 {
-    static readonly object Gate = new();
-    static string stamp = "";
-    static Dictionary<string,string> ids = new(StringComparer.OrdinalIgnoreCase);
+	private static readonly object Gate = new object();
 
-    internal static string Find(string path)
-    {
-        string name = Path.GetFileName(path);
-        if (name.Length != 8 || !name.All(char.IsAsciiHexDigit)) return "";
-        lock (Gate)
-        {
-            string current = File.GetLastWriteTimeUtc(CardCatalogService.BundledPath).Ticks + ":"
-                + File.GetLastWriteTimeUtc(GameCardCatalogUpdater.ExtraCatalogPath).Ticks;
-            if (stamp != current)
-            {
-                var next = new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var card in CardCatalogService.LoadBestAvailable().Entries)
-                foreach (string region in new[] { "tcg", "ocg" })
-                {
-                    string key = Path.GetFileName(IndexService.CardIllustrationRelativePath(card.CardId.ToString(), region));
-                    string id = card.CardId.ToString();
-                    if (next.TryGetValue(key, out var other) && other != id) next[key] = "";
-                    else next.TryAdd(key,id);
-                }
-                ids = next; stamp = current;
-            }
-            return ids.GetValueOrDefault(name, "");
-        }
-    }
+	private static string stamp = "";
 
-    internal static void Refresh(TexRef texture, IReadOnlyList<TexRef> scanned)
-    {
-        var match = scanned.FirstOrDefault(x => x.PathId == texture.PathId && x.AssetFileName == texture.AssetFileName)
-            ?? scanned.FirstOrDefault(x => x.Name == texture.Name)
-            ?? (scanned.Count == 1 ? scanned[0] : null);
-        if (match == null) return; // Never invent a match for ambiguous multi-texture bundles.
-        texture.PathId = match.PathId;
-        texture.AssetFileName = match.AssetFileName;
-        texture.Width = match.Width; texture.Height = match.Height;
-        texture.OverrideBundlePath = null;
-        // Keep existing card identity/category when a foreign tool renames the asset.
-        if (texture.CardKey.Length == 0) texture.Category = match.Category;
-        IndexService.NormalizeLocalCardCategory(texture);
-    }
+	private static Dictionary<string, string> ids = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+	internal static string Find(string path)
+	{
+		string fileName = Path.GetFileName(path);
+		if (fileName.Length != 8 || !fileName.All(char.IsAsciiHexDigit))
+		{
+			return "";
+		}
+		lock (Gate)
+		{
+			string text = File.GetLastWriteTimeUtc(CardCatalogService.BundledPath).Ticks + ":" + File.GetLastWriteTimeUtc(GameCardCatalogUpdater.ExtraCatalogPath).Ticks;
+			if (stamp != text)
+			{
+				Dictionary<string, string> dictionary = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+				foreach (CardCatalogEntry entry in CardCatalogService.LoadBestAvailable().Entries)
+				{
+					string[] array = new string[2] { "tcg", "ocg" };
+					foreach (string illustrationType in array)
+					{
+						string fileName2 = Path.GetFileName(IndexService.CardIllustrationRelativePath(entry.CardId.ToString(), illustrationType));
+						string text2 = entry.CardId.ToString();
+						if (dictionary.TryGetValue(fileName2, out var value) && value != text2)
+						{
+							dictionary[fileName2] = "";
+						}
+						else
+						{
+							dictionary.TryAdd(fileName2, text2);
+						}
+					}
+				}
+				ids = dictionary;
+				stamp = text;
+			}
+			return ids.GetValueOrDefault(fileName, "");
+		}
+	}
+
+	internal static void Refresh(TexRef texture, IReadOnlyList<TexRef> scanned)
+	{
+		TexRef texRef = scanned.FirstOrDefault((TexRef x) => x.PathId == texture.PathId && x.AssetFileName == texture.AssetFileName) ?? scanned.FirstOrDefault((TexRef x) => x.Name == texture.Name) ?? ((scanned.Count == 1) ? scanned[0] : null);
+		if (texRef != null)
+		{
+			texture.PathId = texRef.PathId;
+			texture.AssetFileName = texRef.AssetFileName;
+			texture.Width = texRef.Width;
+			texture.Height = texRef.Height;
+			texture.OverrideBundlePath = null;
+			if (texture.CardKey.Length == 0)
+			{
+				texture.Category = texRef.Category;
+			}
+			IndexService.NormalizeLocalCardCategory(texture);
+		}
+	}
 }

@@ -15,24 +15,23 @@ public sealed class OverFrameService
 
 	public const string GateName = "of_card_asset";
 
-	public TextAssetRef FindGate(string gameRoot, Action<int, int>? progress = null,
-		CancellationToken cancellationToken = default)
+	public TextAssetRef FindGate(string gameRoot, Action<int, int>? progress = null, CancellationToken cancellationToken = default(CancellationToken))
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		string localRoot = IndexService.FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");
-		string cached = GateCachePath(localRoot);
-		if (File.Exists(cached))
+		string path = GateCachePath(localRoot);
+		if (File.Exists(path))
 		{
 			try
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				string path = File.ReadAllText(cached).Trim();
-				if (File.Exists(path))
+				string text = File.ReadAllText(path).Trim();
+				if (File.Exists(text))
 				{
-					TextAssetRef value = _engine.FindTextAssetFast(path, localRoot, "of_card_asset");
-					if (value != null)
+					TextAssetRef textAssetRef = _engine.FindTextAssetFast(text, localRoot, "of_card_asset");
+					if (textAssetRef != null)
 					{
-						return value;
+						return textAssetRef;
 					}
 				}
 			}
@@ -43,12 +42,12 @@ public sealed class OverFrameService
 			catch
 			{
 			}
-			File.Delete(cached);
+			File.Delete(path);
 		}
-		string[] files = (from x in Directory.EnumerateFiles(localRoot, "*", SearchOption.AllDirectories).Where(path =>
+		string[] files = (from x in (ResourceSource.IsMobile(gameRoot) ? StandaloneResourceService.EnumerateBundles(localRoot) : Directory.EnumerateFiles(localRoot, "*", SearchOption.AllDirectories)).Where(delegate(string path2)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				return IsUnityBundle(path);
+				return IsUnityBundle(path2);
 			})
 			orderby new FileInfo(x).Length
 			select x).ToArray();
@@ -59,8 +58,6 @@ public sealed class OverFrameService
 		Parallel.ForEach(files, new ParallelOptions
 		{
 			CancellationToken = cancellationToken,
-			// Do not consume every logical processor: this scan can run beside the UI
-			// and parses allocation-heavy Unity Bundles through AssetsTools.
 			MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 4, 2, 4)
 		}, delegate(string file, ParallelLoopState state)
 		{
@@ -72,19 +69,19 @@ public sealed class OverFrameService
 			{
 				try
 				{
-					TextAssetRef textAssetRef = _engine.FindTextAssetFast(file, localRoot, "of_card_asset");
-					if (textAssetRef != null)
+					TextAssetRef textAssetRef2 = _engine.FindTextAssetFast(file, localRoot, "of_card_asset");
+					if (textAssetRef2 != null)
 					{
 						lock (sync)
 						{
-							if (textAssetRef.Data.Length != 0)
+							if (textAssetRef2.Data.Length != 0)
 							{
-								found = textAssetRef;
+								found = textAssetRef2;
 								state.Stop();
 							}
 							else if (emptyCandidate == null)
 							{
-								emptyCandidate = textAssetRef;
+								emptyCandidate = textAssetRef2;
 							}
 						}
 					}
@@ -107,27 +104,27 @@ public sealed class OverFrameService
 		{
 			throw new FileNotFoundException("没有在 LocalData 中找到 of_card_asset。请先启动游戏完成资源下载。");
 		}
-		Directory.CreateDirectory(Path.GetDirectoryName(cached));
-		File.WriteAllText(cached, found.BundlePath);
+		Directory.CreateDirectory(Path.GetDirectoryName(path));
+		File.WriteAllText(path, found.BundlePath);
 		return found;
 	}
 
 	public TextAssetRef? FindCachedGate(string gameRoot)
 	{
-		string localRoot = IndexService.FindLocalRoot(gameRoot);
-		if (localRoot == null)
+		string text = IndexService.FindLocalRoot(gameRoot);
+		if (text == null)
 		{
 			return null;
 		}
-		string cached = GateCachePath(localRoot);
-		if (!File.Exists(cached))
+		string path = GateCachePath(text);
+		if (!File.Exists(path))
 		{
 			return null;
 		}
 		try
 		{
-			string path = File.ReadAllText(cached).Trim();
-			return File.Exists(path) ? _engine.FindTextAssetFast(path, localRoot, "of_card_asset") : null;
+			string text2 = File.ReadAllText(path).Trim();
+			return File.Exists(text2) ? _engine.FindTextAssetFast(text2, text, "of_card_asset") : null;
 		}
 		catch
 		{
@@ -135,8 +132,7 @@ public sealed class OverFrameService
 		}
 	}
 
-	public List<OverFrameMapping> Read(string gameRoot, Action<int, int>? progress = null,
-		CancellationToken cancellationToken = default)
+	public List<OverFrameMapping> Read(string gameRoot, Action<int, int>? progress = null, CancellationToken cancellationToken = default(CancellationToken))
 	{
 		return Read(FindGate(gameRoot, progress, cancellationToken));
 	}
@@ -147,38 +143,38 @@ public sealed class OverFrameService
 		{
 			throw new InvalidDataException($"{"of_card_asset"} 数据长度 {gate.Data.Length} 不是 4 的倍数，已停止写入以保护文件。");
 		}
-		List<OverFrameMapping> values = new List<OverFrameMapping>(gate.Data.Length / 4);
+		List<OverFrameMapping> list = new List<OverFrameMapping>(gate.Data.Length / 4);
 		for (int i = 0; i < gate.Data.Length; i += 4)
 		{
-			values.Add(new OverFrameMapping(BitConverter.ToUInt16(gate.Data, i), BitConverter.ToUInt16(gate.Data, i + 2)));
+			list.Add(new OverFrameMapping(BitConverter.ToUInt16(gate.Data, i), BitConverter.ToUInt16(gate.Data, i + 2)));
 		}
-		return (from x in values
+		return (from x in list
 			orderby x.CardId, x.ArtId
 			select x).ToList();
 	}
 
 	public void EnableOrUpdate(string gameRoot, ushort cardId, ushort artId)
 	{
-		TextAssetRef gate = FindGate(gameRoot);
-		List<OverFrameMapping> mappings = Parse(gate.Data);
-		int found = mappings.FindIndex((OverFrameMapping x) => x.CardId == cardId);
-		if (found >= 0)
+		TextAssetRef textAssetRef = FindGate(gameRoot);
+		List<OverFrameMapping> list = Parse(textAssetRef.Data);
+		int num = list.FindIndex((OverFrameMapping x) => x.CardId == cardId);
+		if (num >= 0)
 		{
-			mappings[found] = new OverFrameMapping(cardId, artId);
+			list[num] = new OverFrameMapping(cardId, artId);
 		}
 		else
 		{
-			mappings.Add(new OverFrameMapping(cardId, artId));
+			list.Add(new OverFrameMapping(cardId, artId));
 		}
-		Save(gameRoot, gate, mappings);
+		Save(gameRoot, textAssetRef, list);
 	}
 
 	public void Disable(string gameRoot, ushort cardId)
 	{
-		TextAssetRef gate = FindGate(gameRoot);
-		List<OverFrameMapping> mappings = Parse(gate.Data);
-		mappings.RemoveAll((OverFrameMapping x) => x.CardId == cardId);
-		Save(gameRoot, gate, mappings);
+		TextAssetRef textAssetRef = FindGate(gameRoot);
+		List<OverFrameMapping> list = Parse(textAssetRef.Data);
+		list.RemoveAll((OverFrameMapping x) => x.CardId == cardId);
+		Save(gameRoot, textAssetRef, list);
 	}
 
 	public bool HasBackup(string gameRoot)
@@ -186,17 +182,20 @@ public sealed class OverFrameService
 		return HasBackup(gameRoot, FindGate(gameRoot));
 	}
 
-	public bool HasBackup(string gameRoot, TextAssetRef gate) => File.Exists(BackupPath(gameRoot, gate));
+	public bool HasBackup(string gameRoot, TextAssetRef gate)
+	{
+		return File.Exists(BackupPath(gameRoot, gate));
+	}
 
 	public void RestoreBackup(string gameRoot)
 	{
-		TextAssetRef gate = FindGate(gameRoot);
-		string backup = BackupPath(gameRoot, gate);
-		if (!File.Exists(backup))
+		TextAssetRef textAssetRef = FindGate(gameRoot);
+		string text = BackupPath(gameRoot, textAssetRef);
+		if (!File.Exists(text))
 		{
-			throw new FileNotFoundException("尚未找到本工具创建的超框表备份。", backup);
+			throw new FileNotFoundException("尚未找到本工具创建的超框表备份。", text);
 		}
-		File.Copy(backup, gate.BundlePath, overwrite: true);
+		File.Copy(text, textAssetRef.BundlePath, overwrite: true);
 	}
 
 	public string GateLocation(string gameRoot)
@@ -206,10 +205,10 @@ public sealed class OverFrameService
 
 	public List<OverFrameMapping> ReadCached(string gameRoot)
 	{
-		TextAssetRef gate = FindCachedGate(gameRoot);
-		if (gate != null)
+		TextAssetRef textAssetRef = FindCachedGate(gameRoot);
+		if (textAssetRef != null)
 		{
-			return (from x in Parse(gate.Data)
+			return (from x in Parse(textAssetRef.Data)
 				orderby x.CardId, x.ArtId
 				select x).ToList();
 		}
@@ -222,23 +221,23 @@ public sealed class OverFrameService
 		{
 			throw new InvalidDataException($"{"of_card_asset"} 数据长度 {data.Length} 不是 4 的倍数，已停止写入以保护文件。");
 		}
-		List<OverFrameMapping> result = new List<OverFrameMapping>(data.Length / 4);
+		List<OverFrameMapping> list = new List<OverFrameMapping>(data.Length / 4);
 		for (int i = 0; i < data.Length; i += 4)
 		{
-			result.Add(new OverFrameMapping(BitConverter.ToUInt16(data, i), BitConverter.ToUInt16(data, i + 2)));
+			list.Add(new OverFrameMapping(BitConverter.ToUInt16(data, i), BitConverter.ToUInt16(data, i + 2)));
 		}
-		return result;
+		return list;
 	}
 
 	private void Save(string gameRoot, TextAssetRef gate, List<OverFrameMapping> mappings)
 	{
-		byte[] data = new byte[mappings.Count * 4];
+		byte[] array = new byte[mappings.Count * 4];
 		for (int i = 0; i < mappings.Count; i++)
 		{
-			BitConverter.TryWriteBytes(data.AsSpan(i * 4, 2), mappings[i].CardId);
-			BitConverter.TryWriteBytes(data.AsSpan(i * 4 + 2, 2), mappings[i].ArtId);
+			BitConverter.TryWriteBytes(array.AsSpan(i * 4, 2), mappings[i].CardId);
+			BitConverter.TryWriteBytes(array.AsSpan(i * 4 + 2, 2), mappings[i].ArtId);
 		}
-		_engine.ReplaceTextAsset(gate, data, Path.Combine(gameRoot, "_MD卡图备份", "超框开关"));
+		_engine.ReplaceTextAsset(gate, array, Path.Combine(gameRoot, "_MD卡图备份", "超框开关"));
 	}
 
 	private static string BackupPath(string gameRoot, TextAssetRef gate)
@@ -248,17 +247,17 @@ public sealed class OverFrameService
 
 	private static string GateCachePath(string localRoot)
 	{
-		string id = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(localRoot))).Substring(0, 12);
-		return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MDCardModTool", "overframe_gate_" + id + ".txt");
+		string text = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(localRoot))).Substring(0, 12);
+		return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MDCardModTool", "overframe_gate_" + text + ".txt");
 	}
 
 	private static bool IsUnityBundle(string path)
 	{
 		try
 		{
-			using FileStream stream = File.OpenRead(path);
-			Span<byte> bytes = stackalloc byte[7];
-			return stream.Read(bytes) == 7 && Encoding.ASCII.GetString(bytes) == "UnityFS";
+			using FileStream fileStream = File.OpenRead(path);
+			Span<byte> span = stackalloc byte[7];
+			return fileStream.Read(span) == 7 && Encoding.ASCII.GetString(span) == "UnityFS";
 		}
 		catch
 		{

@@ -1,13 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 
 namespace MdCardModTool;
-
-public enum AnimationBundleState
-{
-	Created,
-	BackedUp
-}
 
 public sealed record AnimationTransactionRecord
 {
@@ -17,14 +13,19 @@ public sealed record AnimationTransactionRecord
 
 	public DateTime CreatedUtc { get; init; } = DateTime.UtcNow;
 
-	public List<AnimationTransactionFile> Files { get; init; } = [];
-}
+	public List<AnimationTransactionFile> Files { get; init; } = new List<AnimationTransactionFile>();
 
-public sealed record AnimationTransactionFile
-{
-	public required string RelativePath { get; init; }
+	[CompilerGenerated]
+	[SetsRequiredMembers]
+	private AnimationTransactionRecord(AnimationTransactionRecord original)
+	{
+		FormatVersion = original.FormatVersion;
+		CardId = original.CardId;
+		CreatedUtc = original.CreatedUtc;
+		Files = original.Files;
+	}
 
-	public required AnimationBundleState State { get; init; }
-
-	public string BackupPath { get; init; } = "";
+	public AnimationTransactionRecord()
+	{
+	}
 }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
 using System.Threading;
@@ -10,59 +11,135 @@ namespace MdCardModTool;
 
 internal sealed class AnimationDonorPicker : Form
 {
-	private sealed record Choice(string Id, string Label) { public override string ToString() => Label; }
-	private readonly ImeAwareTextBox _search = new() { Dock = DockStyle.Top, PlaceholderText = Localizer.T("animation.donor.search") };
-	private readonly ListBox _list = new() { Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, BackColor = UiTheme.Surface, ForeColor = UiTheme.Text, IntegralHeight = false };
-	private readonly AnimationPreviewCanvas _preview = new() { Dock = DockStyle.Fill, StatusText = Localizer.T("animation.donor.idle") };
-	private readonly System.Windows.Forms.Timer _timer = new() { Interval = 16 };
-	private readonly System.Diagnostics.Stopwatch _clock = new();
-	private readonly CancellationTokenSource _closed = new();
+	private sealed record Choice(string Id, string Label)
+	{
+		public override string ToString()
+		{
+			return Label;
+		}
+	}
+
+	private readonly ImeAwareTextBox _search = new ImeAwareTextBox
+	{
+		Dock = DockStyle.Top,
+		PlaceholderText = Localizer.T("animation.donor.search")
+	};
+
+	private readonly ListBox _list = new ListBox
+	{
+		Dock = DockStyle.Fill,
+		BorderStyle = BorderStyle.None,
+		BackColor = UiTheme.Surface,
+		ForeColor = UiTheme.Text,
+		IntegralHeight = false
+	};
+
+	private readonly AnimationPreviewCanvas _preview = new AnimationPreviewCanvas
+	{
+		Dock = DockStyle.Fill,
+		StatusText = Localizer.T("animation.donor.idle")
+	};
+
+	private readonly System.Windows.Forms.Timer _timer = new System.Windows.Forms.Timer
+	{
+		Interval = 16
+	};
+
+	private readonly Stopwatch _clock = new Stopwatch();
+
+	private readonly CancellationTokenSource _closed = new CancellationTokenSource();
+
 	private CancellationTokenSource? _previewCancellation;
+
 	private CurrentMonsterAnimationPreview? _frames;
+
 	private int _generation;
+
 	private readonly string _gameRoot;
+
 	private readonly CardCatalogService _catalog = CardCatalogService.LoadBestAvailable();
+
 	private readonly HashSet<string> _ids;
+
 	public string? SelectedCardId => (_list.SelectedItem as Choice)?.Id;
 
 	public AnimationDonorPicker(string gameRoot, IEnumerable<string> ids)
 	{
 		_gameRoot = gameRoot;
-		_ids = ids.ToHashSet(StringComparer.Ordinal);
+		_ids = ids.ToHashSet<string>(StringComparer.Ordinal);
 		Text = Localizer.T("animation.donor.title");
-		Size = new Size(1000, 650);
+		base.Size = new Size(1000, 650);
 		MinimumSize = new Size(800, 520);
-		AutoScaleMode = AutoScaleMode.Dpi;
-		StartPosition = FormStartPosition.CenterParent;
+		base.AutoScaleMode = AutoScaleMode.Dpi;
+		base.StartPosition = FormStartPosition.CenterParent;
 		BackColor = UiTheme.Window;
 		Font = new Font("Microsoft YaHei UI", 9f);
 		UiTheme.ApplyDarkTitleBar(this);
 		UiTheme.StyleTextBox(_search);
-		var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 2, RowCount = 3 };
-		layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
-		layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
-		layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
-		layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-		layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
-		layout.Controls.Add(_search, 0, 0);
-		layout.SetColumnSpan(_search, 2);
-		layout.Controls.Add(_list, 0, 1);
-		layout.Controls.Add(_preview, 1, 1);
-		var preview = UiTheme.Button(Localizer.T("animation.donor.preview"), async (_, _) => await PreviewAsync());
-		var use = UiTheme.Button(Localizer.T("animation.donor.use"), (_, _) => { if (SelectedCardId != null) { DialogResult = DialogResult.OK; Close(); } }, ButtonTone.Gold);
-		preview.Dock = use.Dock = DockStyle.Fill;
-		layout.Controls.Add(preview, 0, 2);
-		layout.Controls.Add(use, 1, 2);
-		Controls.Add(layout);
-		_search.TextChanged += (_, _) => { if (!_search.IsImeComposing) Filter(); };
-		_search.ImeCompositionEnded += (_, _) => Filter();
-		_list.SelectedIndexChanged += (_, _) => { _generation++; _previewCancellation?.Cancel(); ClearPreview(); };
-		_list.DoubleClick += async (_, _) => await PreviewAsync();
-		_timer.Tick += (_, _) =>
+		TableLayoutPanel tableLayoutPanel = new TableLayoutPanel
 		{
-			if (_frames == null || _frames.Frames.Count == 0) return;
-			int i = (int)(_clock.Elapsed.TotalSeconds * _frames.FramesPerSecond) % _frames.Frames.Count;
-			if (!ReferenceEquals(_preview.Frame, _frames.Frames[i])) { _preview.Frame = _frames.Frames[i]; _preview.Invalidate(); }
+			Dock = DockStyle.Fill,
+			Padding = new Padding(16),
+			ColumnCount = 2,
+			RowCount = 3
+		};
+		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38f));
+		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62f));
+		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
+		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 54f));
+		tableLayoutPanel.Controls.Add(_search, 0, 0);
+		tableLayoutPanel.SetColumnSpan(_search, 2);
+		tableLayoutPanel.Controls.Add(_list, 0, 1);
+		tableLayoutPanel.Controls.Add(_preview, 1, 1);
+		Button button = UiTheme.Button(Localizer.T("animation.donor.preview"), async delegate
+		{
+			await PreviewAsync();
+		});
+		Button button2 = UiTheme.Button(Localizer.T("animation.donor.use"), delegate
+		{
+			if (SelectedCardId != null)
+			{
+				base.DialogResult = DialogResult.OK;
+				Close();
+			}
+		}, ButtonTone.Gold);
+		button.Dock = (button2.Dock = DockStyle.Fill);
+		tableLayoutPanel.Controls.Add(button, 0, 2);
+		tableLayoutPanel.Controls.Add(button2, 1, 2);
+		base.Controls.Add(tableLayoutPanel);
+		_search.TextChanged += delegate
+		{
+			if (!_search.IsImeComposing)
+			{
+				Filter();
+			}
+		};
+		_search.ImeCompositionEnded += delegate
+		{
+			Filter();
+		};
+		_list.SelectedIndexChanged += delegate
+		{
+			_generation++;
+			_previewCancellation?.Cancel();
+			ClearPreview();
+		};
+		_list.DoubleClick += async delegate
+		{
+			await PreviewAsync();
+		};
+		_timer.Tick += delegate
+		{
+			if (_frames != null && _frames.Frames.Count != 0)
+			{
+				int index = (int)(_clock.Elapsed.TotalSeconds * (double)_frames.FramesPerSecond) % _frames.Frames.Count;
+				if (_preview.Frame != _frames.Frames[index])
+				{
+					_preview.Frame = _frames.Frames[index];
+					_preview.Invalidate();
+				}
+			}
 		};
 		Filter();
 	}
@@ -70,24 +147,44 @@ internal sealed class AnimationDonorPicker : Form
 	private void Filter()
 	{
 		string query = _search.Text.Trim();
-		IEnumerable<string> ids = query.Length == 0 ? _ids.OrderBy(x => int.Parse(x)) :
-			_catalog.Search(query, _catalog.Count).Select(x => x.AnimationId.ToString()).Where(_ids.Contains)
-			.Concat(_ids.Where(x => x.Contains(query, StringComparison.Ordinal))).Distinct();
+		IEnumerable<string> enumerable;
+		if (query.Length != 0)
+		{
+			enumerable = (from x in _catalog.Search(query, _catalog.Count)
+				select x.AnimationId.ToString()).Where(_ids.Contains).Concat(_ids.Where((string x) => x.Contains(query, StringComparison.Ordinal))).Distinct();
+		}
+		else
+		{
+			IEnumerable<string> enumerable2 = _ids.OrderBy((string x) => int.Parse(x));
+			enumerable = enumerable2;
+		}
+		IEnumerable<string> source = enumerable;
 		_list.BeginUpdate();
 		try
 		{
 			_list.Items.Clear();
-			foreach (string id in ids.Take(600))
-				_list.Items.Add(new Choice(id, id + " · " + (_catalog.FindCardOrMrk(int.Parse(id))?.Name(Localizer.Language) ?? "动画资源")));
-			if (_list.Items.Count > 0) _list.SelectedIndex = 0;
+			foreach (string item in source.Take(600))
+			{
+				_list.Items.Add(new Choice(item, item + " · " + (_catalog.FindCardOrMrk(int.Parse(item))?.Name(Localizer.Language) ?? "动画资源")));
+			}
+			if (_list.Items.Count > 0)
+			{
+				_list.SelectedIndex = 0;
+			}
 		}
-		finally { _list.EndUpdate(); }
+		finally
+		{
+			_list.EndUpdate();
+		}
 	}
 
 	private async Task PreviewAsync()
 	{
-		string? id = SelectedCardId;
-		if (id == null) return;
+		string id = SelectedCardId;
+		if (id == null)
+		{
+			return;
+		}
 		int version = ++_generation;
 		_previewCancellation?.Cancel();
 		_previewCancellation?.Dispose();
@@ -98,22 +195,56 @@ internal sealed class AnimationDonorPicker : Form
 		_preview.Invalidate();
 		try
 		{
-			var frames = await Task.Run(() => Spine42PreviewRenderer.TryLoad(MonsterAnimationIndexService.Find(_gameRoot, id), previewMaxEdge: 512, cancellationToken: token));
-			if (IsDisposed || version != _generation) { frames?.Dispose(); return; }
-			_frames = frames;
-			if (frames?.Frames.Count > 0) _preview.Frame = frames.Frames[0];
-			_preview.StatusText = frames == null ? Localizer.T("animation.donor.unsupported") : "";
+			CurrentMonsterAnimationPreview currentMonsterAnimationPreview = await Task.Run(() => Spine42PreviewRenderer.TryLoad(MonsterAnimationIndexService.Find(_gameRoot, id), null, 24, 120, 512, token));
+			if (base.IsDisposed || version != _generation)
+			{
+				currentMonsterAnimationPreview?.Dispose();
+				return;
+			}
+			_frames = currentMonsterAnimationPreview;
+			if (currentMonsterAnimationPreview != null && currentMonsterAnimationPreview.Frames.Count > 0)
+			{
+				_preview.Frame = currentMonsterAnimationPreview.Frames[0];
+			}
+			_preview.StatusText = ((currentMonsterAnimationPreview == null) ? Localizer.T("animation.donor.unsupported") : "");
 			_clock.Restart();
 			_timer.Start();
 			_preview.Invalidate();
 		}
-		catch (OperationCanceledException) { }
-		catch (Exception ex) { if (!IsDisposed) { _preview.StatusText = ex.Message; _preview.Invalidate(); } }
+		catch (OperationCanceledException)
+		{
+		}
+		catch (Exception ex2)
+		{
+			if (!base.IsDisposed)
+			{
+				_preview.StatusText = ex2.Message;
+				_preview.Invalidate();
+			}
+		}
 	}
-	private void ClearPreview() { _timer.Stop(); _preview.Frame = null; _frames?.Dispose(); _frames = null; _preview.Invalidate(); }
+
+	private void ClearPreview()
+	{
+		_timer.Stop();
+		_preview.Frame = null;
+		_frames?.Dispose();
+		_frames = null;
+		_preview.Invalidate();
+	}
+
 	protected override void Dispose(bool disposing)
 	{
-		if (disposing) { _generation++; _closed.Cancel(); _previewCancellation?.Cancel(); _timer.Dispose(); _preview.Frame = null; _frames?.Dispose(); _frames = null; }
+		if (disposing)
+		{
+			_generation++;
+			_closed.Cancel();
+			_previewCancellation?.Cancel();
+			_timer.Dispose();
+			_preview.Frame = null;
+			_frames?.Dispose();
+			_frames = null;
+		}
 		base.Dispose(disposing);
 	}
 }

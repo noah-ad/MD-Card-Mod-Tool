@@ -13,25 +13,38 @@ public sealed class GradientBanner : Panel
 
 	protected override void OnPaintBackground(PaintEventArgs e)
 	{
-		if (Width <= 0 || Height <= 0) return;
-		using LinearGradientBrush gradient = new LinearGradientBrush(base.ClientRectangle, Color.FromArgb(10, 34, 52), UiTheme.Window, 0f);
-		e.Graphics.FillRectangle(gradient, base.ClientRectangle);
+		if (base.Width <= 0 || base.Height <= 0)
+		{
+			return;
+		}
+		using LinearGradientBrush brush = new LinearGradientBrush(base.ClientRectangle, Color.FromArgb(10, 34, 52), UiTheme.Window, 0f);
+		e.Graphics.FillRectangle(brush, base.ClientRectangle);
 		e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-		float dpi = DeviceDpi / 96f;
-		using Pen cyan = new Pen(Color.FromArgb(44, UiTheme.Primary), dpi);
-		using Pen gold = new Pen(Color.FromArgb(78, UiTheme.Gold), dpi);
-		// Static dueling-field geometry keeps text readable without idle animation.
+		float num = (float)base.DeviceDpi / 96f;
+		using Pen pen = new Pen(Color.FromArgb(44, UiTheme.Primary), num);
+		using Pen pen2 = new Pen(Color.FromArgb(78, UiTheme.Gold), num);
 		for (int i = 0; i < 5; i++)
 		{
-			float x = Width - (330 - i * 75) * dpi;
-			float y = Height * .5f;
-			float r = 30 * dpi;
-			e.Graphics.DrawPolygon(i == 2 ? gold : cyan,
-				[new PointF(x-r,y), new PointF(x-r/2,y-r), new PointF(x+r/2,y-r),
-				 new PointF(x+r,y), new PointF(x+r/2,y+r), new PointF(x-r/2,y+r)]);
-			e.Graphics.DrawLine(cyan, x + r, y, x + 45 * dpi, y);
+			float num2 = (float)base.Width - (float)(330 - i * 75) * num;
+			float num3 = (float)base.Height * 0.5f;
+			float num4 = 30f * num;
+			e.Graphics.DrawPolygon((i == 2) ? pen2 : pen, new PointF[6]
+			{
+				new PointF(num2 - num4, num3),
+				new PointF(num2 - num4 / 2f, num3 - num4),
+				new PointF(num2 + num4 / 2f, num3 - num4),
+				new PointF(num2 + num4, num3),
+				new PointF(num2 + num4 / 2f, num3 + num4),
+				new PointF(num2 - num4 / 2f, num3 + num4)
+			});
+			e.Graphics.DrawLine(pen, num2 + num4, num3, num2 + 45f * num, num3);
 		}
-		e.Graphics.DrawLines(gold, [new PointF(0, Height-2*dpi), new PointF(96*dpi, Height-2*dpi), new PointF(112*dpi, Height-10*dpi)]);
-		e.Graphics.DrawLine(cyan, 118*dpi, Height-10*dpi, Width, Height-10*dpi);
+		e.Graphics.DrawLines(pen2, new PointF[3]
+		{
+			new PointF(0f, (float)base.Height - 2f * num),
+			new PointF(96f * num, (float)base.Height - 2f * num),
+			new PointF(112f * num, (float)base.Height - 10f * num)
+		});
+		e.Graphics.DrawLine(pen, 118f * num, (float)base.Height - 10f * num, base.Width, (float)base.Height - 10f * num);
 	}
 }

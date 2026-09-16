@@ -8,6 +8,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -16,11 +17,9 @@ namespace MdCardModTool;
 public static class MonsterAnimationIndexService
 {
 	public const string BundledFileName = "prebuilt-animation-index-v1.json.br";
-	private static readonly string[] DeterministicScales = new string[10]
-	{
-		"1", "0.5", "0.89", "0.445", "0.56", "0.28", "0.75", "0.375", "0.8", "0.4"
-	}.Concat(Enumerable.Range(1, 2000).Select(value => ((double)value / 1000.0)
-		.ToString("0.###", CultureInfo.InvariantCulture))).Distinct(StringComparer.Ordinal).ToArray();
+
+	private static readonly string[] DeterministicScales = new string[10] { "1", "0.5", "0.89", "0.445", "0.56", "0.28", "0.75", "0.375", "0.8", "0.4" }.Concat(from value in Enumerable.Range(1, 2000)
+		select ((double)value / 1000.0).ToString("0.###", CultureInfo.InvariantCulture)).Distinct<string>(StringComparer.Ordinal).ToArray();
 
 	public static string BundledPath => AppPaths.ResolveFile("prebuilt-animation-index-v1.json.br");
 
@@ -30,89 +29,147 @@ public static class MonsterAnimationIndexService
 		{
 			throw new ArgumentException("卡号必须是纯数字。", "cardId");
 		}
-		List<MonsterAnimationAssetRef> assets = FindDeterministicCandidates(gameRoot, cardId);
-		// Even a complete first-page pair may omit official extra atlas pages.
-		assets.AddRange(FindPrefabDependencies(gameRoot, cardId));
+		List<MonsterAnimationAssetRef> list = FindDeterministicCandidates(gameRoot, cardId);
+		list.AddRange(FindPrefabDependencies(gameRoot, cardId));
 		try
 		{
-			assets.AddRange(from x in LoadBestAvailable(gameRoot, out string _)
+			list.AddRange(from x in LoadBestAvailable(gameRoot, out string _)
 				where x.CardId == cardId && File.Exists(x.BundlePath)
 				select x);
 		}
 		catch
 		{
 		}
-		assets.AddRange(FindCompanionPaths(gameRoot, cardId, assets));
-		assets = (from x in assets.GroupBy<MonsterAnimationAssetRef, string>((MonsterAnimationAssetRef x) => $"{Path.GetFullPath(x.BundlePath)}\0{x.AssetFileName}\0{x.PathId}", StringComparer.OrdinalIgnoreCase)
+		list.AddRange(FindCompanionPaths(gameRoot, cardId, list));
+		list = (from x in list.GroupBy<MonsterAnimationAssetRef, string>((MonsterAnimationAssetRef x) => $"{Path.GetFullPath(x.BundlePath)}\0{x.AssetFileName}\0{x.PathId}", StringComparer.OrdinalIgnoreCase)
 			select x.First() into x
 			orderby x.Kind
 			select x).ThenBy<MonsterAnimationAssetRef, string>((MonsterAnimationAssetRef x) => x.RelativeBundlePath, StringComparer.OrdinalIgnoreCase).ToList();
 		return new MonsterAnimationSet
 		{
 			CardId = cardId,
-			Assets = assets
+			Assets = (ResourceSource.IsMobile(gameRoot) ? list.Select((MonsterAnimationAssetRef a) => new MonsterAnimationAssetRef
+			{
+				BundlePath = a.BundlePath,
+				RelativeBundlePath = a.RelativeBundlePath,
+				AssetFileName = a.AssetFileName,
+				PathId = a.PathId,
+				Name = a.Name,
+				CardId = a.CardId,
+				Kind = a.Kind,
+				StorageKind = "Mobile"
+			}).ToList() : list)
 		};
 	}
 
-	// Follow official prefab dependencies; asset names may differ from the owner card ID.
-	internal static List<MonsterAnimationAssetRef> FindCompanionPaths(string gameRoot, string cardId, System.Collections.Generic.IEnumerable<MonsterAnimationAssetRef> assets)
+	internal static List<MonsterAnimationAssetRef> FindCompanionPaths(string gameRoot, string cardId, IEnumerable<MonsterAnimationAssetRef> assets)
 	{
-		var paths = new HashSet<string>(StringComparer.Ordinal);
-		var engine = new ModEngine();
-		foreach (var asset in assets.Where(a => a.Kind != MonsterAnimationAssetKind.Skeleton))
-		foreach (string container in engine.ReadAssetBundleContainerPaths(asset.BundlePath))
+		HashSet<string> hashSet = new HashSet<string>(StringComparer.Ordinal);
+		ModEngine modEngine = new ModEngine();
+		foreach (MonsterAnimationAssetRef item in assets.Where((MonsterAnimationAssetRef a) => a.Kind != MonsterAnimationAssetKind.Skeleton))
 		{
-			var match = System.Text.RegularExpressions.Regex.Match(container.Replace('\\', '/'),
-				"/monstercutin/(?<region>tcg|ocg)/p" + cardId + "/(?:highend_hd|sd)/(?<folder>[^/]+)/[^/]+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-			if (!match.Success) continue;
-			foreach (string tier in new[] { "HighEnd_HD", "SD" })
-				paths.Add(IndexService.ResourceBundleRelativePath($"Duel/Timeline/Duel/MonsterCutIn/{match.Groups["region"].Value.ToLowerInvariant()}/P{cardId}/{tier}/{match.Groups["folder"].Value}/{asset.Name}"));
+			foreach (string item2 in modEngine.ReadAssetBundleContainerPaths(item.BundlePath))
+			{
+				Match match = Regex.Match(item2.Replace('\\', '/'), "/monstercutin/(?<region>tcg|ocg)/p" + cardId + "/(?:highend_hd|sd)/(?<folder>[^/]+)/[^/]+$", RegexOptions.IgnoreCase);
+				if (match.Success)
+				{
+					string[] array = new string[2] { "HighEnd_HD", "SD" };
+					foreach (string value in array)
+					{
+						hashSet.Add(IndexService.ResourceBundleRelativePath($"Duel/Timeline/Duel/MonsterCutIn/{match.Groups["region"].Value.ToLowerInvariant()}/P{cardId}/{value}/{match.Groups["folder"].Value}/{item.Name}"));
+					}
+				}
+			}
 		}
-		var found = new List<MonsterAnimationAssetRef>();
-		foreach (string relative in paths)
-		foreach (string root in AnimationRoots(gameRoot))
+		List<MonsterAnimationAssetRef> list = new List<MonsterAnimationAssetRef>();
+		foreach (string item3 in hashSet)
 		{
-			string file = Path.Combine(root, relative);
-			if (!File.Exists(file)) continue;
-			foreach (var a in engine.ScanAnimationAssetsFast(file, root, cardId))
-				found.Add(new MonsterAnimationAssetRef { BundlePath = file, RelativeBundlePath = a.RelativeBundlePath, AssetFileName = a.AssetFileName,
-					PathId = a.PathId, Name = a.Name, CardId = cardId, Kind = a.Kind, StorageKind = root == IndexService.StreamingRoot(gameRoot) ? "StreamingAssets" : "LocalData" });
+			string[] array = AnimationRoots(gameRoot);
+			foreach (string text in array)
+			{
+				string text2 = Path.Combine(text, item3);
+				if (!File.Exists(text2))
+				{
+					continue;
+				}
+				foreach (MonsterAnimationAssetRef item4 in modEngine.ScanAnimationAssetsFast(text2, text, cardId))
+				{
+					list.Add(new MonsterAnimationAssetRef
+					{
+						BundlePath = text2,
+						RelativeBundlePath = item4.RelativeBundlePath,
+						AssetFileName = item4.AssetFileName,
+						PathId = item4.PathId,
+						Name = item4.Name,
+						CardId = cardId,
+						Kind = item4.Kind,
+						StorageKind = ((text == IndexService.StreamingRoot(gameRoot)) ? "StreamingAssets" : "LocalData")
+					});
+				}
+			}
 		}
-		return found;
+		return list;
 	}
 
 	internal static List<MonsterAnimationAssetRef> FindPrefabDependencies(string gameRoot, string cardId)
 	{
-		string[] roots = AnimationRoots(gameRoot);
-		var queue = new Queue<string>();
-		foreach (string region in new[] { "tcg", "ocg" })
-		foreach (string tier in new[] { "HighEnd_HD", "SD" })
-			queue.Enqueue(IndexService.ResourceBundleRelativePath($"Duel/Timeline/Duel/MonsterCutIn/{region}/P{cardId}/{tier}/P{cardId}"));
-		var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		var result = new List<MonsterAnimationAssetRef>();
-		var engine = new ModEngine();
-		while (queue.Count > 0 && visited.Count < 256)
+		string[] source = AnimationRoots(gameRoot);
+		Queue<string> queue = new Queue<string>();
+		string[] array = new string[2] { "tcg", "ocg" };
+		foreach (string value in array)
+		{
+			string[] array2 = new string[2] { "HighEnd_HD", "SD" };
+			foreach (string value2 in array2)
+			{
+				queue.Enqueue(IndexService.ResourceBundleRelativePath($"Duel/Timeline/Duel/MonsterCutIn/{value}/P{cardId}/{value2}/P{cardId}"));
+			}
+		}
+		HashSet<string> hashSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		List<MonsterAnimationAssetRef> list = new List<MonsterAnimationAssetRef>();
+		ModEngine modEngine = new ModEngine();
+		while (queue.Count > 0 && hashSet.Count < 256)
 		{
 			string relative = queue.Dequeue().Replace('\\', '/');
-			if (!System.Text.RegularExpressions.Regex.IsMatch(relative, "^[0-9a-fA-F]{2}/[0-9a-fA-F]{8}$") || !visited.Add(relative)) continue;
-			string? root = roots.FirstOrDefault(r => File.Exists(Path.Combine(r, relative)));
-			if (root == null) continue;
-			string file = Path.Combine(root, relative);
+			if (!Regex.IsMatch(relative, "^[0-9a-fA-F]{2}/[0-9a-fA-F]{8}$") || !hashSet.Add(relative))
+			{
+				continue;
+			}
+			string text = source.FirstOrDefault((string r) => File.Exists(Path.Combine(r, relative)));
+			if (text == null)
+			{
+				continue;
+			}
+			string bundlePath = Path.Combine(text, relative);
 			try
 			{
-				bool owned = engine.ReadAssetBundleContainerPaths(file).Any(p =>
-					p.Replace('\\', '/').Contains("/monstercutin/tcg/p" + cardId + "/", StringComparison.OrdinalIgnoreCase)
-					|| p.Replace('\\', '/').Contains("/monstercutin/ocg/p" + cardId + "/", StringComparison.OrdinalIgnoreCase));
-				if (!owned) continue; // Do not traverse shared shaders or another card's resources.
-				foreach (var a in engine.ScanAnimationAssetsFast(file, root, cardId))
-					result.Add(new MonsterAnimationAssetRef { BundlePath = file, RelativeBundlePath = a.RelativeBundlePath,
-						AssetFileName = a.AssetFileName, PathId = a.PathId, Name = a.Name, CardId = cardId, Kind = a.Kind,
-						StorageKind = root == IndexService.StreamingRoot(gameRoot) ? "StreamingAssets" : "LocalData" });
-				foreach (string dependency in engine.ReadAssetBundleContainerPaths(file, dependencies: true)) queue.Enqueue(dependency);
+				if (!modEngine.ReadAssetBundleContainerPaths(bundlePath).Any((string p) => p.Replace('\\', '/').Contains("/monstercutin/tcg/p" + cardId + "/", StringComparison.OrdinalIgnoreCase) || p.Replace('\\', '/').Contains("/monstercutin/ocg/p" + cardId + "/", StringComparison.OrdinalIgnoreCase)))
+				{
+					continue;
+				}
+				foreach (MonsterAnimationAssetRef item in modEngine.ScanAnimationAssetsFast(bundlePath, text, cardId))
+				{
+					list.Add(new MonsterAnimationAssetRef
+					{
+						BundlePath = bundlePath,
+						RelativeBundlePath = item.RelativeBundlePath,
+						AssetFileName = item.AssetFileName,
+						PathId = item.PathId,
+						Name = item.Name,
+						CardId = cardId,
+						Kind = item.Kind,
+						StorageKind = ((text == IndexService.StreamingRoot(gameRoot)) ? "StreamingAssets" : "LocalData")
+					});
+				}
+				foreach (string item2 in modEngine.ReadAssetBundleContainerPaths(bundlePath, dependencies: true))
+				{
+					queue.Enqueue(item2);
+				}
 			}
-			catch (IOException) { }
+			catch (IOException)
+			{
+			}
 		}
-		return result;
+		return list;
 	}
 
 	public static HashSet<string> LoadBundledCardIds()
@@ -134,12 +191,25 @@ public static class MonsterAnimationIndexService
 		{
 			return false;
 		}
-		string[] roots = AnimationRoots(gameRoot);
+		string[] source = AnimationRoots(gameRoot);
 		string[] array = new string[2] { "tcg", "ocg" };
 		foreach (string region in array)
 		{
 			(string High, string Sd) paths = SkeletonRelativePaths(cardId, region);
-			if (roots.Any((string root) => File.Exists(Path.Combine(root, paths.High))) && roots.Any((string root) => File.Exists(Path.Combine(root, paths.Sd))))
+			bool num;
+			if (!ResourceSource.IsMobile(gameRoot))
+			{
+				if (!source.Any((string root) => File.Exists(Path.Combine(root, paths.High))))
+				{
+					continue;
+				}
+				num = source.Any((string root) => File.Exists(Path.Combine(root, paths.Sd)));
+			}
+			else
+			{
+				num = source.Any((string root) => File.Exists(Path.Combine(root, paths.High)) || File.Exists(Path.Combine(root, paths.Sd)));
+			}
+			if (num)
 			{
 				return true;
 			}
@@ -149,120 +219,137 @@ public static class MonsterAnimationIndexService
 
 	public static IReadOnlyList<string> FindInstalledCardIds(string gameRoot)
 	{
-		string[] roots = AnimationRoots(gameRoot);
-		HashSet<string> files = roots.SelectMany((string root) => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)).Select(Path.GetFullPath).ToHashSet<string>(StringComparer.OrdinalIgnoreCase);
-		HashSet<string> candidates = LoadBundledCardIds();
-		candidates.UnionWith(CardCatalogService.LoadBestAvailable().Entries
-			.Where(entry => entry.IsMonster)
-			.Select(entry => entry.AnimationId.ToString(CultureInfo.InvariantCulture)));
+		string[] source = AnimationRoots(gameRoot);
+		HashSet<string> files = source.SelectMany((string root) => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)).Select(Path.GetFullPath).ToHashSet<string>(StringComparer.OrdinalIgnoreCase);
+		HashSet<string> hashSet = LoadBundledCardIds();
+		hashSet.UnionWith(from entry in CardCatalogService.LoadBestAvailable().Entries
+			where entry.IsMonster
+			select entry.AnimationId.ToString(CultureInfo.InvariantCulture));
 		try
 		{
-			candidates.UnionWith(LoadBestAvailable(gameRoot, out _).Select(asset => asset.CardId));
+			hashSet.UnionWith(from asset in LoadBestAvailable(gameRoot, out string _)
+				select asset.CardId);
 		}
 		catch
 		{
 		}
-		List<string> result = new List<string>();
-		foreach (string cardId in candidates.Where(id => id.Length > 0 && id.All(char.IsAsciiDigit))
-			.OrderBy(id => int.TryParse(id, out int value) ? value : int.MaxValue))
+		List<string> list = new List<string>();
+		int result;
+		foreach (string item in from id in hashSet
+			where id.Length > 0 && id.All(char.IsAsciiDigit)
+			orderby (!int.TryParse(id, out result)) ? int.MaxValue : result
+			select id)
 		{
 			string[] array = new string[2] { "tcg", "ocg" };
 			foreach (string region in array)
 			{
-				(string High, string Sd) paths = SkeletonRelativePaths(cardId, region);
-				if (roots.Any((string root) => files.Contains(Path.GetFullPath(Path.Combine(root, paths.High)))) && roots.Any((string root) => files.Contains(Path.GetFullPath(Path.Combine(root, paths.Sd)))))
+				(string High, string Sd) paths = SkeletonRelativePaths(item, region);
+				bool num2;
+				if (!ResourceSource.IsMobile(gameRoot))
 				{
-					result.Add(cardId);
+					if (!source.Any((string root) => files.Contains(Path.GetFullPath(Path.Combine(root, paths.High)))))
+					{
+						continue;
+					}
+					num2 = source.Any((string root) => files.Contains(Path.GetFullPath(Path.Combine(root, paths.Sd))));
+				}
+				else
+				{
+					num2 = source.Any((string root) => files.Contains(Path.GetFullPath(Path.Combine(root, paths.High))) || files.Contains(Path.GetFullPath(Path.Combine(root, paths.Sd))));
+				}
+				if (num2)
+				{
+					list.Add(item);
 					break;
 				}
 			}
 		}
-		return result;
+		return list;
 	}
 
 	private static string[] AnimationRoots(string gameRoot)
 	{
-		List<string> roots = new List<string>();
-		string local = IndexService.FindLocalRoot(gameRoot);
-		if (local != null && Directory.Exists(local))
+		List<string> list = new List<string>();
+		string text = IndexService.FindLocalRoot(gameRoot);
+		if (text != null && Directory.Exists(text))
 		{
-			roots.Add(local);
+			list.Add(text);
 		}
-		string streaming = IndexService.StreamingRoot(gameRoot);
-		if (Directory.Exists(streaming))
+		string text2 = IndexService.StreamingRoot(gameRoot);
+		if (Directory.Exists(text2))
 		{
-			roots.Add(streaming);
+			list.Add(text2);
 		}
-		return roots.ToArray();
+		return list.ToArray();
 	}
 
 	private static (string High, string Sd) SkeletonRelativePaths(string cardId, string region)
 	{
-		string basePath = "Duel/Timeline/Duel/MonsterCutIn/" + region + "/P" + cardId;
-		return (High: IndexService.ResourceBundleRelativePath(basePath + "/HighEnd_HD/P" + cardId + "JS"), Sd: IndexService.ResourceBundleRelativePath(basePath + "/SD/P" + cardId + "JS"));
+		string text = "Duel/Timeline/Duel/MonsterCutIn/" + region + "/P" + cardId;
+		return (High: IndexService.ResourceBundleRelativePath(text + "/HighEnd_HD/P" + cardId + "JS"), Sd: IndexService.ResourceBundleRelativePath(text + "/SD/P" + cardId + "JS"));
 	}
 
 	private static List<MonsterAnimationAssetRef> FindDeterministicCandidates(string gameRoot, string cardId, IEnumerable<string>? discoveredScales = null)
 	{
-		string localRoot = IndexService.FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");
-		string streamingRoot = IndexService.StreamingRoot(gameRoot);
-		(string, string)[] roots = new(string, string)[2]
+		string item = IndexService.FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");
+		string item2 = IndexService.StreamingRoot(gameRoot);
+		(string, string)[] array = new(string, string)[2]
 		{
-			(localRoot, "LocalData"),
-			(streamingRoot, "StreamingAssets")
+			(item, "LocalData"),
+			(item2, "StreamingAssets")
 		};
-		List<string> logicalPaths = new List<string>();
-		string[] scales = discoveredScales?.Distinct(StringComparer.Ordinal).ToArray() ?? DeterministicScales;
-		string[] array = new string[2] { "tcg", "ocg" };
-		foreach (string region in array)
+		List<string> list = new List<string>();
+		string[] array2 = discoveredScales?.Distinct<string>(StringComparer.Ordinal).ToArray() ?? DeterministicScales;
+		string[] array3 = new string[2] { "tcg", "ocg" };
+		foreach (string text in array3)
 		{
-			string basePath = "Duel/Timeline/Duel/MonsterCutIn/" + region + "/P" + cardId;
-			logicalPaths.Add(basePath + "/HighEnd_HD/P" + cardId + "JS");
-			logicalPaths.Add(basePath + "/SD/P" + cardId + "JS");
-			string[] array2 = new string[2] { "HighEnd_HD", "SD" };
-			foreach (string tier in array2)
+			string text2 = "Duel/Timeline/Duel/MonsterCutIn/" + text + "/P" + cardId;
+			list.Add(text2 + "/HighEnd_HD/P" + cardId + "JS");
+			list.Add(text2 + "/SD/P" + cardId + "JS");
+			string[] array4 = new string[2] { "HighEnd_HD", "SD" };
+			foreach (string value in array4)
 			{
-				string[] array3 = scales;
-				foreach (string scale in array3)
+				string[] array5 = array2;
+				foreach (string value2 in array5)
 				{
-					logicalPaths.Add($"{basePath}/{tier}/{scale}/P{cardId}");
-					logicalPaths.Add($"{basePath}/{tier}/{scale}/P{cardId}.atlas");
+					list.Add($"{text2}/{value}/{value2}/P{cardId}");
+					list.Add($"{text2}/{value}/{value2}/P{cardId}.atlas");
 				}
 			}
 		}
-		List<MonsterAnimationAssetRef> result = new List<MonsterAnimationAssetRef>();
-		ModEngine engine = new ModEngine();
-		(string, string)[] array4 = roots;
-		for (int num = 0; num < array4.Length; num++)
+		List<MonsterAnimationAssetRef> list2 = new List<MonsterAnimationAssetRef>();
+		ModEngine modEngine = new ModEngine();
+		(string, string)[] array6 = array;
+		for (int l = 0; l < array6.Length; l++)
 		{
-			(string, string) root = array4[num];
-			if (!Directory.Exists(root.Item1))
+			(string, string) tuple = array6[l];
+			if (!Directory.Exists(tuple.Item1))
 			{
 				continue;
 			}
-			foreach (string logicalPath in logicalPaths)
+			foreach (string item3 in list)
 			{
-				string path = Path.Combine(root.Item1, IndexService.ResourceBundleRelativePath(logicalPath));
-				if (!File.Exists(path))
+				string text3 = Path.Combine(tuple.Item1, IndexService.ResourceBundleRelativePath(item3));
+				if (!File.Exists(text3))
 				{
 					continue;
 				}
 				try
 				{
-					foreach (MonsterAnimationAssetRef asset in from x in engine.ScanAnimationAssetsFast(path, root.Item1)
+					foreach (MonsterAnimationAssetRef item4 in from x in modEngine.ScanAnimationAssetsFast(text3, tuple.Item1)
 						where x.CardId == cardId
 						select x)
 					{
-						result.Add(new MonsterAnimationAssetRef
+						list2.Add(new MonsterAnimationAssetRef
 						{
-							BundlePath = asset.BundlePath,
-							RelativeBundlePath = asset.RelativeBundlePath,
-							AssetFileName = asset.AssetFileName,
-							PathId = asset.PathId,
-							Name = asset.Name,
-							CardId = asset.CardId,
-							Kind = asset.Kind,
-							StorageKind = root.Item2
+							BundlePath = item4.BundlePath,
+							RelativeBundlePath = item4.RelativeBundlePath,
+							AssetFileName = item4.AssetFileName,
+							PathId = item4.PathId,
+							Name = item4.Name,
+							CardId = item4.CardId,
+							Kind = item4.Kind,
+							StorageKind = tuple.Item2
 						});
 					}
 				}
@@ -273,91 +360,105 @@ public static class MonsterAnimationIndexService
 		}
 		if (discoveredScales == null)
 		{
-			// Official SD folders may use four or more decimal digits (e.g. half
-			// of an HD scale). Derive companion scales from actual containers,
-			// not a fixed precision or a special list of card numbers.
-			HashSet<string> companionScales = new(StringComparer.Ordinal);
-			foreach (var asset in result.Where(x => x.Kind != MonsterAnimationAssetKind.Skeleton))
+			HashSet<string> hashSet = new HashSet<string>(StringComparer.Ordinal);
+			foreach (MonsterAnimationAssetRef item5 in list2.Where((MonsterAnimationAssetRef x) => x.Kind != MonsterAnimationAssetKind.Skeleton))
 			{
-				foreach (string container in engine.ReadAssetBundleContainerPaths(asset.BundlePath))
+				foreach (string item6 in modEngine.ReadAssetBundleContainerPaths(item5.BundlePath))
 				{
-					string[] parts = container.Replace('\\', '/').Split('/');
-					if (parts.Length < 3 || !decimal.TryParse(parts[^2], NumberStyles.Float, CultureInfo.InvariantCulture, out decimal scale)) continue;
-					decimal companion = parts[^3].Equals("sd", StringComparison.OrdinalIgnoreCase) ? scale * 2m : scale / 2m;
-					if (companion > 0) companionScales.Add(companion.ToString("0.################", CultureInfo.InvariantCulture));
+					string[] array7 = item6.Replace('\\', '/').Split('/');
+					if (array7.Length >= 3 && decimal.TryParse(array7[^2], NumberStyles.Float, CultureInfo.InvariantCulture, out var result))
+					{
+						decimal num = (array7[^3].Equals("sd", StringComparison.OrdinalIgnoreCase) ? (result * 2m) : (result / 2m));
+						if (num > 0m)
+						{
+							hashSet.Add(num.ToString("0.################", CultureInfo.InvariantCulture));
+						}
+					}
 				}
 			}
-			companionScales.ExceptWith(DeterministicScales);
-			if (companionScales.Count > 0) result.AddRange(FindDeterministicCandidates(gameRoot, cardId, companionScales));
+			hashSet.ExceptWith(DeterministicScales);
+			if (hashSet.Count > 0)
+			{
+				list2.AddRange(FindDeterministicCandidates(gameRoot, cardId, hashSet));
+			}
 		}
-		return result;
+		return list2;
 	}
 
 	public static List<MonsterAnimationAssetRef> LoadBestAvailable(string gameRoot, out string buildId)
 	{
-		string cache = CachePath(gameRoot);
-		List<PortableMonsterAnimationIndex> indexes = [];
-		foreach (string source in new[] { cache, BundledPath }.Distinct(StringComparer.OrdinalIgnoreCase))
+		string text = CachePath(gameRoot);
+		List<PortableMonsterAnimationIndex> list = new List<PortableMonsterAnimationIndex>();
+		foreach (string item in ((!ResourceSource.IsMobile(gameRoot)) ? new string[2] { text, BundledPath } : new string[1] { text }).Distinct<string>(StringComparer.OrdinalIgnoreCase))
 		{
-			if (!File.Exists(source)) continue;
+			if (!File.Exists(item))
+			{
+				continue;
+			}
 			try
 			{
-				PortableMonsterAnimationIndex candidate = Read(source);
-				if (candidate.FormatVersion == 1) indexes.Add(candidate);
+				PortableMonsterAnimationIndex portableMonsterAnimationIndex = Read(item);
+				if (portableMonsterAnimationIndex.FormatVersion == 1)
+				{
+					list.Add(portableMonsterAnimationIndex);
+				}
 			}
 			catch
 			{
 			}
 		}
-		if (indexes.Count == 0)
+		if (list.Count == 0)
 		{
 			buildId = "";
 			return new List<MonsterAnimationAssetRef>();
 		}
-		string localRoot = IndexService.FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");
+		string path = IndexService.FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");
 		Dictionary<string, string> roots = new Dictionary<string, string>(StringComparer.Ordinal)
 		{
-			["LocalData"] = Path.GetFullPath(localRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar,
+			["LocalData"] = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar,
 			["StreamingAssets"] = Path.GetFullPath(IndexService.StreamingRoot(gameRoot)).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar
 		};
 		string currentBuild = PortableIndexService.GetGameBuildId(gameRoot);
-		buildId = indexes.FirstOrDefault(index => string.Equals(index.GameBuildId, currentBuild, StringComparison.Ordinal))?.GameBuildId
-			?? indexes[0].GameBuildId;
-		return indexes.SelectMany(index => index.Assets)
-			.GroupBy(x => $"{x.RelativeBundlePath}\0{x.AssetFileName}\0{x.PathId}", StringComparer.OrdinalIgnoreCase)
-			.Select(group => group.First())
-			.Select((MonsterAnimationAssetRef x) => new MonsterAnimationAssetRef
-		{
-			BundlePath = ResolveInside(roots.GetValueOrDefault(x.StorageKind, roots["LocalData"]), x.RelativeBundlePath),
-			RelativeBundlePath = x.RelativeBundlePath.Replace('/', Path.DirectorySeparatorChar),
-			AssetFileName = x.AssetFileName,
-			PathId = x.PathId,
-			Name = x.Name,
-			CardId = x.CardId,
-			Kind = x.Kind,
-			StorageKind = x.StorageKind
-		}).ToList();
+		buildId = list.FirstOrDefault((PortableMonsterAnimationIndex index) => string.Equals(index.GameBuildId, currentBuild, StringComparison.Ordinal))?.GameBuildId ?? list[0].GameBuildId;
+		return (from @group in list.SelectMany((PortableMonsterAnimationIndex index) => index.Assets).GroupBy<MonsterAnimationAssetRef, string>((MonsterAnimationAssetRef x) => $"{x.RelativeBundlePath}\0{x.AssetFileName}\0{x.PathId}", StringComparer.OrdinalIgnoreCase)
+			select @group.First() into x
+			select new MonsterAnimationAssetRef
+			{
+				BundlePath = ResolveInside(roots.GetValueOrDefault(x.StorageKind, roots["LocalData"]), x.RelativeBundlePath),
+				RelativeBundlePath = x.RelativeBundlePath.Replace('/', Path.DirectorySeparatorChar),
+				AssetFileName = x.AssetFileName,
+				PathId = x.PathId,
+				Name = x.Name,
+				CardId = x.CardId,
+				Kind = x.Kind,
+				StorageKind = (ResourceSource.IsMobile(gameRoot) ? "Mobile" : x.StorageKind)
+			}).ToList();
 	}
 
-	public static MonsterAnimationSet? FindEquivalentPreview(string gameRoot, CardCatalogEntry card,
-		CardCatalogService catalog)
+	public static MonsterAnimationSet? FindEquivalentPreview(string gameRoot, CardCatalogEntry card, CardCatalogService catalog)
 	{
-		HashSet<string> candidates = LoadBundledCardIds();
+		HashSet<string> hashSet = LoadBundledCardIds();
 		try
 		{
-			candidates.UnionWith(CompleteCardIds(LoadBestAvailable(gameRoot, out _)));
+			hashSet.UnionWith(CompleteCardIds(LoadBestAvailable(gameRoot, out string _)));
 		}
 		catch
 		{
 		}
-		foreach (CardCatalogEntry equivalent in catalog.FindEquivalentCards(card))
+		foreach (CardCatalogEntry item in catalog.FindEquivalentCards(card))
 		{
-			string id = equivalent.CardId.ToString(CultureInfo.InvariantCulture);
-			if (equivalent.CardId == card.CardId || !candidates.Contains(id)) continue;
+			string text = item.CardId.ToString(CultureInfo.InvariantCulture);
+			if (item.CardId == card.CardId || !hashSet.Contains(text))
+			{
+				continue;
+			}
 			try
 			{
-				MonsterAnimationSet set = Find(gameRoot, id);
-				if (set.IsComplete) return set;
+				MonsterAnimationSet monsterAnimationSet = Find(gameRoot, text);
+				if (monsterAnimationSet.IsComplete)
+				{
+					return monsterAnimationSet;
+				}
 			}
 			catch
 			{
@@ -368,19 +469,16 @@ public static class MonsterAnimationIndexService
 
 	public static PortableMonsterAnimationIndex Rebuild(string gameRoot, Action<int, int, int>? progress = null, CancellationToken cancellationToken = default(CancellationToken))
 	{
-		// Discover installed cards from the current multilingual card catalog and
-		// deterministic MonsterCutIn skeleton paths first. This keeps new cards
-		// discoverable without parsing every unrelated Bundle (some valid game
-		// Bundles are extremely expensive for AssetsTools to materialize).
 		IReadOnlyList<string> cardIds = FindInstalledCardIds(gameRoot);
 		ConcurrentBag<MonsterAnimationAssetRef> found = new ConcurrentBag<MonsterAnimationAssetRef>();
-		// Preserve the shipped full scan. Deterministic probing discovers newly
-		// added cards, but some official scale/path layouts cannot be inferred.
 		try
 		{
-			foreach (MonsterAnimationAssetRef asset in LoadBestAvailable(gameRoot, out _).Where(asset => File.Exists(asset.BundlePath)))
+			string buildId;
+			foreach (MonsterAnimationAssetRef item in from asset in LoadBestAvailable(gameRoot, out buildId)
+				where File.Exists(asset.BundlePath)
+				select asset)
 			{
-				found.Add(asset);
+				found.Add(item);
 			}
 		}
 		catch
@@ -391,13 +489,16 @@ public static class MonsterAnimationIndexService
 		{
 			MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 2, 2, 8),
 			CancellationToken = cancellationToken
-		}, cardId =>
+		}, delegate(string cardId)
 		{
 			try
 			{
-				var candidates = FindDeterministicCandidates(gameRoot, cardId).Concat(FindPrefabDependencies(gameRoot, cardId)).ToList();
-				candidates.AddRange(FindCompanionPaths(gameRoot, cardId, candidates));
-				foreach (MonsterAnimationAssetRef current in candidates) found.Add(current);
+				List<MonsterAnimationAssetRef> list = FindDeterministicCandidates(gameRoot, cardId).Concat(FindPrefabDependencies(gameRoot, cardId)).ToList();
+				list.AddRange(FindCompanionPaths(gameRoot, cardId, list));
+				foreach (MonsterAnimationAssetRef item2 in ResourceSource.IsMobile(gameRoot) ? Find(gameRoot, cardId).Assets : list)
+				{
+					found.Add(item2);
+				}
 			}
 			catch
 			{
@@ -409,46 +510,45 @@ public static class MonsterAnimationIndexService
 			}
 		});
 		int result2;
-		PortableMonsterAnimationIndex result = new PortableMonsterAnimationIndex
+		PortableMonsterAnimationIndex portableMonsterAnimationIndex = new PortableMonsterAnimationIndex
 		{
 			GameBuildId = PortableIndexService.GetGameBuildId(gameRoot),
 			Assets = (from x in found.GroupBy<MonsterAnimationAssetRef, string>((MonsterAnimationAssetRef x) => $"{x.RelativeBundlePath}\0{x.AssetFileName}\0{x.PathId}", StringComparer.OrdinalIgnoreCase)
 				select WithoutAbsolutePath(x.First()) into x
-				orderby (!int.TryParse(x.CardId, out result2)) ? int.MaxValue : result2, x.Kind
+				orderby int.TryParse(x.CardId, out result2) ? result2 : int.MaxValue, x.Kind
 				select x).ThenBy<MonsterAnimationAssetRef, string>((MonsterAnimationAssetRef x) => x.RelativeBundlePath, StringComparer.OrdinalIgnoreCase).ToList()
 		};
-		Write(CachePath(gameRoot), result);
-		return result;
+		Write(CachePath(gameRoot), portableMonsterAnimationIndex);
+		return portableMonsterAnimationIndex;
 	}
 
-	public static PortableMonsterAnimationIndex EnsureCurrentIndex(string gameRoot,
-		Action<int, int, int>? progress = null, CancellationToken cancellationToken = default)
+	public static PortableMonsterAnimationIndex EnsureCurrentIndex(string gameRoot, Action<int, int, int>? progress = null, CancellationToken cancellationToken = default(CancellationToken))
 	{
-		string currentBuild = PortableIndexService.GetGameBuildId(gameRoot);
-		string cache = CachePath(gameRoot);
-		if (File.Exists(cache))
+		string gameBuildId = PortableIndexService.GetGameBuildId(gameRoot);
+		string path = CachePath(gameRoot);
+		if (File.Exists(path))
 		{
 			try
 			{
-				PortableMonsterAnimationIndex cached = Read(cache);
-				if (cached.FormatVersion == 1 && string.Equals(cached.GameBuildId, currentBuild, StringComparison.Ordinal))
+				PortableMonsterAnimationIndex portableMonsterAnimationIndex = Read(path);
+				if (portableMonsterAnimationIndex.FormatVersion == 1 && string.Equals(portableMonsterAnimationIndex.GameBuildId, gameBuildId, StringComparison.Ordinal))
 				{
-					return RefreshMissingLinks(gameRoot, cached, progress, cancellationToken);
+					return RefreshMissingLinks(gameRoot, portableMonsterAnimationIndex, progress, cancellationToken);
 				}
 			}
 			catch
 			{
 			}
 		}
-		if (File.Exists(BundledPath))
+		if (!ResourceSource.IsMobile(gameRoot) && File.Exists(BundledPath))
 		{
 			try
 			{
-				PortableMonsterAnimationIndex bundled = Read(BundledPath);
-				if (bundled.FormatVersion == 1 && string.Equals(bundled.GameBuildId, currentBuild, StringComparison.Ordinal))
+				PortableMonsterAnimationIndex portableMonsterAnimationIndex2 = Read(BundledPath);
+				if (portableMonsterAnimationIndex2.FormatVersion == 1 && string.Equals(portableMonsterAnimationIndex2.GameBuildId, gameBuildId, StringComparison.Ordinal))
 				{
-					Write(cache, bundled);
-					return RefreshMissingLinks(gameRoot, bundled, progress, cancellationToken);
+					Write(path, portableMonsterAnimationIndex2);
+					return RefreshMissingLinks(gameRoot, portableMonsterAnimationIndex2, progress, cancellationToken);
 				}
 			}
 			catch
@@ -458,30 +558,30 @@ public static class MonsterAnimationIndexService
 		return Rebuild(gameRoot, progress, cancellationToken);
 	}
 
-	public static PortableMonsterAnimationIndex RefreshMissingLinks(string gameRoot, PortableMonsterAnimationIndex index,
-		Action<int, int, int>? progress = null, CancellationToken cancellationToken = default)
+	public static PortableMonsterAnimationIndex RefreshMissingLinks(string gameRoot, PortableMonsterAnimationIndex index, Action<int, int, int>? progress = null, CancellationToken cancellationToken = default(CancellationToken))
 	{
 		string local = IndexService.FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到活动账号。");
-		List<MonsterAnimationAssetRef> assets = index.Assets.Where(asset => File.Exists(Path.Combine(
-			asset.StorageKind == "StreamingAssets" ? IndexService.StreamingRoot(gameRoot) : local, asset.RelativeBundlePath))).ToList();
-		HashSet<string> complete = CompleteCardIds(assets);
-		string[] missing = FindInstalledCardIds(gameRoot).Where(id => !complete.Contains(id)).ToArray();
-		for (int i = 0; i < missing.Length; i++)
+		List<MonsterAnimationAssetRef> list = index.Assets.Where((MonsterAnimationAssetRef asset) => File.Exists(Path.Combine((asset.StorageKind == "StreamingAssets") ? IndexService.StreamingRoot(gameRoot) : local, asset.RelativeBundlePath))).ToList();
+		HashSet<string> complete = CompleteCardIds(list);
+		string[] array = (from id in FindInstalledCardIds(gameRoot)
+			where !complete.Contains(id)
+			select id).ToArray();
+		for (int num = 0; num < array.Length; num++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			var candidates = FindDeterministicCandidates(gameRoot, missing[i]).Concat(FindPrefabDependencies(gameRoot, missing[i])).ToList();
-			candidates.AddRange(FindCompanionPaths(gameRoot, missing[i], candidates));
-			assets.AddRange(candidates.Select(WithoutAbsolutePath));
-			progress?.Invoke(i + 1, missing.Length, assets.Count);
+			List<MonsterAnimationAssetRef> list2 = FindDeterministicCandidates(gameRoot, array[num]).Concat(FindPrefabDependencies(gameRoot, array[num])).ToList();
+			list2.AddRange(FindCompanionPaths(gameRoot, array[num], list2));
+			list.AddRange((ResourceSource.IsMobile(gameRoot) ? ((IEnumerable<MonsterAnimationAssetRef>)Find(gameRoot, array[num]).Assets) : ((IEnumerable<MonsterAnimationAssetRef>)list2)).Select(WithoutAbsolutePath));
+			progress?.Invoke(num + 1, array.Length, list.Count);
 		}
-		var refreshed = new PortableMonsterAnimationIndex
+		PortableMonsterAnimationIndex portableMonsterAnimationIndex = new PortableMonsterAnimationIndex
 		{
 			GameBuildId = index.GameBuildId,
-			Assets = assets.DistinctBy(asset => $"{asset.StorageKind}|{asset.RelativeBundlePath.Replace('\\', '/')}|{asset.AssetFileName}|{asset.PathId}", StringComparer.OrdinalIgnoreCase).ToList()
+			Assets = list.DistinctBy<MonsterAnimationAssetRef, string>((MonsterAnimationAssetRef asset) => $"{asset.StorageKind}|{asset.RelativeBundlePath.Replace('\\', '/')}|{asset.AssetFileName}|{asset.PathId}", StringComparer.OrdinalIgnoreCase).ToList()
 		};
 		cancellationToken.ThrowIfCancellationRequested();
-		Write(CachePath(gameRoot), refreshed);
-		return refreshed;
+		Write(CachePath(gameRoot), portableMonsterAnimationIndex);
+		return portableMonsterAnimationIndex;
 	}
 
 	public static HashSet<string> CompleteCardIds(PortableMonsterAnimationIndex index)
@@ -491,12 +591,9 @@ public static class MonsterAnimationIndexService
 
 	public static HashSet<string> CompleteCardIds(IEnumerable<MonsterAnimationAssetRef> assets)
 	{
-		return assets.GroupBy(asset => asset.CardId, StringComparer.Ordinal)
-			.Where(group => group.Count(asset => asset.Kind == MonsterAnimationAssetKind.Texture) >= 2
-				&& group.Count(asset => asset.Kind == MonsterAnimationAssetKind.Atlas) >= 2
-				&& group.Count(asset => asset.Kind == MonsterAnimationAssetKind.Skeleton) >= 2)
-			.Select(group => group.Key)
-			.ToHashSet(StringComparer.Ordinal);
+		return (from @group in assets.GroupBy<MonsterAnimationAssetRef, string>((MonsterAnimationAssetRef asset) => asset.CardId, StringComparer.Ordinal)
+			where @group.Count((MonsterAnimationAssetRef asset) => asset.Kind == MonsterAnimationAssetKind.Texture) >= (@group.Any((MonsterAnimationAssetRef a) => a.StorageKind == "Mobile") ? 1 : 2) && @group.Count((MonsterAnimationAssetRef asset) => asset.Kind == MonsterAnimationAssetKind.Atlas) >= (@group.Any((MonsterAnimationAssetRef a) => a.StorageKind == "Mobile") ? 1 : 2) && @group.Count((MonsterAnimationAssetRef asset) => asset.Kind == MonsterAnimationAssetKind.Skeleton) >= (@group.Any((MonsterAnimationAssetRef a) => a.StorageKind == "Mobile") ? 1 : 2)
+			select @group.Key).ToHashSet<string>(StringComparer.Ordinal);
 	}
 
 	public static void Export(string gameRoot, PortableMonsterAnimationIndex index, string outputPath)
@@ -506,31 +603,40 @@ public static class MonsterAnimationIndexService
 
 	public static PortableMonsterAnimationIndex Read(string path)
 	{
-		using FileStream file = File.OpenRead(path);
-		using BrotliStream brotli = new BrotliStream(file, CompressionMode.Decompress);
-		return JsonSerializer.Deserialize<PortableMonsterAnimationIndex>(brotli) ?? throw new InvalidDataException("动画预绑定索引无法读取。");
+		using FileStream stream = File.OpenRead(path);
+		using BrotliStream utf8Json = new BrotliStream(stream, CompressionMode.Decompress);
+		return JsonSerializer.Deserialize<PortableMonsterAnimationIndex>(utf8Json) ?? throw new InvalidDataException("动画预绑定索引无法读取。");
 	}
 
 	public static void Write(string path, PortableMonsterAnimationIndex index)
 	{
 		Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
-		string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+		string text = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
 		try
 		{
-			using (FileStream file = File.Create(temporary))
-			using (BrotliStream brotli = new(file, CompressionLevel.SmallestSize)) JsonSerializer.Serialize(brotli, index);
-			File.Move(temporary, path, overwrite: true);
+			using (FileStream stream = File.Create(text))
+			{
+				using BrotliStream utf8Json = new BrotliStream(stream, CompressionLevel.SmallestSize);
+				JsonSerializer.Serialize(utf8Json, index);
+			}
+			File.Move(text, path, overwrite: true);
 		}
-		finally { if (File.Exists(temporary)) File.Delete(temporary); }
+		finally
+		{
+			if (File.Exists(text))
+			{
+				File.Delete(text);
+			}
+		}
 	}
 
 	public static string CachePath(string gameRoot)
 	{
-		string localRoot = IndexService.FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");
-		string id = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(localRoot + "|animation-v1"))).Substring(0, 12);
-		string text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MDCardModTool");
-		Directory.CreateDirectory(text);
-		return Path.Combine(text, "animation_index_" + id + ".json.br");
+		string text = IndexService.FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");
+		string text2 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text + "|animation-v1"))).Substring(0, 12);
+		string text3 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MDCardModTool");
+		Directory.CreateDirectory(text3);
+		return Path.Combine(text3, "animation_index_" + text2 + ".json.br");
 	}
 
 	private static MonsterAnimationAssetRef WithoutAbsolutePath(MonsterAnimationAssetRef x)

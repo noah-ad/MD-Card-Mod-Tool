@@ -6,18 +6,15 @@ using System.Windows.Forms;
 
 namespace MdCardModTool;
 
-/// <summary>
-/// Keeps the native ComboBox keyboard and accessibility behavior while
-/// replacing the light Windows drop-down button with the application chrome.
-/// </summary>
 public sealed class ModernComboBox : ComboBox
 {
-	private const int WmPaint = 0x000F;
-	private const int WmNcPaint = 0x0085;
+	private const int WmPaint = 15;
+
+	private const int WmNcPaint = 133;
 
 	public ModernComboBox()
 	{
-		SetStyle(ControlStyles.OptimizedDoubleBuffer, true);
+		SetStyle(ControlStyles.OptimizedDoubleBuffer, value: true);
 	}
 
 	protected override void OnHandleCreated(EventArgs e)
@@ -25,63 +22,55 @@ public sealed class ModernComboBox : ComboBox
 		base.OnHandleCreated(e);
 		if (OperatingSystem.IsWindows())
 		{
-			// The themed Win32 ComboBox ignores BackColor for its closed state on
-			// several Windows 10/11 builds. Disabling only this control's native
-			// theme lets the owner-drawn dark palette remain DPI/accessibility safe.
-			SetWindowTheme(Handle, "", "");
+			SetWindowTheme(base.Handle, "", "");
 		}
 	}
 
 	protected override void WndProc(ref Message message)
 	{
 		base.WndProc(ref message);
-		if ((message.Msg == WmPaint || message.Msg == WmNcPaint) && IsHandleCreated && !IsDisposed)
+		if ((message.Msg == 15 || message.Msg == 133) && base.IsHandleCreated && !base.IsDisposed)
 		{
-			using Graphics graphics = CreateGraphics();
-			DrawDropDownChrome(graphics);
+			using (Graphics graphics = CreateGraphics())
+			{
+				DrawDropDownChrome(graphics);
+			}
 		}
 	}
 
 	private void DrawDropDownChrome(Graphics graphics)
 	{
-		float scale = Math.Max(1f, DeviceDpi / 96f);
-		int buttonWidth = Math.Max(UiTheme.Scale(this, 30), SystemInformation.VerticalScrollBarWidth);
-		if (DropDownStyle == ComboBoxStyle.DropDownList)
+		float num = Math.Max(1f, (float)base.DeviceDpi / 96f);
+		int num2 = Math.Max(UiTheme.Scale(this, 30), SystemInformation.VerticalScrollBarWidth);
+		if (base.DropDownStyle == ComboBoxStyle.DropDownList)
 		{
-			using SolidBrush background = new(BackColor);
-			graphics.FillRectangle(background, ClientRectangle);
-			string selectedText = SelectedItem?.ToString() ?? Text;
-			TextRenderer.DrawText(graphics, selectedText, Font,
-				new Rectangle(UiTheme.Scale(this, 7), 0,
-					Math.Max(1, ClientSize.Width - buttonWidth - UiTheme.Scale(this, 10)), ClientSize.Height),
-				Enabled ? ForeColor : UiTheme.Muted,
-				TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+			using SolidBrush brush = new SolidBrush(BackColor);
+			graphics.FillRectangle(brush, base.ClientRectangle);
+			string text = base.SelectedItem?.ToString() ?? Text;
+			TextRenderer.DrawText(graphics, text, Font, new Rectangle(UiTheme.Scale(this, 7), 0, Math.Max(1, base.ClientSize.Width - num2 - UiTheme.Scale(this, 10)), base.ClientSize.Height), base.Enabled ? ForeColor : UiTheme.Muted, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.VerticalCenter);
 		}
-		Rectangle button = new(Math.Max(0, ClientSize.Width - buttonWidth), 0,
-			Math.Min(buttonWidth, ClientSize.Width), ClientSize.Height);
-		using SolidBrush fill = new(BackColor);
-		graphics.FillRectangle(fill, button);
-
+		Rectangle rect = new Rectangle(Math.Max(0, base.ClientSize.Width - num2), 0, Math.Min(num2, base.ClientSize.Width), base.ClientSize.Height);
+		using SolidBrush brush2 = new SolidBrush(BackColor);
+		graphics.FillRectangle(brush2, rect);
 		graphics.SmoothingMode = SmoothingMode.AntiAlias;
 		graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-		Color glyphColor = Enabled ? (Focused || DroppedDown ? UiTheme.Primary : UiTheme.Muted) : UiTheme.Border;
-		using Pen glyph = new(glyphColor, 1.7f * scale)
+		using Pen pen = new Pen((!base.Enabled) ? UiTheme.Border : ((Focused || base.DroppedDown) ? UiTheme.Primary : UiTheme.Muted), 1.7f * num)
 		{
 			StartCap = LineCap.Round,
 			EndCap = LineCap.Round,
 			LineJoin = LineJoin.Round
 		};
-		float centerX = button.Left + button.Width / 2f;
-		float centerY = button.Top + button.Height / 2f;
-		float half = 3.5f * scale;
-		graphics.DrawLines(glyph,
-		[
-			new PointF(centerX - half, centerY - 1.5f * scale),
-			new PointF(centerX, centerY + 2f * scale),
-			new PointF(centerX + half, centerY - 1.5f * scale)
-		]);
+		float num3 = (float)rect.Left + (float)rect.Width / 2f;
+		float num4 = (float)rect.Top + (float)rect.Height / 2f;
+		float num5 = 3.5f * num;
+		graphics.DrawLines(pen, new PointF[3]
+		{
+			new PointF(num3 - num5, num4 - 1.5f * num),
+			new PointF(num3, num4 + 2f * num),
+			new PointF(num3 + num5, num4 - 1.5f * num)
+		});
 	}
 
 	[DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
-	private static extern int SetWindowTheme(IntPtr handle, string? subAppName, string? subIdList);
+	private static extern int SetWindowTheme(nint handle, string? subAppName, string? subIdList);
 }

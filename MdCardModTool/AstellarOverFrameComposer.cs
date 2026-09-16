@@ -7,331 +7,288 @@ using SixLabors.ImageSharp.PixelFormats;
 
 namespace MdCardModTool;
 
-public sealed record AstellarOverFrameComposition(
-	byte[] GamePng,
-	byte[] PreviewPng,
-	int TransparentEdgePixels);
-
-/// <summary>
-/// Independent implementation of Astellar's six-layer over-frame composition.
-/// The output deliberately keeps RGB values below zero-alpha edge pixels; this
-/// is data used by Master Duel's card shader and must not be flattened by GDI+.
-/// </summary>
 public static class AstellarOverFrameComposer
 {
-	private static readonly string[] BottomToTop =
-	[
-		"BackGround", "EffBox", "ArtFrame", "EffFrame", "NameBox", "PeriFrame"
-	];
+	private static readonly string[] BottomToTop = new string[6] { "BackGround", "EffBox", "ArtFrame", "EffFrame", "NameBox", "PeriFrame" };
 
-	private static readonly HashSet<string> TransparentEdgeLayers =
-	[
-		"PeriFrame", "ArtFrame", "EffFrame"
-	];
+	private static readonly HashSet<string> TransparentEdgeLayers = new HashSet<string> { "PeriFrame", "ArtFrame", "EffFrame" };
 
-	public static AstellarOverFrameComposition Compose(byte[] transparentArtPng,
-		AstellarOverFrameTemplate template, byte[]? backgroundPng = null)
+	public static AstellarOverFrameComposition Compose(byte[] transparentArtPng, AstellarOverFrameTemplate template, byte[]? backgroundPng = null)
 	{
-		using Image<Rgba32> art = Image.Load<Rgba32>(transparentArtPng);
-		Validate(art, "透明高图");
-		int pixelCount = FrameComposer.Width * FrameComposer.Height;
-		Rgba32[] artPixels = new Rgba32[pixelCount];
-		art.CopyPixelDataTo(artPixels);
-		// A true over-frame stack is background -> frame chrome -> transparent subject.
-		// Keeping the subject last is what lets opaque subject pixels cross the frame.
-		Rgba32[] output = CreateUnderlay(pixelCount, backgroundPng);
-		Dictionary<string, bool[]> layerMasks = new(StringComparer.Ordinal);
-
-		foreach (string name in BottomToTop)
+		using Image<Rgba32> image = Image.Load<Rgba32>(transparentArtPng);
+		Validate(image, "透明高图");
+		int num = 720896;
+		Rgba32[] array = new Rgba32[num];
+		image.CopyPixelDataTo(array);
+		Rgba32[] array2 = CreateUnderlay(num, backgroundPng);
+		Dictionary<string, bool[]> dictionary = new Dictionary<string, bool[]>(StringComparer.Ordinal);
+		string[] bottomToTop = BottomToTop;
+		foreach (string text in bottomToTop)
 		{
-			if (!template.Layers.TryGetValue(name, out byte[]? bytes))
+			if (!template.Layers.TryGetValue(text, out byte[] value))
 			{
-				throw new InvalidDataException($"透明边缘模板 {template.Key} 缺少 {name} 图层。");
+				throw new InvalidDataException($"透明边缘模板 {template.Key} 缺少 {text} 图层。");
 			}
-			using Image<Rgba32> layer = Image.Load<Rgba32>(bytes);
-			Validate(layer, name);
-			Rgba32[] layerPixels = new Rgba32[pixelCount];
-			layer.CopyPixelDataTo(layerPixels);
-			if (TransparentEdgeLayers.Contains(name) || name == "EffBox")
+			using Image<Rgba32> image2 = Image.Load<Rgba32>(value);
+			Validate(image2, text);
+			Rgba32[] array3 = new Rgba32[num];
+			image2.CopyPixelDataTo(array3);
+			if (TransparentEdgeLayers.Contains(text) || text == "EffBox")
 			{
-				bool[] layerMask = new bool[pixelCount];
-				CollectAlphaMask(layerPixels, layerMask);
-				layerMasks[name] = layerMask;
+				bool[] array4 = new bool[num];
+				CollectAlphaMask(array3, array4);
+				dictionary[text] = array4;
 			}
-			AlphaComposite(output, layerPixels);
+			AlphaComposite(array2, array3);
 		}
-		AlphaComposite(output, artPixels);
-
-		bool[] edgeMask = CombineTransparentEdgeMasks(layerMasks);
-		int transparentPixels = ClearAlphaPreservingRgb(output, edgeMask);
-		byte[] gamePng = Encode(output);
-
-		// The default preview must show the real Alpha result. Hidden RGB remains
-		// available through CreateVisibleRgbPreview as an explicit diagnostic only.
-		return new AstellarOverFrameComposition(gamePng, (byte[])gamePng.Clone(),
-			transparentPixels);
+		AlphaComposite(array2, array);
+		bool[] edgeMask = CombineTransparentEdgeMasks(dictionary);
+		int transparentEdgePixels = ClearAlphaPreservingRgb(array2, edgeMask);
+		byte[] array5 = Encode(array2);
+		return new AstellarOverFrameComposition(array5, (byte[])array5.Clone(), transparentEdgePixels);
 	}
 
-	/// <summary>
-	/// Uses Floowan's iridescent RGB together with Astellar's more open Alpha
-	/// geometry. This is the standalone frame shown in the transparent-iridescent
-	/// frame category.
-	/// </summary>
-	public static byte[] CreateTransparentGradientFrame(byte[] gradientFramePng,
-		byte[] transparentFramePng)
+	public static byte[] CreateTransparentGradientFrame(byte[] gradientFramePng, byte[] transparentFramePng)
 	{
-		using Image<Rgba32> gradient = Image.Load<Rgba32>(gradientFramePng);
-		using Image<Rgba32> transparent = Image.Load<Rgba32>(transparentFramePng);
-		Validate(gradient, "炫彩卡框");
-		Validate(transparent, "透明卡框");
-		int pixelCount = FrameComposer.Width * FrameComposer.Height;
-		Rgba32[] gradientPixels = new Rgba32[pixelCount];
-		Rgba32[] transparentPixels = new Rgba32[pixelCount];
-		gradient.CopyPixelDataTo(gradientPixels);
-		transparent.CopyPixelDataTo(transparentPixels);
-		for (int index = 0; index < pixelCount; index++)
+		using Image<Rgba32> image = Image.Load<Rgba32>(gradientFramePng);
+		using Image<Rgba32> image2 = Image.Load<Rgba32>(transparentFramePng);
+		Validate(image, "炫彩卡框");
+		Validate(image2, "透明卡框");
+		int num = 720896;
+		Rgba32[] array = new Rgba32[num];
+		Rgba32[] array2 = new Rgba32[num];
+		image.CopyPixelDataTo(array);
+		image2.CopyPixelDataTo(array2);
+		for (int i = 0; i < num; i++)
 		{
-			Rgba32 color = gradientPixels[index];
-			color.A = Math.Min(color.A, transparentPixels[index].A);
-			gradientPixels[index] = color;
+			Rgba32 rgba = array[i];
+			rgba.A = Math.Min(rgba.A, array2[i].A);
+			array[i] = rgba;
 		}
-		// This PNG is a read-only UI resource generated on demand. Favor responsive
-		// category switching; final game output still uses BestCompression below.
-		return Encode(gradientPixels, PngCompressionLevel.BestSpeed);
+		return Encode(array, PngCompressionLevel.Level1);
 	}
 
-	/// <summary>
-	/// Composes an iridescent frame and then applies the same Astellar Dirty Alpha
-	/// geometry used by the transparent frame mode. The result is genuinely
-	/// transparent while retaining the gradient RGB below zero Alpha.
-	/// </summary>
-	public static AstellarOverFrameComposition ComposeTransparentFlatFrame(byte[] artPng,
-		byte[] framePng, AstellarOverFrameTemplate template, byte[]? backgroundPng = null)
+	public static AstellarOverFrameComposition ComposeTransparentFlatFrame(byte[] artPng, byte[] framePng, AstellarOverFrameTemplate template, byte[]? backgroundPng = null)
 	{
-		byte[] flatPng = ComposeFlatFrame(artPng, framePng, backgroundPng);
-		using Image<Rgba32> flat = Image.Load<Rgba32>(flatPng);
-		Rgba32[] pixels = new Rgba32[FrameComposer.Width * FrameComposer.Height];
-		flat.CopyPixelDataTo(pixels);
-		int transparentPixels = ClearAlphaPreservingRgb(pixels,
-			CreateTransparentEdgeMask(template));
-		byte[] gamePng = Encode(pixels);
-		return new AstellarOverFrameComposition(gamePng, (byte[])gamePng.Clone(),
-			transparentPixels);
+		using Image<Rgba32> image = Image.Load<Rgba32>(ComposeFlatFrame(artPng, framePng, backgroundPng));
+		Rgba32[] array = new Rgba32[720896];
+		image.CopyPixelDataTo(array);
+		int transparentEdgePixels = ClearAlphaPreservingRgb(array, CreateTransparentEdgeMask(template));
+		byte[] array2 = Encode(array);
+		return new AstellarOverFrameComposition(array2, (byte[])array2.Clone(), transparentEdgePixels);
 	}
 
-	/// <summary>
-	/// Composes the shared background -> frame -> transparent subject pipeline used by
-	/// Floowan gradient frames and complete ordinary card frames in the unified OF editor.
-	/// </summary>
-	public static byte[] ComposeFlatFrame(byte[] artPng, byte[] framePng,
-		byte[]? backgroundPng = null)
+	public static byte[] ComposeFlatFrame(byte[] artPng, byte[] framePng, byte[]? backgroundPng = null)
 	{
-		using Image<Rgba32> art = Image.Load<Rgba32>(artPng);
-		using Image<Rgba32> frame = Image.Load<Rgba32>(framePng);
-		Validate(art, "卡图");
-		Validate(frame, "卡框");
-		int pixelCount = FrameComposer.Width * FrameComposer.Height;
-		Rgba32[] artPixels = new Rgba32[pixelCount];
-		Rgba32[] framePixels = new Rgba32[pixelCount];
-		art.CopyPixelDataTo(artPixels);
-		frame.CopyPixelDataTo(framePixels);
-		Rgba32[] output = CreateUnderlay(pixelCount, backgroundPng);
-		AlphaComposite(output, framePixels);
-		AlphaComposite(output, artPixels);
-		return Encode(output);
+		using Image<Rgba32> image = Image.Load<Rgba32>(artPng);
+		using Image<Rgba32> image2 = Image.Load<Rgba32>(framePng);
+		Validate(image, "卡图");
+		Validate(image2, "卡框");
+		Rgba32[] array = new Rgba32[720896];
+		Rgba32[] array2 = new Rgba32[720896];
+		image.CopyPixelDataTo(array);
+		image2.CopyPixelDataTo(array2);
+		Rgba32[] array3 = CreateUnderlay(720896, backgroundPng);
+		AlphaComposite(array3, array2);
+		AlphaComposite(array3, array);
+		return Encode(array3);
 	}
 
 	public static byte[] CreateVisibleFramePreview(byte[] framePng)
 	{
-		using Image<Rgba32> frame = Image.Load<Rgba32>(framePng);
-		Validate(frame, "卡框");
-		Rgba32[] pixels = new Rgba32[FrameComposer.Width * FrameComposer.Height];
-		frame.CopyPixelDataTo(pixels);
-		return Encode(CreateVisibleRgbProjection(pixels));
+		using Image<Rgba32> image = Image.Load<Rgba32>(framePng);
+		Validate(image, "卡框");
+		Rgba32[] array = new Rgba32[720896];
+		image.CopyPixelDataTo(array);
+		return Encode(CreateVisibleRgbProjection(array));
 	}
 
-	/// <summary>
-	/// Creates a diagnostic RGB projection used to inspect Master Duel's hidden
-	/// transparent color data:
-	/// zero-alpha pixels that still carry RGB are made visible for display only.
-	/// The returned PNG is never a default preview and is never written back to
-	/// Texture2D; the original alpha remains authoritative.
-	/// </summary>
 	public static byte[] CreateVisibleRgbPreview(byte[] texturePng)
 	{
 		using Image<Rgba32> image = Image.Load<Rgba32>(texturePng);
-		Rgba32[] pixels = new Rgba32[image.Width * image.Height];
-		image.CopyPixelDataTo(pixels);
-		return Encode(CreateVisibleRgbProjection(pixels), image.Width, image.Height);
+		Rgba32[] array = new Rgba32[image.Width * image.Height];
+		image.CopyPixelDataTo(array);
+		return Encode(CreateVisibleRgbProjection(array), image.Width, image.Height);
 	}
 
 	private static Rgba32[] CreateVisibleRgbProjection(Rgba32[] source)
 	{
-		Rgba32[] preview = (Rgba32[])source.Clone();
-		for (int index = 0; index < preview.Length; index++)
+		Rgba32[] array = (Rgba32[])source.Clone();
+		for (int i = 0; i < array.Length; i++)
 		{
-			Rgba32 pixel = preview[index];
-			if (pixel.A != 0 || (pixel.R == 0 && pixel.G == 0 && pixel.B == 0)) continue;
-			pixel.A = 255;
-			preview[index] = pixel;
+			Rgba32 rgba = array[i];
+			if (rgba.A == 0 && (rgba.R != 0 || rgba.G != 0 || rgba.B != 0))
+			{
+				rgba.A = byte.MaxValue;
+				array[i] = rgba;
+			}
 		}
-		return preview;
+		return array;
 	}
 
 	private static bool[] CreateTransparentEdgeMask(AstellarOverFrameTemplate template)
 	{
-		Dictionary<string, bool[]> layerMasks = new(StringComparer.Ordinal);
-		foreach (string name in TransparentEdgeLayers)
+		Dictionary<string, bool[]> dictionary = new Dictionary<string, bool[]>(StringComparer.Ordinal);
+		foreach (string transparentEdgeLayer in TransparentEdgeLayers)
 		{
-			if (!template.Layers.TryGetValue(name, out byte[]? bytes))
+			if (!template.Layers.TryGetValue(transparentEdgeLayer, out byte[] value))
 			{
-				throw new InvalidDataException($"透明边缘模板 {template.Key} 缺少 {name} 图层。");
+				throw new InvalidDataException($"透明边缘模板 {template.Key} 缺少 {transparentEdgeLayer} 图层。");
 			}
-			using Image<Rgba32> layer = Image.Load<Rgba32>(bytes);
-			Validate(layer, name);
-			Rgba32[] pixels = new Rgba32[FrameComposer.Width * FrameComposer.Height];
-			layer.CopyPixelDataTo(pixels);
-			bool[] mask = new bool[pixels.Length];
-			CollectAlphaMask(pixels, mask);
-			layerMasks[name] = mask;
+			using Image<Rgba32> image = Image.Load<Rgba32>(value);
+			Validate(image, transparentEdgeLayer);
+			Rgba32[] array = new Rgba32[720896];
+			image.CopyPixelDataTo(array);
+			bool[] array2 = new bool[array.Length];
+			CollectAlphaMask(array, array2);
+			dictionary[transparentEdgeLayer] = array2;
 		}
-		if (!template.Layers.TryGetValue("EffBox", out byte[]? effectBoxBytes))
+		if (!template.Layers.TryGetValue("EffBox", out byte[] value2))
 		{
-			throw new InvalidDataException($"透明边缘模板 {template.Key} 缺少 EffBox 图层。");
+			throw new InvalidDataException("透明边缘模板 " + template.Key + " 缺少 EffBox 图层。");
 		}
-		using (Image<Rgba32> effectBox = Image.Load<Rgba32>(effectBoxBytes))
+		using (Image<Rgba32> image2 = Image.Load<Rgba32>(value2))
 		{
-			Validate(effectBox, "EffBox");
-			Rgba32[] pixels = new Rgba32[FrameComposer.Width * FrameComposer.Height];
-			effectBox.CopyPixelDataTo(pixels);
-			bool[] mask = new bool[pixels.Length];
-			CollectAlphaMask(pixels, mask);
-			layerMasks["EffBox"] = mask;
+			Validate(image2, "EffBox");
+			Rgba32[] array3 = new Rgba32[720896];
+			image2.CopyPixelDataTo(array3);
+			bool[] array4 = new bool[array3.Length];
+			CollectAlphaMask(array3, array4);
+			dictionary["EffBox"] = array4;
 		}
-		return CombineTransparentEdgeMasks(layerMasks);
+		return CombineTransparentEdgeMasks(dictionary);
 	}
 
-	private static bool[] CombineTransparentEdgeMasks(
-		IReadOnlyDictionary<string, bool[]> layerMasks)
+	private static bool[] CombineTransparentEdgeMasks(IReadOnlyDictionary<string, bool[]> layerMasks)
 	{
-		int pixelCount = FrameComposer.Width * FrameComposer.Height;
-		bool[] edgeMask = new bool[pixelCount];
-		layerMasks.TryGetValue("EffBox", out bool[]? effectBoxMask);
-		foreach (string name in TransparentEdgeLayers)
+		int num = 720896;
+		bool[] array = new bool[num];
+		layerMasks.TryGetValue("EffBox", out bool[] value);
+		foreach (string transparentEdgeLayer in TransparentEdgeLayers)
 		{
-			if (!layerMasks.TryGetValue(name, out bool[]? layerMask)) continue;
-			for (int index = 0; index < pixelCount; index++)
+			if (!layerMasks.TryGetValue(transparentEdgeLayer, out bool[] value2))
 			{
-				if (layerMask[index]
-					&& (name == "PeriFrame" || effectBoxMask == null || !effectBoxMask[index]))
+				continue;
+			}
+			for (int i = 0; i < num; i++)
+			{
+				if (value2[i] && (transparentEdgeLayer == "PeriFrame" || value == null || !value[i]))
 				{
-					edgeMask[index] = true;
+					array[i] = true;
 				}
 			}
 		}
-		return edgeMask;
+		return array;
 	}
 
 	private static int ClearAlphaPreservingRgb(Rgba32[] pixels, bool[] edgeMask)
 	{
-		int transparentPixels = 0;
-		for (int index = 0; index < pixels.Length; index++)
+		int num = 0;
+		for (int i = 0; i < pixels.Length; i++)
 		{
-			if (!edgeMask[index]) continue;
-			Rgba32 pixel = pixels[index];
-			bool carriesRgb = pixel.R != 0 || pixel.G != 0 || pixel.B != 0;
-			pixel.A = 0;
-			pixels[index] = pixel;
-			// Fully black edge pixels still need alpha cleared, but they carry no
-			// hidden RGB shader data and therefore do not inflate this diagnostic.
-			if (carriesRgb) transparentPixels++;
+			if (edgeMask[i])
+			{
+				Rgba32 rgba = pixels[i];
+				bool num2 = rgba.R != 0 || rgba.G != 0 || rgba.B != 0;
+				rgba.A = 0;
+				pixels[i] = rgba;
+				if (num2)
+				{
+					num++;
+				}
+			}
 		}
-		return transparentPixels;
+		return num;
 	}
 
 	private static Rgba32[] CreateUnderlay(int pixelCount, byte[]? backgroundPng)
 	{
-		Rgba32[] output = new Rgba32[pixelCount];
-		if (backgroundPng == null) return output;
-		using Image<Rgba32> background = Image.Load<Rgba32>(backgroundPng);
-		Validate(background, "叠底背景");
-		background.CopyPixelDataTo(output);
-		return output;
+		Rgba32[] array = new Rgba32[pixelCount];
+		if (backgroundPng == null)
+		{
+			return array;
+		}
+		using Image<Rgba32> image = Image.Load<Rgba32>(backgroundPng);
+		Validate(image, "叠底背景");
+		image.CopyPixelDataTo(array);
+		return array;
 	}
 
 	private static void AlphaComposite(Rgba32[] destination, Rgba32[] source)
 	{
-		if (destination.Length != source.Length) throw new ArgumentException("图层像素数量不一致。", nameof(source));
-		for (int index = 0; index < destination.Length; index++)
+		if (destination.Length != source.Length)
 		{
-			Rgba32 over = source[index];
-			if (over.A == 0) continue;
-			if (over.A == 255)
+			throw new ArgumentException("图层像素数量不一致。", "source");
+		}
+		for (int i = 0; i < destination.Length; i++)
+		{
+			Rgba32 rgba = source[i];
+			if (rgba.A == 0)
 			{
-				destination[index] = over;
 				continue;
 			}
-			Rgba32 under = destination[index];
-			int sourceAlpha = over.A;
+			if (rgba.A == byte.MaxValue)
+			{
+				destination[i] = rgba;
+				continue;
+			}
+			Rgba32 under = destination[i];
+			int sourceAlpha = rgba.A;
 			int inverse = 255 - sourceAlpha;
-			int outAlpha = sourceAlpha + (under.A * inverse + 127) / 255;
-			if (outAlpha == 0)
+			int num = sourceAlpha + (under.A * inverse + 127) / 255;
+			if (num == 0)
 			{
-				destination[index] = over;
+				destination[i] = rgba;
 				continue;
 			}
-			int denominator = outAlpha * 255;
-			byte Blend(byte top, byte bottom) => (byte)Math.Clamp(
-				(top * sourceAlpha * 255 + bottom * under.A * inverse + denominator / 2) / denominator,
-				0, 255);
-			destination[index] = new Rgba32(
-				Blend(over.R, under.R),
-				Blend(over.G, under.G),
-				Blend(over.B, under.B),
-				(byte)outAlpha);
+			int denominator = num * 255;
+			destination[i] = new Rgba32(Blend(rgba.R, under.R), Blend(rgba.G, under.G), Blend(rgba.B, under.B), (byte)num);
+			byte Blend(byte top, byte bottom)
+			{
+				return (byte)Math.Clamp((top * sourceAlpha * 255 + bottom * under.A * inverse + denominator / 2) / denominator, 0, 255);
+			}
 		}
 	}
 
 	private static void CollectAlphaMask(Rgba32[] pixels, bool[] mask)
 	{
-		for (int index = 0; index < pixels.Length; index++)
+		for (int i = 0; i < pixels.Length; i++)
 		{
-			if (pixels[index].A > 0) mask[index] = true;
+			if (pixels[i].A > 0)
+			{
+				mask[i] = true;
+			}
 		}
 	}
 
 	private static byte[] Encode(Rgba32[] pixels)
 	{
-		return Encode(pixels, FrameComposer.Width, FrameComposer.Height);
+		return Encode(pixels, 704, 1024);
 	}
 
 	private static byte[] Encode(Rgba32[] pixels, PngCompressionLevel compressionLevel)
 	{
-		return Encode(pixels, FrameComposer.Width, FrameComposer.Height, compressionLevel);
+		return Encode(pixels, 704, 1024, compressionLevel);
 	}
 
-	private static byte[] Encode(Rgba32[] pixels, int width, int height,
-		PngCompressionLevel compressionLevel = PngCompressionLevel.BestCompression)
+	private static byte[] Encode(Rgba32[] pixels, int width, int height, PngCompressionLevel compressionLevel = PngCompressionLevel.Level9)
 	{
 		using Image<Rgba32> image = Image.LoadPixelData<Rgba32>(pixels, width, height);
-		using MemoryStream stream = new();
-		image.Save(stream, new PngEncoder
+		using MemoryStream memoryStream = new MemoryStream();
+		image.Save(memoryStream, new PngEncoder
 		{
 			ColorType = PngColorType.RgbWithAlpha,
-			// Transparent RGB is shader data in Master Duel, not disposable color.
-			// Keep this explicit even though current ImageSharp versions default to
-			// Preserve; a future package/default change must not silently clear it.
 			TransparentColorMode = PngTransparentColorMode.Preserve,
 			CompressionLevel = compressionLevel
 		});
-		return stream.ToArray();
+		return memoryStream.ToArray();
 	}
 
 	private static void Validate(Image image, string label)
 	{
-		if (image.Width != FrameComposer.Width || image.Height != FrameComposer.Height)
+		if (image.Width != 704 || image.Height != 1024)
 		{
-			throw new InvalidDataException($"{label}必须严格为 {FrameComposer.Width}×{FrameComposer.Height}；当前为 {image.Width}×{image.Height}。");
+			throw new InvalidDataException($"{label}必须严格为 {704}×{1024}；当前为 {image.Width}×{image.Height}。");
 		}
 	}
 }

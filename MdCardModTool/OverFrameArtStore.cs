@@ -63,35 +63,50 @@ public static class OverFrameArtStore
 	public static void SaveSource(string gameRoot, ushort cardId, string imagePath)
 	{
 		using Image<Rgba32> image = Image.Load<Rgba32>(imagePath);
-		image.Mutate(context => context.AutoOrient());
+		image.Mutate(delegate(IImageProcessingContext context)
+		{
+			context.AutoOrient();
+		});
 		SaveSourceImage(gameRoot, cardId, image);
 	}
 
 	public static void SaveSource(string gameRoot, ushort cardId, byte[] imageBytes)
 	{
 		using Image<Rgba32> image = Image.Load<Rgba32>(imageBytes);
-		image.Mutate(context => context.AutoOrient());
+		image.Mutate(delegate(IImageProcessingContext context)
+		{
+			context.AutoOrient();
+		});
 		SaveSourceImage(gameRoot, cardId, image);
 	}
 
 	public static void SaveBackground(string gameRoot, ushort cardId, string imagePath)
 	{
 		using Image<Rgba32> image = Image.Load<Rgba32>(imagePath);
-		image.Mutate(context => context.AutoOrient());
+		image.Mutate(delegate(IImageProcessingContext context)
+		{
+			context.AutoOrient();
+		});
 		SaveBackgroundImage(gameRoot, cardId, image);
 	}
 
 	public static void SaveBackground(string gameRoot, ushort cardId, byte[] png)
 	{
 		using Image<Rgba32> image = Image.Load<Rgba32>(png);
-		image.Mutate(context => context.AutoOrient());
+		image.Mutate(delegate(IImageProcessingContext context)
+		{
+			context.AutoOrient();
+		});
 		SaveBackgroundImage(gameRoot, cardId, image);
 	}
 
 	public static void DeleteBackground(string gameRoot, ushort cardId)
 	{
 		string path = BackgroundPath(gameRoot, cardId);
-		if (File.Exists(path)) File.Delete(path);
+		if (File.Exists(path))
+		{
+			File.Delete(path);
+		}
 	}
 
 	public static string SaveCustomFrame(string gameRoot, ushort cardId, string imagePath)
@@ -99,9 +114,9 @@ public static class OverFrameArtStore
 		using Image<Rgba32> image = Image.Load<Rgba32>(imagePath);
 		Validate(image.Width, image.Height, "自定义卡框");
 		Directory.CreateDirectory(CardFolder(gameRoot, cardId));
-		string target = CustomFramePath(gameRoot, cardId);
-		image.SaveAsPng(target);
-		return target;
+		string text = CustomFramePath(gameRoot, cardId);
+		image.SaveAsPng(text);
+		return text;
 	}
 
 	public static OverFrameFrameSettings ReadSettings(string gameRoot, ushort cardId)

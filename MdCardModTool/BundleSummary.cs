@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 
 namespace MdCardModTool;
 
@@ -15,9 +16,20 @@ public sealed class BundleSummary
 	{
 		if (AssetTypes.Count != 0)
 		{
-			return string.Join("；", from x in AssetTypes
-				orderby x.Key
-				select $"{x.Key} × {x.Value}");
+			return string.Join("；", AssetTypes.OrderBy<KeyValuePair<string, int>, string>(delegate(KeyValuePair<string, int> x)
+			{
+				KeyValuePair<string, int> keyValuePair = x;
+				return keyValuePair.Key;
+			}).Select(delegate(KeyValuePair<string, int> x)
+			{
+				DefaultInterpolatedStringHandler defaultInterpolatedStringHandler = new DefaultInterpolatedStringHandler(3, 2);
+				KeyValuePair<string, int> keyValuePair = x;
+				defaultInterpolatedStringHandler.AppendFormatted(keyValuePair.Key);
+				defaultInterpolatedStringHandler.AppendLiteral(" × ");
+				keyValuePair = x;
+				defaultInterpolatedStringHandler.AppendFormatted(keyValuePair.Value);
+				return defaultInterpolatedStringHandler.ToStringAndClear();
+			}));
 		}
 		return "无 Serialized Asset（通常是资源数据或依赖 Bundle）";
 	}

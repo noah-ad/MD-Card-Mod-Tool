@@ -13,53 +13,49 @@ public static class FrameComposer
 
 	public static byte[] Compose(byte[] artPng, byte[] framePng)
 	{
-		using Bitmap art = BitmapFrom(artPng);
-		using Bitmap frame = BitmapFrom(framePng);
-		Validate(art, "透明高图");
-		Validate(frame, "卡框");
-		using Bitmap output = new Bitmap(704, 1024, PixelFormat.Format32bppArgb);
-		using (Graphics graphics = Graphics.FromImage(output))
+		using Bitmap image = BitmapFrom(artPng);
+		using Bitmap image2 = BitmapFrom(framePng);
+		Validate(image, "透明高图");
+		Validate(image2, "卡框");
+		using Bitmap bitmap = new Bitmap(704, 1024, PixelFormat.Format32bppArgb);
+		using (Graphics graphics = Graphics.FromImage(bitmap))
 		{
 			graphics.Clear(Color.Transparent);
 			graphics.CompositingMode = CompositingMode.SourceCopy;
-			graphics.DrawImageUnscaled(frame, 0, 0);
+			graphics.DrawImageUnscaled(image2, 0, 0);
 			graphics.CompositingMode = CompositingMode.SourceOver;
-			graphics.DrawImageUnscaled(art, 0, 0);
+			graphics.DrawImageUnscaled(image, 0, 0);
 		}
-		using MemoryStream stream = new MemoryStream();
-		output.Save(stream, ImageFormat.Png);
-		return stream.ToArray();
+		using MemoryStream memoryStream = new MemoryStream();
+		bitmap.Save(memoryStream, ImageFormat.Png);
+		return memoryStream.ToArray();
 	}
 
-	/// <summary>
-	/// Conventional card composition: artwork below a complete flat frame.  This
-	/// is deliberately separate from transparent-edge over-frame composition.
-	/// </summary>
 	public static byte[] ComposeNormalFrame(byte[] artPng, byte[] framePng)
 	{
-		using Bitmap art = BitmapFrom(artPng);
-		using Bitmap frame = BitmapFrom(framePng);
-		Validate(art, "卡图");
-		Validate(frame, "普通完整卡框");
-		using Bitmap output = new Bitmap(Width, Height, PixelFormat.Format32bppArgb);
-		using (Graphics graphics = Graphics.FromImage(output))
+		using Bitmap image = BitmapFrom(artPng);
+		using Bitmap image2 = BitmapFrom(framePng);
+		Validate(image, "卡图");
+		Validate(image2, "普通完整卡框");
+		using Bitmap bitmap = new Bitmap(704, 1024, PixelFormat.Format32bppArgb);
+		using (Graphics graphics = Graphics.FromImage(bitmap))
 		{
 			graphics.Clear(Color.Transparent);
 			graphics.CompositingMode = CompositingMode.SourceCopy;
-			graphics.DrawImageUnscaled(art, 0, 0);
+			graphics.DrawImageUnscaled(image, 0, 0);
 			graphics.CompositingMode = CompositingMode.SourceOver;
-			graphics.DrawImageUnscaled(frame, 0, 0);
+			graphics.DrawImageUnscaled(image2, 0, 0);
 		}
-		using MemoryStream stream = new MemoryStream();
-		output.Save(stream, ImageFormat.Png);
-		return stream.ToArray();
+		using MemoryStream memoryStream = new MemoryStream();
+		bitmap.Save(memoryStream, ImageFormat.Png);
+		return memoryStream.ToArray();
 	}
 
 	public static Bitmap BitmapFrom(byte[] data)
 	{
 		using MemoryStream stream = new MemoryStream(data);
-		using Image image = Image.FromStream(stream);
-		return new Bitmap(image);
+		using Image original = Image.FromStream(stream);
+		return new Bitmap(original);
 	}
 
 	public static Bitmap PreviewBitmap(byte[] data)

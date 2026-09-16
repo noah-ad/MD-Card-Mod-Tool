@@ -20,29 +20,29 @@ public sealed class MonsterAnimationRawAssetService
 
 	public MonsterAnimationAssetProfile ResolveProfile(MonsterAnimationAssetRef asset)
 	{
-		string relative = Normalize(asset.RelativeBundlePath);
+		string text = Normalize(asset.RelativeBundlePath);
 		string[] array = new string[2] { "tcg", "ocg" };
-		foreach (string region in array)
+		foreach (string text2 in array)
 		{
-			string basePath = "Duel/Timeline/Duel/MonsterCutIn/" + region + "/P" + asset.CardId;
+			string value = "Duel/Timeline/Duel/MonsterCutIn/" + text2 + "/P" + asset.CardId;
 			string[] array2 = new string[2] { "HighEnd_HD", "SD" };
-			foreach (string tier in array2)
+			foreach (string text3 in array2)
 			{
 				if (asset.Kind == MonsterAnimationAssetKind.Skeleton)
 				{
-					if (relative == Normalize(IndexService.ResourceBundleRelativePath($"{basePath}/{tier}/P{asset.CardId}JS")))
+					if (text == Normalize(IndexService.ResourceBundleRelativePath($"{value}/{text3}/P{asset.CardId}JS")))
 					{
-						return new MonsterAnimationAssetProfile(tier, region, "");
+						return new MonsterAnimationAssetProfile(text3, text2, "");
 					}
 					continue;
 				}
 				string[] scales = Scales;
-				foreach (string scale in scales)
+				foreach (string text4 in scales)
 				{
-					string suffix = ((asset.Kind == MonsterAnimationAssetKind.Atlas) ? ("/P" + asset.CardId + ".atlas") : ("/P" + asset.CardId));
-					if (relative == Normalize(IndexService.ResourceBundleRelativePath($"{basePath}/{tier}/{scale}{suffix}")))
+					string value2 = ((asset.Kind == MonsterAnimationAssetKind.Atlas) ? ("/P" + asset.CardId + ".atlas") : ("/P" + asset.CardId));
+					if (text == Normalize(IndexService.ResourceBundleRelativePath($"{value}/{text3}/{text4}{value2}")))
 					{
-						return new MonsterAnimationAssetProfile(tier, region, scale);
+						return new MonsterAnimationAssetProfile(text3, text2, text4);
 					}
 				}
 			}
@@ -52,15 +52,15 @@ public sealed class MonsterAnimationRawAssetService
 
 	public string ExportFileName(MonsterAnimationAssetRef asset)
 	{
-		MonsterAnimationAssetProfile profile = ResolveProfile(asset);
-		string extension = asset.Kind switch
+		MonsterAnimationAssetProfile monsterAnimationAssetProfile = ResolveProfile(asset);
+		string text = asset.Kind switch
 		{
 			MonsterAnimationAssetKind.Texture => ".png",
 			MonsterAnimationAssetKind.Atlas => ".atlas",
 			_ => ".json",
 		};
-		string resourceName = ((asset.Kind == MonsterAnimationAssetKind.Skeleton) ? (asset.Name + extension) : (Path.GetFileNameWithoutExtension(asset.Name) + extension));
-		return Safe(profile.FilePrefix + "_" + resourceName);
+		string text2 = ((asset.Kind == MonsterAnimationAssetKind.Skeleton) ? (asset.Name + text) : (Path.GetFileNameWithoutExtension(asset.Name) + text));
+		return Safe(monsterAnimationAssetProfile.FilePrefix + "_" + text2);
 	}
 
 	public byte[] Read(MonsterAnimationAssetRef asset)
@@ -75,37 +75,37 @@ public sealed class MonsterAnimationRawAssetService
 	public RawAnimationManifest ExportAll(MonsterAnimationSet set, string directory)
 	{
 		Directory.CreateDirectory(directory);
-		RawAnimationManifest manifest = new RawAnimationManifest
+		RawAnimationManifest rawAnimationManifest = new RawAnimationManifest
 		{
 			CardId = set.CardId
 		};
-		HashSet<string> usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		foreach (MonsterAnimationAssetRef asset in Ordered(set.Assets))
+		HashSet<string> used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (MonsterAnimationAssetRef item in Ordered(set.Assets))
 		{
-			string fileName = UniqueName(ExportFileName(asset), usedNames);
-			File.WriteAllBytes(Path.Combine(directory, fileName), Read(asset));
-			manifest.Files.Add(new RawAnimationManifestEntry
+			string text = UniqueName(ExportFileName(item), used);
+			File.WriteAllBytes(Path.Combine(directory, text), Read(item));
+			rawAnimationManifest.Files.Add(new RawAnimationManifestEntry
 			{
-				FileName = fileName,
-				RelativeBundlePath = Normalize(asset.RelativeBundlePath),
-				AssetFileName = asset.AssetFileName,
-				PathId = asset.PathId,
-				Kind = asset.Kind
+				FileName = text,
+				RelativeBundlePath = Normalize(item.RelativeBundlePath),
+				AssetFileName = item.AssetFileName,
+				PathId = item.PathId,
+				Kind = item.Kind
 			});
 		}
-		File.WriteAllText(Path.Combine(directory, "_动画资源映射.json"), JsonSerializer.Serialize(manifest, new JsonSerializerOptions
+		File.WriteAllText(Path.Combine(directory, "_动画资源映射.json"), JsonSerializer.Serialize(rawAnimationManifest, new JsonSerializerOptions
 		{
 			WriteIndented = true
 		}), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-		return manifest;
+		return rawAnimationManifest;
 	}
 
 	public void ReplaceOne(string gameRoot, MonsterAnimationAssetRef asset, string inputPath)
 	{
-		string rollback = TemporaryRollbackDirectory();
-		Directory.CreateDirectory(rollback);
-		string snapshot = Path.Combine(rollback, "000.bundle");
-		File.Copy(asset.BundlePath, snapshot, overwrite: true);
+		string text = TemporaryRollbackDirectory();
+		Directory.CreateDirectory(text);
+		string text2 = Path.Combine(text, "000.bundle");
+		File.Copy(asset.BundlePath, text2, overwrite: true);
 		try
 		{
 			ValidateInput(asset.Kind, inputPath);
@@ -113,87 +113,87 @@ public sealed class MonsterAnimationRawAssetService
 		}
 		catch
 		{
-			File.Copy(snapshot, asset.BundlePath, overwrite: true);
+			File.Copy(text2, asset.BundlePath, overwrite: true);
 			throw;
 		}
 		finally
 		{
-			TryDeleteDirectory(rollback);
+			TryDeleteDirectory(text);
 		}
 	}
 
 	public int ImportAll(string gameRoot, MonsterAnimationSet set, string directory)
 	{
-		string manifestPath = Path.Combine(directory, "_动画资源映射.json");
-		if (!File.Exists(manifestPath))
+		string text = Path.Combine(directory, "_动画资源映射.json");
+		if (!File.Exists(text))
 		{
-			throw new FileNotFoundException("所选目录缺少 _动画资源映射.json，请先用本窗口“导出全部”建立可回导目录。", manifestPath);
+			throw new FileNotFoundException("所选目录缺少 _动画资源映射.json，请先用本窗口“导出全部”建立可回导目录。", text);
 		}
-		RawAnimationManifest manifest = JsonSerializer.Deserialize<RawAnimationManifest>(File.ReadAllText(manifestPath)) ?? throw new InvalidDataException("动画资源映射无法读取。");
-		if (manifest.FormatVersion != 1 || manifest.CardId != set.CardId)
+		RawAnimationManifest rawAnimationManifest = JsonSerializer.Deserialize<RawAnimationManifest>(File.ReadAllText(text)) ?? throw new InvalidDataException("动画资源映射无法读取。");
+		if (rawAnimationManifest.FormatVersion != 1 || rawAnimationManifest.CardId != set.CardId)
 		{
-			throw new InvalidDataException($"映射属于卡号 {manifest.CardId}，当前窗口是 {set.CardId}。");
+			throw new InvalidDataException($"映射属于卡号 {rawAnimationManifest.CardId}，当前窗口是 {set.CardId}。");
 		}
-		List<(MonsterAnimationAssetRef, string)> imports = new List<(MonsterAnimationAssetRef, string)>();
-		foreach (RawAnimationManifestEntry entry in manifest.Files)
+		List<(MonsterAnimationAssetRef, string)> list = new List<(MonsterAnimationAssetRef, string)>();
+		foreach (RawAnimationManifestEntry entry in rawAnimationManifest.Files)
 		{
 			if (entry.FileName != Path.GetFileName(entry.FileName))
 			{
 				throw new InvalidDataException("映射中包含越界文件名。");
 			}
-			MonsterAnimationAssetRef asset = set.Assets.FirstOrDefault((MonsterAnimationAssetRef x) => x.Kind == entry.Kind && x.PathId == entry.PathId && string.Equals(x.AssetFileName, entry.AssetFileName, StringComparison.Ordinal) && string.Equals(Normalize(x.RelativeBundlePath), Normalize(entry.RelativeBundlePath), StringComparison.OrdinalIgnoreCase)) ?? throw new InvalidDataException("当前游戏版本找不到映射资源：" + entry.FileName);
-			string input = Path.Combine(directory, entry.FileName);
-			if (!File.Exists(input))
+			MonsterAnimationAssetRef monsterAnimationAssetRef = set.Assets.FirstOrDefault((MonsterAnimationAssetRef x) => x.Kind == entry.Kind && x.PathId == entry.PathId && string.Equals(x.AssetFileName, entry.AssetFileName, StringComparison.Ordinal) && string.Equals(Normalize(x.RelativeBundlePath), Normalize(entry.RelativeBundlePath), StringComparison.OrdinalIgnoreCase)) ?? throw new InvalidDataException("当前游戏版本找不到映射资源：" + entry.FileName);
+			string text2 = Path.Combine(directory, entry.FileName);
+			if (!File.Exists(text2))
 			{
-				throw new FileNotFoundException("缺少待导入文件：" + entry.FileName, input);
+				throw new FileNotFoundException("缺少待导入文件：" + entry.FileName, text2);
 			}
-			ValidateInput(asset.Kind, input);
-			imports.Add((asset, input));
+			ValidateInput(monsterAnimationAssetRef.Kind, text2);
+			list.Add((monsterAnimationAssetRef, text2));
 		}
-		if (imports.Count == 0)
+		if (list.Count == 0)
 		{
 			throw new InvalidDataException("映射中没有可导入的动画资源。");
 		}
-		string rollback = TemporaryRollbackDirectory();
-		Directory.CreateDirectory(rollback);
-		string[] bundles = imports.Select<(MonsterAnimationAssetRef, string), string>(((MonsterAnimationAssetRef Asset, string Path) x) => x.Asset.BundlePath).Distinct<string>(StringComparer.OrdinalIgnoreCase).ToArray();
+		string text3 = TemporaryRollbackDirectory();
+		Directory.CreateDirectory(text3);
+		string[] array = list.Select<(MonsterAnimationAssetRef, string), string>(((MonsterAnimationAssetRef Asset, string Path) x) => x.Asset.BundlePath).Distinct<string>(StringComparer.OrdinalIgnoreCase).ToArray();
 		try
 		{
-			for (int i = 0; i < bundles.Length; i++)
+			for (int num = 0; num < array.Length; num++)
 			{
-				File.Copy(bundles[i], Path.Combine(rollback, $"{i:D3}.bundle"), overwrite: true);
+				File.Copy(array[num], Path.Combine(text3, $"{num:D3}.bundle"), overwrite: true);
 			}
 			try
 			{
-				foreach (var item in imports)
+				foreach (var item in list)
 				{
 					Apply(gameRoot, item.Item1, item.Item2);
 				}
 			}
 			catch
 			{
-				for (int i2 = 0; i2 < bundles.Length; i2++)
+				for (int num2 = 0; num2 < array.Length; num2++)
 				{
-					File.Copy(Path.Combine(rollback, $"{i2:D3}.bundle"), bundles[i2], overwrite: true);
+					File.Copy(Path.Combine(text3, $"{num2:D3}.bundle"), array[num2], overwrite: true);
 				}
 				throw;
 			}
 		}
 		finally
 		{
-			TryDeleteDirectory(rollback);
+			TryDeleteDirectory(text3);
 		}
-		return imports.Count;
+		return list.Count;
 	}
 
 	public bool Restore(string gameRoot, MonsterAnimationAssetRef asset)
 	{
-		string backup = Path.Combine(gameRoot, "_MD卡图备份", asset.ModSourceKind, asset.RelativeBundlePath);
-		if (!File.Exists(backup))
+		string text = Path.Combine(gameRoot, "_MD卡图备份", asset.ModSourceKind, asset.RelativeBundlePath);
+		if (!File.Exists(text))
 		{
 			return false;
 		}
-		File.Copy(backup, asset.BundlePath, overwrite: true);
+		File.Copy(text, asset.BundlePath, overwrite: true);
 		return true;
 	}
 
@@ -202,9 +202,9 @@ public sealed class MonsterAnimationRawAssetService
 		string backupRoot = Path.Combine(gameRoot, "_MD卡图备份", asset.ModSourceKind);
 		if (asset.Kind == MonsterAnimationAssetKind.Texture)
 		{
-			using (Image<Rgba32> image = Image.Load<Rgba32>(inputPath))
+			using (Image<Rgba32> atlas = Image.Load<Rgba32>(inputPath))
 			{
-				_engine.ReplaceAnimationAtlas(asset, image, backupRoot);
+				_engine.ReplaceAnimationAtlas(asset, atlas, backupRoot);
 				return;
 			}
 		}
@@ -220,37 +220,37 @@ public sealed class MonsterAnimationRawAssetService
 		}
 		if (kind == MonsterAnimationAssetKind.Texture)
 		{
-			ImageInfo info = Image.Identify(inputPath) ?? throw new InvalidDataException("无法读取动画图集图片。");
-			if (info.Width < 1 || info.Height < 1 || info.Width > 16384 || info.Height > 16384)
+			ImageInfo imageInfo = Image.Identify(inputPath) ?? throw new InvalidDataException("无法读取动画图集图片。");
+			if (imageInfo.Width < 1 || imageInfo.Height < 1 || imageInfo.Width > 16384 || imageInfo.Height > 16384)
 			{
 				throw new InvalidDataException("动画图集尺寸必须在 1–16384 像素范围内。");
 			}
 			return;
 		}
-		byte[] data = NormalizeTextData(File.ReadAllBytes(inputPath));
-		if (data.Length == 0)
+		byte[] array = NormalizeTextData(File.ReadAllBytes(inputPath));
+		if (array.Length == 0)
 		{
 			throw new InvalidDataException("文本资源不能为空。");
 		}
 		if (kind == MonsterAnimationAssetKind.Skeleton)
 		{
-			using (JsonDocument.Parse(data))
+			using (JsonDocument.Parse(array))
 			{
 				return;
 			}
 		}
-		new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(data);
+		new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(array);
 	}
 
 	private static byte[] NormalizeTextData(byte[] data)
 	{
-		int start = (data.AsSpan().StartsWith(Encoding.UTF8.Preamble) ? Encoding.UTF8.Preamble.Length : 0);
-		int end = data.Length;
-		while (end > start && data[end - 1] == 0)
+		int num = (data.AsSpan().StartsWith(Encoding.UTF8.Preamble) ? Encoding.UTF8.Preamble.Length : 0);
+		int num2 = data.Length;
+		while (num2 > num && data[num2 - 1] == 0)
 		{
-			end--;
+			num2--;
 		}
-		return data.AsSpan(start, end - start).ToArray();
+		return data.AsSpan(num, num2 - num).ToArray();
 	}
 
 	private static IEnumerable<MonsterAnimationAssetRef> Ordered(IEnumerable<MonsterAnimationAssetRef> assets)
@@ -270,20 +270,20 @@ public sealed class MonsterAnimationRawAssetService
 		{
 			return candidate;
 		}
-		string stem = Path.GetFileNameWithoutExtension(candidate);
+		string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(candidate);
 		string extension = Path.GetExtension(candidate);
-		int i = 2;
-		string value;
+		int num = 2;
+		string text;
 		while (true)
 		{
-			value = $"{stem}_{i}{extension}";
-			if (used.Add(value))
+			text = $"{fileNameWithoutExtension}_{num}{extension}";
+			if (used.Add(text))
 			{
 				break;
 			}
-			i++;
+			num++;
 		}
-		return value;
+		return text;
 	}
 
 	private static string Normalize(string path)
@@ -293,7 +293,7 @@ public sealed class MonsterAnimationRawAssetService
 
 	private static string Safe(string value)
 	{
-		return string.Concat(value.Select((char c) => (!Path.GetInvalidFileNameChars().Contains(c)) ? c : '_'));
+		return string.Concat(value.Select((char c) => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
 	}
 
 	private static string TemporaryRollbackDirectory()

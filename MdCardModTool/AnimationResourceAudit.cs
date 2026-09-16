@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -9,36 +10,67 @@ namespace MdCardModTool;
 
 internal static class AnimationResourceAudit
 {
-    public static void Run(string gameRoot, string output)
-    {
-        Directory.CreateDirectory(output);
-        var ids = MonsterAnimationIndexService.FindInstalledCardIds(gameRoot);
-        var rows = new object[ids.Count];
-        Parallel.For(0, ids.Count, new ParallelOptions { MaxDegreeOfParallelism = 3 }, i =>
-        {
-            string id = ids[i];
-            try
-            {
-                var assets = MonsterAnimationIndexService.FindPrefabDependencies(gameRoot, id);
-                assets.AddRange(MonsterAnimationIndexService.FindCompanionPaths(gameRoot, id, assets));
-                assets = assets.DistinctBy(a => Path.GetFullPath(a.BundlePath) + "|" + a.PathId).ToList();
-                var set = new MonsterAnimationSet { CardId = id, Assets = assets };
-                var pairs = MonsterAnimationAssetPairing.FindComplete(set);
-                bool complete = pairs.Any(p => p.Tier == "SD") && pairs.Any(p => p.Tier == "HighEnd_HD");
-                bool alias = pairs.Any(p => p.Atlas.Name != "P" + id + ".atlas");
-                var engine = new ModEngine();
-                int pages = pairs.Select(p => Encoding.UTF8.GetString(engine.ReadTextAsset(p.Atlas).Data)
-                    .Split('\n').Count(l => l.Trim().EndsWith(".png", StringComparison.OrdinalIgnoreCase))).DefaultIfEmpty(0).Max();
-                var missingPages = pairs.SelectMany(p => Encoding.UTF8.GetString(engine.ReadTextAsset(p.Atlas).Data).Split('\n')
-                    .Select(l => l.Trim()).Where(l => l.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
-                    .Where(page => !p.Textures.Any(t => (t.Name + ".png").Equals(page, StringComparison.OrdinalIgnoreCase)))).Distinct().ToArray();
-                rows[i] = new { CardId = id, Complete = complete, Alias = alias, Pages = pages, MissingPages = missingPages, Assets = assets.Count,
-                    Names = assets.Select(a => a.Name).Distinct().ToArray(), Error = "" };
-                if (!complete || alias || pages > 1) Console.WriteLine($"card={id}; complete={complete}; alias={alias}; pages={pages}; assets={assets.Count}");
-            }
-            catch (Exception ex) { rows[i] = new { CardId = id, Complete = false, Error = ex.Message }; Console.WriteLine($"card={id}; ERROR={ex.Message}"); }
-        });
-        File.WriteAllText(Path.Combine(output, "audit.json"), JsonSerializer.Serialize(rows, new JsonSerializerOptions { WriteIndented = true }));
-        Console.WriteLine($"audited={ids.Count}; gameWrites=False");
-    }
+	public static void Run(string gameRoot, string output)
+	{
+		Directory.CreateDirectory(output);
+		IReadOnlyList<string> ids = MonsterAnimationIndexService.FindInstalledCardIds(gameRoot);
+		object[] rows = new object[ids.Count];
+		Parallel.For(0, ids.Count, new ParallelOptions
+		{
+			MaxDegreeOfParallelism = 3
+		}, delegate(int i)
+		{
+			string id = ids[i];
+			try
+			{
+				List<MonsterAnimationAssetRef> list = MonsterAnimationIndexService.FindPrefabDependencies(gameRoot, id);
+				list.AddRange(MonsterAnimationIndexService.FindCompanionPaths(gameRoot, id, list));
+				list = list.DistinctBy((MonsterAnimationAssetRef a) => Path.GetFullPath(a.BundlePath) + "|" + a.PathId).ToList();
+				IReadOnlyList<MonsterAnimationAssetTriplet> source = MonsterAnimationAssetPairing.FindComplete(new MonsterAnimationSet
+				{
+					CardId = id,
+					Assets = list
+				});
+				bool flag = source.Any((MonsterAnimationAssetTriplet p) => p.Tier == "SD") && source.Any((MonsterAnimationAssetTriplet p) => p.Tier == "HighEnd_HD");
+				bool flag2 = source.Any((MonsterAnimationAssetTriplet p) => p.Atlas.Name != "P" + id + ".atlas");
+				ModEngine engine = new ModEngine();
+				int num = source.Select((MonsterAnimationAssetTriplet p) => Encoding.UTF8.GetString(engine.ReadTextAsset(p.Atlas).Data).Split('\n').Count((string l) => l.Trim().EndsWith(".png", StringComparison.OrdinalIgnoreCase))).DefaultIfEmpty(0).Max();
+				string[] missingPages = source.SelectMany((MonsterAnimationAssetTriplet p) => from l in Encoding.UTF8.GetString(engine.ReadTextAsset(p.Atlas).Data).Split('\n')
+					select l.Trim() into page
+					where page.EndsWith(".png", StringComparison.OrdinalIgnoreCase)
+					where !p.Textures.Any((MonsterAnimationAssetRef t) => (t.Name + ".png").Equals(page, StringComparison.OrdinalIgnoreCase))
+					select page).Distinct().ToArray();
+				rows[i] = new
+				{
+					CardId = id,
+					Complete = flag,
+					Alias = flag2,
+					Pages = num,
+					MissingPages = missingPages,
+					Assets = list.Count,
+					Names = list.Select((MonsterAnimationAssetRef a) => a.Name).Distinct().ToArray(),
+					Error = ""
+				};
+				if (!flag || flag2 || num > 1)
+				{
+					Console.WriteLine($"card={id}; complete={flag}; alias={flag2}; pages={num}; assets={list.Count}");
+				}
+			}
+			catch (Exception ex)
+			{
+				rows[i] = new
+				{
+					CardId = id,
+					Complete = false,
+					Error = ex.Message
+				};
+				Console.WriteLine("card=" + id + "; ERROR=" + ex.Message);
+			}
+		});
+		File.WriteAllText(Path.Combine(output, "audit.json"), JsonSerializer.Serialize(rows, new JsonSerializerOptions
+		{
+			WriteIndented = true
+		}));
+		Console.WriteLine($"audited={ids.Count}; gameWrites=False");
+	}
 }

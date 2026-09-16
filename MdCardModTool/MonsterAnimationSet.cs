@@ -19,6 +19,14 @@ public sealed class MonsterAnimationSet
 	{
 		get
 		{
+			if (IsMobile)
+			{
+				if (Textures.Count >= 1 && Atlases.Count >= 1 && Skeletons.Count >= 1)
+				{
+					return MonsterAnimationAssetPairing.FindComplete(this).Count > 0;
+				}
+				return false;
+			}
 			if (Textures.Count >= 2 && Atlases.Count >= 2)
 			{
 				return Skeletons.Count >= 2;
@@ -26,6 +34,8 @@ public sealed class MonsterAnimationSet
 			return false;
 		}
 	}
+
+	public bool IsMobile => Assets.Any((MonsterAnimationAssetRef a) => a.StorageKind == "Mobile");
 
 	public string CountSummary => $"Texture2D ×{Textures.Count} · Atlas ×{Atlases.Count} · JS ×{Skeletons.Count}";
 }

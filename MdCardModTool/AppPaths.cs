@@ -4,33 +4,37 @@ using System.IO;
 
 namespace MdCardModTool;
 
-/// <summary>
-/// Stable application layout. Published builds keep the launcher at the root
-/// and all external payload beside it under <c>data</c>. Legacy and source-tree
-/// candidates remain read-only fallbacks for developer builds.
-/// </summary>
 public static class AppPaths
 {
 	public static string ApplicationRoot => AppContext.BaseDirectory;
 
 	public static string DataRoot => Path.Combine(ApplicationRoot, "data");
 
-	public static string Data(params string[] segments) => Combine(DataRoot, segments);
+	public static string Data(params string[] segments)
+	{
+		return Combine(DataRoot, segments);
+	}
 
 	public static string ResolveFile(params string[] segments)
 	{
-		foreach (string candidate in CandidatePaths(segments))
+		foreach (string item in CandidatePaths(segments))
 		{
-			if (File.Exists(candidate)) return candidate;
+			if (File.Exists(item))
+			{
+				return item;
+			}
 		}
 		return Data(segments);
 	}
 
 	public static string? ResolveDirectory(params string[] segments)
 	{
-		foreach (string candidate in CandidatePaths(segments))
+		foreach (string item in CandidatePaths(segments))
 		{
-			if (Directory.Exists(candidate)) return candidate;
+			if (Directory.Exists(item))
+			{
+				return item;
+			}
 		}
 		return null;
 	}
@@ -44,11 +48,11 @@ public static class AppPaths
 
 	private static string Combine(string root, IReadOnlyList<string> segments)
 	{
-		string path = root;
-		for (int index = 0; index < segments.Count; index++)
+		string text = root;
+		for (int i = 0; i < segments.Count; i++)
 		{
-			path = Path.Combine(path, segments[index]);
+			text = Path.Combine(text, segments[i]);
 		}
-		return path;
+		return text;
 	}
 }

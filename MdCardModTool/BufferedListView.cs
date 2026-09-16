@@ -6,6 +6,8 @@ namespace MdCardModTool;
 
 public sealed class BufferedListView : ListView
 {
+	private const int WmThemeChanged = 794;
+
 	public bool DarkThemeRequested { get; private set; }
 
 	public BufferedListView()
@@ -16,22 +18,16 @@ public sealed class BufferedListView : ListView
 	protected override void OnHandleCreated(EventArgs e)
 	{
 		base.OnHandleCreated(e);
-		if (!OperatingSystem.IsWindows())
+		if (OperatingSystem.IsWindows())
 		{
-			return;
+			DarkThemeRequested = SetWindowTheme(base.Handle, "DarkMode_Explorer", null) == 0;
+			SendMessage(base.Handle, 794, IntPtr.Zero, IntPtr.Zero);
 		}
-		// Owner drawing does not include Win32's non-client scrollbars. Asking the
-		// common-control theme for its dark Explorer variant keeps any unavoidable
-		// vertical indicator consistent with the workspace.
-		DarkThemeRequested = SetWindowTheme(Handle, "DarkMode_Explorer", null) == 0;
-		SendMessage(Handle, WmThemeChanged, IntPtr.Zero, IntPtr.Zero);
 	}
 
-	private const int WmThemeChanged = 0x031A;
-
 	[DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
-	private static extern int SetWindowTheme(IntPtr handle, string? subAppName, string? subIdList);
+	private static extern int SetWindowTheme(nint handle, string? subAppName, string? subIdList);
 
 	[DllImport("user32.dll")]
-	private static extern IntPtr SendMessage(IntPtr handle, int message, IntPtr wParam, IntPtr lParam);
+	private static extern nint SendMessage(nint handle, int message, nint wParam, nint lParam);
 }

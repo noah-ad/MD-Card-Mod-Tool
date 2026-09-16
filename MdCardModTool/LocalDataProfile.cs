@@ -1,4 +1,6 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 
 namespace MdCardModTool;
 
@@ -12,5 +14,21 @@ public sealed record LocalDataProfile
 
 	public string DisplayName => $"{AccountId}  ·  {LastWriteTimeUtc.ToLocalTime():yyyy-MM-dd HH:mm}";
 
-	public override string ToString() => DisplayName;
+	public override string ToString()
+	{
+		return DisplayName;
+	}
+
+	[CompilerGenerated]
+	[SetsRequiredMembers]
+	private LocalDataProfile(LocalDataProfile original)
+	{
+		AccountId = original.AccountId;
+		RootPath = original.RootPath;
+		LastWriteTimeUtc = original.LastWriteTimeUtc;
+	}
+
+	public LocalDataProfile()
+	{
+	}
 }

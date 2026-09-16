@@ -15,11 +15,11 @@ public static class CardFrameRenderer
 		{
 			throw new InvalidDataException($"卡框必须为 {704}×{1024}。当前为 {frame.Width}×{frame.Height}。");
 		}
-		using Bitmap argb = ((frame.PixelFormat == PixelFormat.Format32bppArgb) ? null : new Bitmap(frame.Width, frame.Height, PixelFormat.Format32bppArgb));
-		Bitmap source = argb ?? frame;
-		if (argb != null)
+		using Bitmap bitmap = ((frame.PixelFormat == PixelFormat.Format32bppArgb) ? null : new Bitmap(frame.Width, frame.Height, PixelFormat.Format32bppArgb));
+		Bitmap source = bitmap ?? frame;
+		if (bitmap != null)
 		{
-			using Graphics graphics = Graphics.FromImage(argb);
+			using Graphics graphics = Graphics.FromImage(bitmap);
 			graphics.DrawImageUnscaled(frame, 0, 0);
 		}
 		BitmapData data = source.LockBits(new Rectangle(0, 0, source.Width, source.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
@@ -28,87 +28,83 @@ public static class CardFrameRenderer
 			int stride = Math.Abs(data.Stride);
 			byte[] bytes = new byte[stride * source.Height];
 			Marshal.Copy(data.Scan0, bytes, 0, bytes.Length);
-			// The transparent drop-shadow area around a frame is a separate alpha
-			// island. Taking one bounding box around every transparent pixel mixed
-			// that exterior island with the illustration opening and effectively
-			// returned almost the whole 704×1024 card. Find connected alpha islands
-			// and prefer the largest one containing the card centre.
-			int pixelCount = source.Width * source.Height;
-			byte[] visited = new byte[pixelCount];
-			int[] queue = new int[pixelCount];
-			(int Area, int Left, int Top, int Right, int Bottom) best = default;
-			int centerX = source.Width / 2;
-			int centerY = source.Height / 2;
-			bool IsTransparent(int x, int y)
+			int num = source.Width * source.Height;
+			byte[] visited = new byte[num];
+			int[] queue = new int[num];
+			(int, int, int, int, int) tuple = default((int, int, int, int, int));
+			int num2 = source.Width / 2;
+			int num3 = source.Height / 2;
+			if (IsTransparent(num2, num3))
 			{
-				int row = data.Stride >= 0 ? y * stride : (source.Height - 1 - y) * stride;
-				return bytes[row + x * 4 + 3] <= 128;
+				tuple = FloodComponent(num2, num3);
+				return RectangleF.FromLTRB(tuple.Item2, tuple.Item3, tuple.Item4 + 1, tuple.Item5 + 1);
 			}
-			(int Area, int Left, int Top, int Right, int Bottom) FloodComponent(int startX, int startY)
+			for (int i = 0; i < source.Height; i++)
 			{
-				int head = 0;
-				int tail = 0;
-				int start = startY * source.Width + startX;
-				queue[tail++] = start;
-				visited[start] = 1;
-				int area = 0;
-				int left = startX;
-				int top = startY;
-				int right = startX;
-				int bottom = startY;
-				while (head < tail)
+				for (int j = 0; j < source.Width; j++)
 				{
-					int index = queue[head++];
-					int y = index / source.Width;
-					int x = index - y * source.Width;
-					area++;
-					left = Math.Min(left, x);
-					top = Math.Min(top, y);
-					right = Math.Max(right, x);
-					bottom = Math.Max(bottom, y);
-					TryVisit(x - 1, y);
-					TryVisit(x + 1, y);
-					TryVisit(x, y - 1);
-					TryVisit(x, y + 1);
-					void TryVisit(int nextX, int nextY)
+					int num4 = i * source.Width + j;
+					if (visited[num4] == 0 && IsTransparent(j, i))
 					{
-						if ((uint)nextX >= (uint)source.Width || (uint)nextY >= (uint)source.Height) return;
-						int next = nextY * source.Width + nextX;
-						if (visited[next] != 0 || !IsTransparent(nextX, nextY)) return;
-						visited[next] = 1;
-						queue[tail++] = next;
-					}
-				}
-				return (area, left, top, right, bottom);
-			}
-
-			// Every official card illustration window contains the card centre. This
-			// fast path avoids scanning unrelated transparent islands when switching
-			// frames in the editor.
-			if (IsTransparent(centerX, centerY))
-			{
-				best = FloodComponent(centerX, centerY);
-				return RectangleF.FromLTRB(best.Left, best.Top, best.Right + 1, best.Bottom + 1);
-			}
-
-			for (int startY = 0; startY < source.Height; startY++)
-			{
-				for (int startX = 0; startX < source.Width; startX++)
-				{
-					int start = startY * source.Width + startX;
-					if (visited[start] != 0 || !IsTransparent(startX, startY)) continue;
-					var component = FloodComponent(startX, startY);
-					if (component.Area > best.Area)
-					{
-						best = component;
+						(int, int, int, int, int) tuple2 = FloodComponent(j, i);
+						if (tuple2.Item1 > tuple.Item1)
+						{
+							tuple = tuple2;
+						}
 					}
 				}
 			}
-			if (best.Area == 0)
+			if (tuple.Item1 == 0)
 			{
 				throw new InvalidDataException("卡框中没有找到透明插图区。");
 			}
-			return RectangleF.FromLTRB(best.Left, best.Top, best.Right + 1, best.Bottom + 1);
+			return RectangleF.FromLTRB(tuple.Item2, tuple.Item3, tuple.Item4 + 1, tuple.Item5 + 1);
+			(int Area, int Left, int Top, int Right, int Bottom) FloodComponent(int startX, int startY)
+			{
+				int num5 = 0;
+				int tail = 0;
+				int num6 = startY * source.Width + startX;
+				queue[tail++] = num6;
+				visited[num6] = 1;
+				int num7 = 0;
+				int num8 = startX;
+				int num9 = startY;
+				int num10 = startX;
+				int num11 = startY;
+				while (num5 < tail)
+				{
+					int num12 = queue[num5++];
+					int num13 = num12 / source.Width;
+					int num14 = num12 - num13 * source.Width;
+					num7++;
+					num8 = Math.Min(num8, num14);
+					num9 = Math.Min(num9, num13);
+					num10 = Math.Max(num10, num14);
+					num11 = Math.Max(num11, num13);
+					TryVisit(num14 - 1, num13);
+					TryVisit(num14 + 1, num13);
+					TryVisit(num14, num13 - 1);
+					TryVisit(num14, num13 + 1);
+				}
+				return (Area: num7, Left: num8, Top: num9, Right: num10, Bottom: num11);
+				void TryVisit(int nextX, int nextY)
+				{
+					if ((uint)nextX < (uint)source.Width && (uint)nextY < (uint)source.Height)
+					{
+						int num15 = nextY * source.Width + nextX;
+						if (visited[num15] == 0 && IsTransparent(nextX, nextY))
+						{
+							visited[num15] = 1;
+							queue[tail++] = num15;
+						}
+					}
+				}
+			}
+			bool IsTransparent(int x, int y)
+			{
+				int num5 = ((data.Stride >= 0) ? (y * stride) : ((source.Height - 1 - y) * stride));
+				return bytes[num5 + x * 4 + 3] <= 128;
+			}
 		}
 		finally
 		{
@@ -118,28 +114,25 @@ public static class CardFrameRenderer
 
 	public static byte[] ComposeStoredArtPreview(byte[] storedArtPng, byte[] framePng)
 	{
-		using Bitmap art = FrameComposer.BitmapFrom(storedArtPng);
+		using Bitmap storedArt = FrameComposer.BitmapFrom(storedArtPng);
 		using Bitmap frame = FrameComposer.BitmapFrom(framePng);
-		using Bitmap output = ComposeStoredArtPreview(art, frame);
-		using MemoryStream stream = new MemoryStream();
-		output.Save(stream, ImageFormat.Png);
-		return stream.ToArray();
+		using Bitmap bitmap = ComposeStoredArtPreview(storedArt, frame);
+		using MemoryStream memoryStream = new MemoryStream();
+		bitmap.Save(memoryStream, ImageFormat.Png);
+		return memoryStream.ToArray();
 	}
 
 	public static Bitmap ComposeStoredArtPreview(Bitmap storedArt, Bitmap frame)
 	{
-		RectangleF artWindow = FindArtWindow(frame);
-		Bitmap output = new Bitmap(704, 1024, PixelFormat.Format32bppArgb);
-		using Graphics graphics = Graphics.FromImage(output);
+		RectangleF destRect = FindArtWindow(frame);
+		Bitmap bitmap = new Bitmap(704, 1024, PixelFormat.Format32bppArgb);
+		using Graphics graphics = Graphics.FromImage(bitmap);
 		Configure(graphics);
 		graphics.Clear(Color.White);
-		// Pendulum Texture2D uses the complete tall canvas. Cropping the first
-		// 596 rows discarded real image data and made the cropper disagree with
-		// the in-game UV mapping. Draw the complete source into the card window.
-		Rectangle source = new Rectangle(0, 0, storedArt.Width, storedArt.Height);
-		graphics.DrawImage(storedArt, artWindow, source, GraphicsUnit.Pixel);
+		Rectangle rectangle = new Rectangle(0, 0, storedArt.Width, storedArt.Height);
+		graphics.DrawImage(storedArt, destRect, rectangle, GraphicsUnit.Pixel);
 		graphics.DrawImageUnscaled(frame, 0, 0);
-		return output;
+		return bitmap;
 	}
 
 	internal static void Configure(Graphics graphics)

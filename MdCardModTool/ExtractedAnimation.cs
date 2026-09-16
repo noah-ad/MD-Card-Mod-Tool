@@ -29,8 +29,8 @@ public sealed class ExtractedAnimation : IDisposable
 		using Image image = Image.FromStream(stream);
 		if (maxPreviewEdge > 0 && Math.Max(image.Width, image.Height) > maxPreviewEdge)
 		{
-			double ratio = (double)maxPreviewEdge / (double)Math.Max(image.Width, image.Height);
-			return new Bitmap(image, Math.Max(1, (int)Math.Round((double)image.Width * ratio)), Math.Max(1, (int)Math.Round((double)image.Height * ratio)));
+			double num = (double)maxPreviewEdge / (double)Math.Max(image.Width, image.Height);
+			return new Bitmap(image, Math.Max(1, (int)Math.Round((double)image.Width * num)), Math.Max(1, (int)Math.Round((double)image.Height * num)));
 		}
 		return new Bitmap(image);
 	}

@@ -6,13 +6,12 @@ namespace MdCardModTool;
 
 public static class AppSettingsStore
 {
-	private static readonly JsonSerializerOptions JsonOptions = new()
+	private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
 	{
 		WriteIndented = true
 	};
 
-	public static string AppDataRoot => Path.Combine(
-		Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MDCardModTool");
+	public static string AppDataRoot => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MDCardModTool");
 
 	public static string SettingsPath => Path.Combine(AppDataRoot, "settings-v1.json");
 
@@ -34,8 +33,8 @@ public static class AppSettingsStore
 	public static void Save(AppSettings settings)
 	{
 		Directory.CreateDirectory(AppDataRoot);
-		string temporary = SettingsPath + ".tmp";
-		File.WriteAllText(temporary, JsonSerializer.Serialize(settings, JsonOptions));
-		File.Move(temporary, SettingsPath, overwrite: true);
+		string text = SettingsPath + ".tmp";
+		File.WriteAllText(text, JsonSerializer.Serialize(settings, JsonOptions));
+		File.Move(text, SettingsPath, overwrite: true);
 	}
 }

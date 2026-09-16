@@ -5,24 +5,22 @@ using System.Windows.Forms;
 
 namespace MdCardModTool;
 
-/// <summary>
-/// Keeps the native NumericUpDown editing, keyboard and accessibility support,
-/// while painting its otherwise bright Win32 spinner in the MD dark palette.
-/// </summary>
 public sealed class ModernNumericUpDown : NumericUpDown
 {
-	private const int WmPaint = 0x000F;
-	private const int WmNcPaint = 0x0085;
-	private const int WmEnable = 0x000A;
+	private const int WmPaint = 15;
+
+	private const int WmNcPaint = 133;
+
+	private const int WmEnable = 10;
 
 	public ModernNumericUpDown()
 	{
 		BackColor = UiTheme.SurfaceAlt;
 		ForeColor = UiTheme.Text;
-		BorderStyle = BorderStyle.FixedSingle;
+		base.BorderStyle = BorderStyle.FixedSingle;
 		Font = new Font("Microsoft YaHei UI", 9f);
-		SetStyle(ControlStyles.OptimizedDoubleBuffer, true);
-		ControlAdded += (_, e) =>
+		SetStyle(ControlStyles.OptimizedDoubleBuffer, value: true);
+		base.ControlAdded += delegate(object? _, ControlEventArgs e)
 		{
 			if (e.Control != null)
 			{
@@ -34,19 +32,23 @@ public sealed class ModernNumericUpDown : NumericUpDown
 	protected override void OnHandleCreated(EventArgs e)
 	{
 		base.OnHandleCreated(e);
-		foreach (Control child in Controls)
+		foreach (Control control in base.Controls)
 		{
-			StyleChild(child);
+			StyleChild(control);
 		}
 	}
 
 	protected override void WndProc(ref Message message)
 	{
 		base.WndProc(ref message);
-		if (message.Msg is WmPaint or WmNcPaint or WmEnable && IsHandleCreated && !IsDisposed)
+		int msg = message.Msg;
+		bool flag = ((msg == 10 || msg == 15 || msg == 133) ? true : false);
+		if (flag && base.IsHandleCreated && !base.IsDisposed)
 		{
-			using Graphics graphics = CreateGraphics();
-			DrawChrome(graphics);
+			using (Graphics graphics = CreateGraphics())
+			{
+				DrawChrome(graphics);
+			}
 		}
 	}
 
@@ -58,41 +60,37 @@ public sealed class ModernNumericUpDown : NumericUpDown
 
 	private void DrawChrome(Graphics graphics)
 	{
-		float scale = Math.Max(1f, DeviceDpi / 96f);
-		int border = Math.Max(1, (int)MathF.Ceiling(scale));
-		int buttonWidth = Math.Max(UiTheme.Scale(this, 22), SystemInformation.VerticalScrollBarWidth);
-		Rectangle button = new(Math.Max(border, ClientSize.Width - buttonWidth - border), border,
-			Math.Max(1, Math.Min(buttonWidth, ClientSize.Width - border * 2)), Math.Max(1, ClientSize.Height - border * 2));
-		using SolidBrush fill = new(Enabled ? UiTheme.Elevated : UiTheme.SurfaceAlt);
-		graphics.FillRectangle(fill, button);
-		using Pen divider = new(UiTheme.Border, scale);
-		graphics.DrawLine(divider, button.Left, button.Top, button.Left, button.Bottom);
-
+		float num = Math.Max(1f, (float)base.DeviceDpi / 96f);
+		int num2 = Math.Max(1, (int)MathF.Ceiling(num));
+		int num3 = Math.Max(UiTheme.Scale(this, 22), SystemInformation.VerticalScrollBarWidth);
+		Rectangle rect = new Rectangle(Math.Max(num2, base.ClientSize.Width - num3 - num2), num2, Math.Max(1, Math.Min(num3, base.ClientSize.Width - num2 * 2)), Math.Max(1, base.ClientSize.Height - num2 * 2));
+		using SolidBrush brush = new SolidBrush(base.Enabled ? UiTheme.Elevated : UiTheme.SurfaceAlt);
+		graphics.FillRectangle(brush, rect);
+		using Pen pen = new Pen(UiTheme.Border, num);
+		graphics.DrawLine(pen, rect.Left, rect.Top, rect.Left, rect.Bottom);
 		graphics.SmoothingMode = SmoothingMode.AntiAlias;
 		graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-		Color arrowColor = Enabled ? (Focused ? UiTheme.Primary : UiTheme.Muted) : UiTheme.Border;
-		using Pen arrow = new(arrowColor, 1.35f * scale)
+		using Pen pen2 = new Pen((!base.Enabled) ? UiTheme.Border : (Focused ? UiTheme.Primary : UiTheme.Muted), 1.35f * num)
 		{
 			StartCap = LineCap.Round,
 			EndCap = LineCap.Round,
 			LineJoin = LineJoin.Round
 		};
-		float centerX = button.Left + button.Width / 2f;
-		float half = 2.6f * scale;
-		float upperY = button.Top + button.Height * 0.29f;
-		float lowerY = button.Top + button.Height * 0.71f;
-		graphics.DrawLines(arrow,
-		[
-			new PointF(centerX - half, upperY + half / 2f),
-			new PointF(centerX, upperY - half / 2f),
-			new PointF(centerX + half, upperY + half / 2f)
-		]);
-		graphics.DrawLines(arrow,
-		[
-			new PointF(centerX - half, lowerY - half / 2f),
-			new PointF(centerX, lowerY + half / 2f),
-			new PointF(centerX + half, lowerY - half / 2f)
-		]);
+		float num4 = (float)rect.Left + (float)rect.Width / 2f;
+		float num5 = 2.6f * num;
+		float num6 = (float)rect.Top + (float)rect.Height * 0.29f;
+		float num7 = (float)rect.Top + (float)rect.Height * 0.71f;
+		graphics.DrawLines(pen2, new PointF[3]
+		{
+			new PointF(num4 - num5, num6 + num5 / 2f),
+			new PointF(num4, num6 - num5 / 2f),
+			new PointF(num4 + num5, num6 + num5 / 2f)
+		});
+		graphics.DrawLines(pen2, new PointF[3]
+		{
+			new PointF(num4 - num5, num7 - num5 / 2f),
+			new PointF(num4, num7 + num5 / 2f),
+			new PointF(num4 + num5, num7 - num5 / 2f)
+		});
 	}
-
 }

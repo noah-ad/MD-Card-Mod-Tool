@@ -11,29 +11,31 @@ public sealed class BorderPanel : Panel
 
 	public BorderPanel()
 	{
-		SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
-			| ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
+		SetStyle(ControlStyles.UserPaint | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, value: true);
 		DoubleBuffered = true;
 		base.Padding = new Padding(2);
-		ParentChanged += (_, _) => Invalidate();
+		base.ParentChanged += delegate
+		{
+			Invalidate();
+		};
 	}
 
 	protected override void OnPaintBackground(PaintEventArgs e)
 	{
-		using SolidBrush parentSurface = new(Parent?.BackColor ?? UiTheme.Window);
-		e.Graphics.FillRectangle(parentSurface, ClientRectangle);
+		using SolidBrush brush = new SolidBrush(base.Parent?.BackColor ?? UiTheme.Window);
+		e.Graphics.FillRectangle(brush, base.ClientRectangle);
 		e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 		e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-		using GraphicsPath path = UiTheme.RoundedPath(new Rectangle(1, 1, Math.Max(1, Width - 3), Math.Max(1, Height - 3)), UiTheme.Scale(this, CornerRadius));
-		using SolidBrush fill = new(BackColor);
-		e.Graphics.FillPath(fill, path);
+		using GraphicsPath path = UiTheme.RoundedPath(new Rectangle(1, 1, Math.Max(1, base.Width - 3), Math.Max(1, base.Height - 3)), UiTheme.Scale(this, CornerRadius));
+		using SolidBrush brush2 = new SolidBrush(BackColor);
+		e.Graphics.FillPath(brush2, path);
 	}
 
 	protected override void OnPaint(PaintEventArgs e)
 	{
 		e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-		float scale = Math.Max(1f, DeviceDpi / 96f);
-		using Pen pen = new Pen(UiTheme.Border, scale);
+		float width = Math.Max(1f, (float)base.DeviceDpi / 96f);
+		using Pen pen = new Pen(UiTheme.Border, width);
 		using GraphicsPath path = UiTheme.RoundedPath(new Rectangle(1, 1, Math.Max(1, base.Width - 3), Math.Max(1, base.Height - 3)), UiTheme.Scale(this, CornerRadius));
 		e.Graphics.DrawPath(pen, path);
 	}

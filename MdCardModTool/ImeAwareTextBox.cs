@@ -3,14 +3,11 @@ using System.Windows.Forms;
 
 namespace MdCardModTool;
 
-/// <summary>
-/// Exposes IME composition state so expensive filtering and popups do not
-/// interrupt an unfinished Chinese or Japanese composition string.
-/// </summary>
 public sealed class ImeAwareTextBox : TextBox
 {
-	private const int WmImeStartComposition = 0x010D;
-	private const int WmImeEndComposition = 0x010E;
+	private const int WmImeStartComposition = 269;
+
+	private const int WmImeEndComposition = 270;
 
 	public bool IsImeComposing { get; private set; }
 
@@ -20,18 +17,16 @@ public sealed class ImeAwareTextBox : TextBox
 
 	protected override void WndProc(ref Message message)
 	{
-		if (message.Msg == WmImeStartComposition && !IsImeComposing)
+		if (message.Msg == 269 && !IsImeComposing)
 		{
 			IsImeComposing = true;
-			ImeCompositionStarted?.Invoke(this, EventArgs.Empty);
+			this.ImeCompositionStarted?.Invoke(this, EventArgs.Empty);
 		}
-
 		base.WndProc(ref message);
-
-		if (message.Msg == WmImeEndComposition && IsImeComposing)
+		if (message.Msg == 270 && IsImeComposing)
 		{
 			IsImeComposing = false;
-			ImeCompositionEnded?.Invoke(this, EventArgs.Empty);
+			this.ImeCompositionEnded?.Invoke(this, EventArgs.Empty);
 		}
 	}
 }

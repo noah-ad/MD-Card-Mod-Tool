@@ -14,18 +14,29 @@ public sealed class CardCatalogService
 	public const string BundledFileName = "card-catalog-v1.json.br";
 
 	private readonly List<CardCatalogEntry> _entries;
+
 	private readonly Dictionary<int, CardCatalogEntry> _byId;
+
 	private readonly Dictionary<int, CardCatalogEntry> _byMrk;
+
 	private readonly Dictionary<int, string[]> _normalizedNames;
+
+	public int Count => _entries.Count;
+
+	public IReadOnlyList<CardCatalogEntry> Entries => _entries;
+
+	public static string BundledPath => AppPaths.ResolveFile("card-catalog-v1.json.br");
 
 	public CardCatalogService(IEnumerable<CardCatalogEntry> entries)
 	{
-		_entries = entries.OrderBy(x => x.CardId).ToList();
-		_byId = _entries.ToDictionary(x => x.CardId);
-		_byMrk = _entries.Where(x => x.Mrk > 0)
-			.GroupBy(x => x.Mrk)
-			.ToDictionary(group => group.Key, group => group.OrderByDescending(x => HasName(x)).ThenBy(x => x.CardId).First());
-		_normalizedNames = _entries.ToDictionary(x => x.CardId, x => new[]
+		_entries = entries.OrderBy((CardCatalogEntry x) => x.CardId).ToList();
+		_byId = _entries.ToDictionary((CardCatalogEntry x) => x.CardId);
+		_byMrk = (from x in _entries
+			where x.Mrk > 0
+			group x by x.Mrk).ToDictionary((IGrouping<int, CardCatalogEntry> group) => group.Key, (IGrouping<int, CardCatalogEntry> group) => (from x in @group
+			orderby HasName(x) descending, x.CardId
+			select x).First());
+		_normalizedNames = _entries.ToDictionary((CardCatalogEntry x) => x.CardId, (CardCatalogEntry x) => new string[4]
 		{
 			Normalize(x.SimplifiedChineseName),
 			Normalize(x.TraditionalChineseName),
@@ -34,86 +45,91 @@ public sealed class CardCatalogService
 		});
 	}
 
-	public int Count => _entries.Count;
-
-	public IReadOnlyList<CardCatalogEntry> Entries => _entries;
-
-	public static string BundledPath => AppPaths.ResolveFile(BundledFileName);
-
 	public static CardCatalogService LoadBestAvailable()
 	{
-		List<CardCatalogEntry> entries = [];
-		foreach (string candidate in BundledCandidates())
+		List<CardCatalogEntry> list = new List<CardCatalogEntry>();
+		foreach (string item in BundledCandidates())
 		{
-			if (!File.Exists(candidate))
+			if (!File.Exists(item))
 			{
 				continue;
 			}
 			try
 			{
-				entries = Read(candidate);
-				if (entries.Count > 0)
+				list = Read(item);
+				if (list.Count > 0)
 				{
 					break;
 				}
 			}
 			catch
 			{
-				// A partial or quarantined copy at one publish location must not
-				// hide the valid fallback copy at the other location.
 			}
 		}
-		string extra = GameCardCatalogUpdater.ExtraCatalogPath;
-		if (File.Exists(extra))
+		string extraCatalogPath = GameCardCatalogUpdater.ExtraCatalogPath;
+		if (File.Exists(extraCatalogPath))
 		{
 			try
 			{
-				Dictionary<int, CardCatalogEntry> merged = entries.ToDictionary(x => x.CardId);
-				foreach (CardCatalogEntry entry in Read(extra))
+				Dictionary<int, CardCatalogEntry> dictionary = list.ToDictionary((CardCatalogEntry x) => x.CardId);
+				foreach (CardCatalogEntry item2 in Read(extraCatalogPath))
 				{
-					merged[entry.CardId] = MergeGameData(merged.GetValueOrDefault(entry.CardId), entry);
+					dictionary[item2.CardId] = MergeGameData(dictionary.GetValueOrDefault(item2.CardId), item2);
 				}
-				entries = merged.Values.ToList();
+				list = dictionary.Values.ToList();
 			}
 			catch
 			{
 			}
 		}
-		return new CardCatalogService(entries);
+		return new CardCatalogService(list);
 	}
 
 	private static IEnumerable<string> BundledCandidates()
 	{
 		yield return BundledPath;
-		yield return Path.Combine(AppContext.BaseDirectory, "Resources", BundledFileName);
+		yield return Path.Combine(AppContext.BaseDirectory, "Resources", "card-catalog-v1.json.br");
 	}
 
-	public CardCatalogEntry? Find(int cardId) => _byId.GetValueOrDefault(cardId);
+	public CardCatalogEntry? Find(int cardId)
+	{
+		return _byId.GetValueOrDefault(cardId);
+	}
 
-	public CardCatalogEntry? FindByMrk(int mrk) => _byMrk.GetValueOrDefault(mrk);
+	public CardCatalogEntry? FindByMrk(int mrk)
+	{
+		return _byMrk.GetValueOrDefault(mrk);
+	}
 
 	public CardCatalogEntry? FindCardOrMrk(int value)
 	{
-		// Plain numeric input is always a public card number. CARD_Indx positions
-		// can collide with real card IDs and therefore must never silently redirect
-		// a user's selection to an unrelated monster.
 		return Find(value);
 	}
 
 	public CardCatalogEntry? Find(string cardId)
 	{
-		return int.TryParse(cardId, NumberStyles.None, CultureInfo.InvariantCulture, out int id) ? Find(id) : null;
+		if (!int.TryParse(cardId, NumberStyles.None, CultureInfo.InvariantCulture, out var result))
+		{
+			return null;
+		}
+		return Find(result);
 	}
 
 	public IReadOnlyList<CardCatalogEntry> FindEquivalentCards(CardCatalogEntry card)
 	{
-		if (!_normalizedNames.TryGetValue(card.CardId, out string[]? source)) return [];
-		HashSet<string> names = source.Where(name => name.Length > 0).ToHashSet(StringComparer.Ordinal);
-		if (names.Count == 0) return [];
-		return _entries.Where(candidate => _normalizedNames[candidate.CardId].Any(names.Contains))
-			.OrderBy(candidate => candidate.CardId == card.CardId ? 0 : 1)
-			.ThenBy(candidate => candidate.CardId)
-			.ToArray();
+		if (!_normalizedNames.TryGetValue(card.CardId, out string[] value))
+		{
+			return Array.Empty<CardCatalogEntry>();
+		}
+		HashSet<string> names = value.Where((string name) => name.Length > 0).ToHashSet<string>(StringComparer.Ordinal);
+		if (names.Count == 0)
+		{
+			return Array.Empty<CardCatalogEntry>();
+		}
+		return (from candidate in _entries
+			where _normalizedNames[candidate.CardId].Any(names.Contains)
+			orderby (candidate.CardId != card.CardId) ? 1 : 0, candidate.CardId
+			select candidate).ToArray();
 	}
 
 	public IReadOnlyList<CardCatalogEntry> Search(string query, int limit = 50)
@@ -121,81 +137,77 @@ public sealed class CardCatalogService
 		string normalized = Normalize(query);
 		if (normalized.Length == 0)
 		{
-			return [];
+			return Array.Empty<CardCatalogEntry>();
 		}
-		bool numeric = int.TryParse(query.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int requestedId);
-		return _entries.Select(entry => (Entry: entry, Score: Score(entry, normalized, numeric, requestedId)))
-			.Where(x => x.Score > 0)
-			.OrderByDescending(x => x.Score)
-			.ThenBy(x => x.Entry.CardId)
-			.Take(Math.Clamp(limit, 1, 250))
-			.Select(x => x.Entry)
-			.ToArray();
+		int requestedId;
+		bool numeric = int.TryParse(query.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out requestedId);
+		return (from x in (from entry in _entries
+				select (Entry: entry, Score: Score(entry, normalized, numeric, requestedId)) into x
+				where x.Score > 0
+				orderby x.Score descending, x.Entry.CardId
+				select x).Take(Math.Clamp(limit, 1, 250))
+			select x.Entry).ToArray();
 	}
 
 	public static int GenerateFromAstellarCsv(string csvPath, string outputPath)
 	{
-		using StreamReader reader = new(csvPath, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-		using IEnumerator<string[]> rows = ReadCsv(reader).GetEnumerator();
-		if (!rows.MoveNext())
+		using StreamReader reader = new StreamReader(csvPath, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+		using IEnumerator<string[]> enumerator = ReadCsv(reader).GetEnumerator();
+		if (!enumerator.MoveNext())
 		{
 			throw new InvalidDataException("Astellar CSV 为空。");
 		}
-		Dictionary<string, int> columns = rows.Current.Select((name, index) => (name, index))
-			.ToDictionary(x => x.name.Trim(), x => x.index, StringComparer.OrdinalIgnoreCase);
-		int itemId = Required(columns, "ITEM ID");
-		int type = Required(columns, "Type");
-		int subType = Required(columns, "SubType");
-		int zhTw = Required(columns, "zh-tw(Name)");
-		int zhCn = Required(columns, "zh-cn(Name)");
-		int ja = Required(columns, "ja-jp(Name)");
-		int en = Required(columns, "en-us(Name)");
-		Dictionary<int, CardCatalogEntry> entries = new();
-		while (rows.MoveNext())
+		Dictionary<string, int> columns = enumerator.Current.Select((string name, int item) => (name: name, index: item)).ToDictionary<(string, int), string, int>(((string name, int index) x) => x.name.Trim(), ((string name, int index) x) => x.index, StringComparer.OrdinalIgnoreCase);
+		int index = Required(columns, "ITEM ID");
+		int index2 = Required(columns, "Type");
+		int index3 = Required(columns, "SubType");
+		int index4 = Required(columns, "zh-tw(Name)");
+		int index5 = Required(columns, "zh-cn(Name)");
+		int index6 = Required(columns, "ja-jp(Name)");
+		int index7 = Required(columns, "en-us(Name)");
+		Dictionary<int, CardCatalogEntry> dictionary = new Dictionary<int, CardCatalogEntry>();
+		while (enumerator.MoveNext())
 		{
-			string[] row = rows.Current;
-			if (!TryCell(row, itemId, out string idText)
-				|| !int.TryParse(idText, NumberStyles.None, CultureInfo.InvariantCulture, out int id)
-				|| id <= 0)
+			string[] current = enumerator.Current;
+			if (TryCell(current, index, out string value) && int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var result) && result > 0)
 			{
-				continue;
-			}
-			CardCatalogEntry incoming = new()
-			{
-				CardId = id,
-				Type = Cell(row, type),
-				SubType = Cell(row, subType),
-				TraditionalChineseName = Cell(row, zhTw),
-				SimplifiedChineseName = Cell(row, zhCn),
-				JapaneseName = Cell(row, ja),
-				EnglishName = Cell(row, en)
-			};
-			if (HasName(incoming))
-			{
-				entries[id] = Merge(entries.GetValueOrDefault(id), incoming);
+				CardCatalogEntry cardCatalogEntry = new CardCatalogEntry
+				{
+					CardId = result,
+					Type = Cell(current, index2),
+					SubType = Cell(current, index3),
+					TraditionalChineseName = Cell(current, index4),
+					SimplifiedChineseName = Cell(current, index5),
+					JapaneseName = Cell(current, index6),
+					EnglishName = Cell(current, index7)
+				};
+				if (HasName(cardCatalogEntry))
+				{
+					dictionary[result] = Merge(dictionary.GetValueOrDefault(result), cardCatalogEntry);
+				}
 			}
 		}
-		Write(outputPath, entries.Values.OrderBy(x => x.CardId));
-		return entries.Count;
+		Write(outputPath, dictionary.Values.OrderBy((CardCatalogEntry x) => x.CardId));
+		return dictionary.Count;
 	}
 
 	public static List<CardCatalogEntry> Read(string path)
 	{
-		using FileStream file = File.OpenRead(path);
-		using BrotliStream brotli = new(file, CompressionMode.Decompress);
-		return JsonSerializer.Deserialize<List<CardCatalogEntry>>(brotli) ?? [];
+		using FileStream stream = File.OpenRead(path);
+		using BrotliStream utf8Json = new BrotliStream(stream, CompressionMode.Decompress);
+		return JsonSerializer.Deserialize<List<CardCatalogEntry>>(utf8Json) ?? new List<CardCatalogEntry>();
 	}
 
 	public static void Write(string path, IEnumerable<CardCatalogEntry> entries)
 	{
-		Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-		string temporary = path + ".tmp";
-		using (FileStream file = File.Create(temporary))
-		using (BrotliStream brotli = new(file, CompressionLevel.SmallestSize))
+		Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
+		string text = path + ".tmp";
+		using (FileStream stream = File.Create(text))
 		{
-			JsonSerializer.Serialize(brotli, entries);
+			using BrotliStream utf8Json = new BrotliStream(stream, CompressionLevel.SmallestSize);
+			JsonSerializer.Serialize(utf8Json, entries);
 		}
-		File.Move(temporary, path, overwrite: true);
+		File.Move(text, path, overwrite: true);
 	}
 
 	private int Score(CardCatalogEntry entry, string query, bool numeric, int requestedId)
@@ -204,36 +216,36 @@ public sealed class CardCatalogService
 		{
 			return 10000;
 		}
-		int score = 0;
-		string id = entry.CardId.ToString(CultureInfo.InvariantCulture);
-		if (id.StartsWith(query, StringComparison.Ordinal))
+		int num = 0;
+		string text = entry.CardId.ToString(CultureInfo.InvariantCulture);
+		if (text.StartsWith(query, StringComparison.Ordinal))
 		{
-			score = 6000 - id.Length;
+			num = 6000 - text.Length;
 		}
-		foreach (string name in _normalizedNames[entry.CardId])
+		string[] array = _normalizedNames[entry.CardId];
+		foreach (string text2 in array)
 		{
-			if (name.Length == 0)
+			if (text2.Length == 0)
 			{
 				continue;
 			}
-			if (name == query)
+			if (text2 == query)
 			{
-				score = Math.Max(score, 9000);
+				num = Math.Max(num, 9000);
+				continue;
 			}
-			else if (name.StartsWith(query, StringComparison.Ordinal))
+			if (text2.StartsWith(query, StringComparison.Ordinal))
 			{
-				score = Math.Max(score, 7000 - name.Length);
+				num = Math.Max(num, 7000 - text2.Length);
+				continue;
 			}
-			else
+			int num2 = text2.IndexOf(query, StringComparison.Ordinal);
+			if (num2 >= 0)
 			{
-				int index = name.IndexOf(query, StringComparison.Ordinal);
-				if (index >= 0)
-				{
-					score = Math.Max(score, 4000 - index - name.Length / 8);
-				}
+				num = Math.Max(num, 4000 - num2 - text2.Length / 8);
 			}
 		}
-		return score;
+		return num;
 	}
 
 	private static CardCatalogEntry Merge(CardCatalogEntry? current, CardCatalogEntry incoming)
@@ -244,7 +256,7 @@ public sealed class CardCatalogService
 		}
 		return current with
 		{
-			Mrk = current.Mrk > 0 ? current.Mrk : incoming.Mrk,
+			Mrk = ((current.Mrk > 0) ? current.Mrk : incoming.Mrk),
 			Type = Pick(current.Type, incoming.Type),
 			SubType = Pick(current.SubType, incoming.SubType),
 			TraditionalChineseName = Pick(current.TraditionalChineseName, incoming.TraditionalChineseName),
@@ -254,15 +266,14 @@ public sealed class CardCatalogService
 		};
 	}
 
-	internal static IReadOnlyList<CardCatalogEntry> MergeGameCatalogs(IEnumerable<CardCatalogEntry> bundled,
-		IEnumerable<CardCatalogEntry> game)
+	internal static IReadOnlyList<CardCatalogEntry> MergeGameCatalogs(IEnumerable<CardCatalogEntry> bundled, IEnumerable<CardCatalogEntry> game)
 	{
-		Dictionary<int, CardCatalogEntry> merged = bundled.ToDictionary(entry => entry.CardId);
-		foreach (CardCatalogEntry entry in game)
+		Dictionary<int, CardCatalogEntry> dictionary = bundled.ToDictionary((CardCatalogEntry entry) => entry.CardId);
+		foreach (CardCatalogEntry item in game)
 		{
-			merged[entry.CardId] = MergeGameData(merged.GetValueOrDefault(entry.CardId), entry);
+			dictionary[item.CardId] = MergeGameData(dictionary.GetValueOrDefault(item.CardId), item);
 		}
-		return merged.Values.OrderBy(entry => entry.CardId).ToArray();
+		return dictionary.Values.OrderBy((CardCatalogEntry entry) => entry.CardId).ToArray();
 	}
 
 	private static CardCatalogEntry MergeGameData(CardCatalogEntry? current, CardCatalogEntry incoming)
@@ -273,12 +284,9 @@ public sealed class CardCatalogService
 		}
 		return current with
 		{
-			// The compact Astellar catalog has richer type/frame metadata. Game data is
-			// authoritative for an installed language, but must not erase the other
-			// three translations when only one language pack is present.
 			Type = Pick(current.Type, incoming.Type),
 			SubType = Pick(current.SubType, incoming.SubType),
-			Mrk = incoming.Mrk > 0 ? incoming.Mrk : current.Mrk,
+			Mrk = ((incoming.Mrk > 0) ? incoming.Mrk : current.Mrk),
 			TraditionalChineseName = PreferIncoming(current.TraditionalChineseName, incoming.TraditionalChineseName),
 			SimplifiedChineseName = PreferIncoming(current.SimplifiedChineseName, incoming.SimplifiedChineseName),
 			JapaneseName = PreferIncoming(current.JapaneseName, incoming.JapaneseName),
@@ -286,19 +294,41 @@ public sealed class CardCatalogService
 		};
 	}
 
-	private static bool HasName(CardCatalogEntry entry) =>
-		!string.IsNullOrWhiteSpace(entry.SimplifiedChineseName)
-		|| !string.IsNullOrWhiteSpace(entry.TraditionalChineseName)
-		|| !string.IsNullOrWhiteSpace(entry.JapaneseName)
-		|| !string.IsNullOrWhiteSpace(entry.EnglishName);
+	private static bool HasName(CardCatalogEntry entry)
+	{
+		if (string.IsNullOrWhiteSpace(entry.SimplifiedChineseName) && string.IsNullOrWhiteSpace(entry.TraditionalChineseName) && string.IsNullOrWhiteSpace(entry.JapaneseName))
+		{
+			return !string.IsNullOrWhiteSpace(entry.EnglishName);
+		}
+		return true;
+	}
 
-	private static string Pick(string current, string incoming) => string.IsNullOrWhiteSpace(current) ? incoming.Trim() : current;
+	private static string Pick(string current, string incoming)
+	{
+		if (!string.IsNullOrWhiteSpace(current))
+		{
+			return current;
+		}
+		return incoming.Trim();
+	}
 
-	private static string PreferIncoming(string current, string incoming) =>
-		string.IsNullOrWhiteSpace(incoming) ? current : incoming.Trim();
+	private static string PreferIncoming(string current, string incoming)
+	{
+		if (!string.IsNullOrWhiteSpace(incoming))
+		{
+			return incoming.Trim();
+		}
+		return current;
+	}
 
-	private static int Required(Dictionary<string, int> columns, string name) =>
-		columns.TryGetValue(name, out int index) ? index : throw new InvalidDataException("Astellar CSV 缺少字段：" + name);
+	private static int Required(Dictionary<string, int> columns, string name)
+	{
+		if (!columns.TryGetValue(name, out var value))
+		{
+			throw new InvalidDataException("Astellar CSV 缺少字段：" + name);
+		}
+		return value;
+	}
 
 	private static bool TryCell(string[] row, int index, out string value)
 	{
@@ -306,7 +336,14 @@ public sealed class CardCatalogService
 		return value.Length > 0;
 	}
 
-	private static string Cell(string[] row, int index) => index >= 0 && index < row.Length ? row[index].Trim() : "";
+	private static string Cell(string[] row, int index)
+	{
+		if (index < 0 || index >= row.Length)
+		{
+			return "";
+		}
+		return row[index].Trim();
+	}
 
 	private static string Normalize(string value)
 	{
@@ -314,35 +351,28 @@ public sealed class CardCatalogService
 		{
 			return "";
 		}
-		return new string(value.Normalize(NormalizationForm.FormKC)
-			.Where(char.IsLetterOrDigit)
-			.Select(char.ToLowerInvariant)
+		return new string(value.Normalize(NormalizationForm.FormKC).Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant)
 			.ToArray());
 	}
 
 	private static IEnumerable<string[]> ReadCsv(TextReader reader)
 	{
-		List<string> row = [];
-		StringBuilder field = new();
+		List<string> row = new List<string>();
+		StringBuilder field = new StringBuilder();
 		bool quoted = false;
 		while (true)
 		{
-			int next = reader.Read();
-			if (next < 0)
+			int num = reader.Read();
+			if (num < 0)
 			{
-				if (field.Length > 0 || row.Count > 0)
-				{
-					row.Add(field.ToString());
-					yield return [.. row];
-				}
-				yield break;
+				break;
 			}
-			char c = (char)next;
+			char c = (char)num;
 			if (quoted)
 			{
 				if (c == '"')
 				{
-					if (reader.Peek() == '"')
+					if (reader.Peek() == 34)
 					{
 						reader.Read();
 						field.Append('"');
@@ -361,23 +391,29 @@ public sealed class CardCatalogService
 			if (c == '"' && field.Length == 0)
 			{
 				quoted = true;
+				continue;
 			}
-			else if (c == ',')
+			switch (c)
 			{
+			case ',':
 				row.Add(field.ToString());
 				field.Clear();
-			}
-			else if (c == '\n')
-			{
+				break;
+			case '\n':
 				row.Add(field.ToString().TrimEnd('\r'));
 				field.Clear();
-				yield return [.. row];
+				yield return row.ToArray();
 				row.Clear();
-			}
-			else
-			{
+				break;
+			default:
 				field.Append(c);
+				break;
 			}
+		}
+		if (field.Length > 0 || row.Count > 0)
+		{
+			row.Add(field.ToString());
+			yield return row.ToArray();
 		}
 	}
 }

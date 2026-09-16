@@ -15,7 +15,7 @@ public static class IndexService
 {
 	private const string CacheVersion = "v6";
 
-	private static readonly ConcurrentDictionary<string, string> PreferredLocalRoots = new(StringComparer.OrdinalIgnoreCase);
+	private static readonly ConcurrentDictionary<string, string> PreferredLocalRoots = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
 	private static readonly uint[] Crc32Table = Enumerable.Range(0, 256).Select(delegate(int index)
 	{
@@ -29,45 +29,52 @@ public static class IndexService
 
 	public static string? FindLocalRoot(string gameRoot)
 	{
-		string fullGameRoot = Path.GetFullPath(gameRoot);
-		string local = Path.Combine(fullGameRoot, "LocalData");
-		if (!Directory.Exists(local))
+		string fullPath = Path.GetFullPath(gameRoot);
+		if (ResourceSource.IsMobile(fullPath))
+		{
+			return fullPath;
+		}
+		string text = Path.Combine(fullPath, "LocalData");
+		if (!Directory.Exists(text))
 		{
 			return null;
 		}
-		if (PreferredLocalRoots.TryGetValue(fullGameRoot, out string? preferred)
-			&& Directory.Exists(preferred)
-			&& IsInsideLocalData(preferred, local))
+		if (PreferredLocalRoots.TryGetValue(fullPath, out string value) && Directory.Exists(value) && IsInsideLocalData(value, text))
 		{
-			return preferred;
+			return value;
 		}
-		return (from x in Directory.GetDirectories(local)
+		return (from x in Directory.GetDirectories(text)
 			select Path.Combine(x, "0000")).Where(Directory.Exists).OrderByDescending(Directory.GetLastWriteTimeUtc).FirstOrDefault();
 	}
 
 	public static void SetPreferredLocalRoot(string gameRoot, string? localRoot)
 	{
-		string fullGameRoot = Path.GetFullPath(gameRoot);
+		string fullPath = Path.GetFullPath(gameRoot);
 		if (string.IsNullOrWhiteSpace(localRoot))
 		{
-			PreferredLocalRoots.TryRemove(fullGameRoot, out _);
+			PreferredLocalRoots.TryRemove(fullPath, out string _);
 			return;
 		}
-		string fullLocalRoot = Path.GetFullPath(localRoot);
-		string localData = Path.Combine(fullGameRoot, "LocalData");
-		if (!Directory.Exists(fullLocalRoot) || !IsInsideLocalData(fullLocalRoot, localData)
-			|| !string.Equals(Path.GetFileName(fullLocalRoot), "0000", StringComparison.OrdinalIgnoreCase))
+		string fullPath2 = Path.GetFullPath(localRoot);
+		if (!ResourceSource.IsMobile(fullPath) || !fullPath.Equals(fullPath2, StringComparison.OrdinalIgnoreCase))
 		{
-			throw new ArgumentException("所选账号目录必须是当前游戏 LocalData/<账号>/0000。", nameof(localRoot));
+			string localData = Path.Combine(fullPath, "LocalData");
+			if (!Directory.Exists(fullPath2) || !IsInsideLocalData(fullPath2, localData) || !string.Equals(Path.GetFileName(fullPath2), "0000", StringComparison.OrdinalIgnoreCase))
+			{
+				throw new ArgumentException("所选账号目录必须是当前游戏 LocalData/<账号>/0000。", "localRoot");
+			}
+			PreferredLocalRoots[fullPath] = fullPath2;
 		}
-		PreferredLocalRoots[fullGameRoot] = fullLocalRoot;
 	}
 
 	private static bool IsInsideLocalData(string path, string localData)
 	{
-		string relative = Path.GetRelativePath(Path.GetFullPath(localData), Path.GetFullPath(path));
-		return relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
-			&& !Path.IsPathRooted(relative);
+		string relativePath = Path.GetRelativePath(Path.GetFullPath(localData), Path.GetFullPath(path));
+		if (relativePath != ".." && !relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+		{
+			return !Path.IsPathRooted(relativePath);
+		}
+		return false;
 	}
 
 	public static string StreamingRoot(string gameRoot)
@@ -77,38 +84,42 @@ public static class IndexService
 
 	public static string CachePath(string localRoot, string streamingRoot)
 	{
-		string id = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{localRoot}|{streamingRoot}|{"v6"}"))).Substring(0, 12);
-		string text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MDCardModTool");
-		Directory.CreateDirectory(text);
-		return Path.Combine(text, "index_" + id + ".json");
+		string text = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{localRoot}|{streamingRoot}|{"v6"}"))).Substring(0, 12);
+		string text2 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MDCardModTool");
+		Directory.CreateDirectory(text2);
+		return Path.Combine(text2, "index_" + text + ".json");
 	}
 
 	public static GameIndex Build(string gameRoot, Action<int, int, int>? progress = null)
 	{
+		if (ResourceSource.IsMobile(gameRoot))
+		{
+			return ResourceSource.BuildMobile(gameRoot, progress);
+		}
 		string localRoot = FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000");
 		string streamingRoot = StreamingRoot(gameRoot);
-		FileInfo[] allLocalFiles = (from x in Directory.EnumerateFiles(localRoot, "*", SearchOption.AllDirectories)
+		FileInfo[] array = (from x in Directory.EnumerateFiles(localRoot, "*", SearchOption.AllDirectories)
 			select new FileInfo(x)).ToArray();
-		HashSet<string> localPaths = new HashSet<string>(from x in allLocalFiles
+		HashSet<string> hashSet = new HashSet<string>(from x in array
 			where x.Length >= 200000 && x.Length < 300000 && IsUnityBundle(x.FullName)
 			select x.FullName, StringComparer.OrdinalIgnoreCase);
-		foreach (string path in EnumerateDownloadedCardIllustrationBundles(localRoot, (IReadOnlyCollection<FileInfo>?)(object)allLocalFiles))
+		foreach (string item in EnumerateDownloadedCardIllustrationBundles(localRoot, (IReadOnlyCollection<FileInfo>)(object)array))
 		{
-			localPaths.Add(path);
+			hashSet.Add(item);
 		}
 		string backedLocal = Path.Combine(gameRoot, "_MD卡图备份", "本地卡图");
 		if (Directory.Exists(backedLocal))
 		{
-			foreach (string backup in Directory.EnumerateFiles(backedLocal, "*", SearchOption.AllDirectories))
+			foreach (string item2 in Directory.EnumerateFiles(backedLocal, "*", SearchOption.AllDirectories))
 			{
-				string live = Path.Combine(localRoot, Path.GetRelativePath(backedLocal, backup));
-				if (File.Exists(live) && IsUnityBundle(live))
+				string text = Path.Combine(localRoot, Path.GetRelativePath(backedLocal, item2));
+				if (File.Exists(text) && IsUnityBundle(text))
 				{
-					localPaths.Add(live);
+					hashSet.Add(text);
 				}
 			}
 		}
-		List<(string Path, string Root, string Kind)> files = localPaths.Select((string x) => (Path: x, Root: localRoot, Kind: "本地卡图")).ToList();
+		List<(string Path, string Root, string Kind)> files = hashSet.Select((string x) => (Path: x, Root: localRoot, Kind: "本地卡图")).ToList();
 		if (Directory.Exists(streamingRoot))
 		{
 			files.AddRange(from x in Directory.EnumerateFiles(streamingRoot, "*", SearchOption.AllDirectories).Where(IsUnityBundle)
@@ -124,9 +135,9 @@ public static class IndexService
 		{
 			try
 			{
-				foreach (TexRef current in engine.ScanBundle(file.Path, file.Root, file.Kind, includeDependencies: false).Textures.Where((TexRef x) => file.Kind != "本地卡图" || IsDirectCardIllustration(x) || File.Exists(Path.Combine(backedLocal, x.RelativeBundlePath))))
+				foreach (TexRef item3 in engine.ScanBundle(file.Path, file.Root, file.Kind, includeDependencies: false).Textures.Where((TexRef x) => file.Kind != "本地卡图" || IsDirectCardIllustration(x) || File.Exists(Path.Combine(backedLocal, x.RelativeBundlePath))))
 				{
-					bag.Add(current);
+					bag.Add(item3);
 				}
 			}
 			catch
@@ -138,9 +149,9 @@ public static class IndexService
 				progress?.Invoke(num, files.Count, bag.Count);
 			}
 		});
-		foreach (TexRef frame in GetCardFrames(gameRoot))
+		foreach (TexRef cardFrame in GetCardFrames(gameRoot))
 		{
-			bag.Add(frame);
+			bag.Add(cardFrame);
 		}
 		return new GameIndex
 		{
@@ -152,19 +163,19 @@ public static class IndexService
 
 	public static void BuildAndSave(string gameRoot, Action<int, int, int>? progress = null)
 	{
-		GameIndex index = Build(gameRoot, progress);
-		File.WriteAllText(CachePath(FindLocalRoot(gameRoot), StreamingRoot(gameRoot)), JsonSerializer.Serialize(index));
+		GameIndex value = Build(gameRoot, progress);
+		File.WriteAllText(CachePath(FindLocalRoot(gameRoot), StreamingRoot(gameRoot)), JsonSerializer.Serialize(value));
 	}
 
 	public static void Save(string gameRoot, IEnumerable<TexRef> textures)
 	{
 		string path = CachePath(FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000"), StreamingRoot(gameRoot));
-		GameIndex existing = (File.Exists(path) ? JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(path)) : null);
+		GameIndex gameIndex = (File.Exists(path) ? JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(path)) : null);
 		Save(gameRoot, new GameIndex
 		{
 			Textures = textures.ToList(),
-			AlternateArtIndexVersion = (existing?.AlternateArtIndexVersion ?? 0),
-			CheckedLocalBundlePaths = (existing?.CheckedLocalBundlePaths ?? new List<string>())
+			AlternateArtIndexVersion = (gameIndex?.AlternateArtIndexVersion ?? 0),
+			CheckedLocalBundlePaths = (gameIndex?.CheckedLocalBundlePaths ?? new List<string>())
 		});
 	}
 
@@ -175,24 +186,24 @@ public static class IndexService
 
 	public static void AddCardFramesAndSave(string gameRoot)
 	{
-		string localRoot = FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000");
-		string streamingRoot = StreamingRoot(gameRoot);
-		string cache = CachePath(localRoot, streamingRoot);
-		GameIndex index;
-		if (File.Exists(cache))
+		string text = FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000");
+		string text2 = StreamingRoot(gameRoot);
+		string path = CachePath(text, text2);
+		GameIndex gameIndex;
+		if (File.Exists(path))
 		{
-			index = JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(cache)) ?? new GameIndex();
+			gameIndex = JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(path)) ?? new GameIndex();
 		}
 		else
 		{
-			string legacyId = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(localRoot + "|" + streamingRoot + "|v4"))).Substring(0, 12);
-			string legacy = Path.Combine(Path.GetDirectoryName(cache), "index_" + legacyId + ".json");
-			index = (File.Exists(legacy) ? (JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(legacy)) ?? new GameIndex()) : Build(gameRoot));
+			string text3 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text + "|" + text2 + "|v4"))).Substring(0, 12);
+			string path2 = Path.Combine(Path.GetDirectoryName(path), "index_" + text3 + ".json");
+			gameIndex = (File.Exists(path2) ? (JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(path2)) ?? new GameIndex()) : Build(gameRoot));
 		}
-		index.Textures.RemoveAll((TexRef x) => x.SourceKind == "卡框资源");
-		index.Textures.AddRange(GetCardFrames(gameRoot));
-		index.Textures.Sort((TexRef a, TexRef b) => string.Compare($"{a.SourceKind}\0{a.Category}\0{a.Name}\0{a.Width:D8}", $"{b.SourceKind}\0{b.Category}\0{b.Name}\0{b.Width:D8}", StringComparison.Ordinal));
-		File.WriteAllText(cache, JsonSerializer.Serialize(index));
+		gameIndex.Textures.RemoveAll((TexRef x) => x.SourceKind == "卡框资源");
+		gameIndex.Textures.AddRange(GetCardFrames(gameRoot));
+		gameIndex.Textures.Sort((TexRef a, TexRef b) => string.Compare($"{a.SourceKind}\0{a.Category}\0{a.Name}\0{a.Width:D8}", $"{b.SourceKind}\0{b.Category}\0{b.Name}\0{b.Width:D8}", StringComparison.Ordinal));
+		File.WriteAllText(path, JsonSerializer.Serialize(gameIndex));
 	}
 
 	private static IEnumerable<TexRef> GetCardFrames(string gameRoot)
@@ -216,8 +227,6 @@ public static class IndexService
 			select (Path: path, Root: localRoot)).ToList() : (from path in CardIllustrationBundleCandidates(localRoot, cardKey)
 			where !knownBundles.Contains(Path.GetFullPath(path))
 			select (Path: path, Root: localRoot)).ToList());
-		// A small set of card illustrations ships with the base game instead of the
-		// selected account's LocalData. Resolve those deterministic TCG/OCG paths too.
 		if (cardKey != "0" && Directory.Exists(streamingRoot))
 		{
 			files.AddRange(from path in CardIllustrationBundleCandidates(streamingRoot, cardKey)
@@ -236,10 +245,10 @@ public static class IndexService
 		{
 			try
 			{
-				foreach (TexRef current in engine.ScanBundle(file.Path, file.Root, "本地卡图", includeDependencies: false).Textures.Where(IsDirectCardIllustration))
+				foreach (TexRef item in engine.ScanBundle(file.Path, file.Root, "本地卡图", includeDependencies: false).Textures.Where(IsDirectCardIllustration))
 				{
-					added.Add(current);
-					if (current.CardKey == cardKey)
+					added.Add(item);
+					if (item.CardKey == cardKey)
 					{
 						Interlocked.Exchange(ref found, 1);
 						state.Stop();
@@ -258,11 +267,11 @@ public static class IndexService
 				}
 			}
 		});
-		List<TexRef> unique = (from x in added.GroupBy<TexRef, string>((TexRef x) => $"{x.BundlePath}\0{x.AssetFileName}\0{x.PathId}", StringComparer.OrdinalIgnoreCase)
+		List<TexRef> textures = (from x in added.GroupBy<TexRef, string>((TexRef x) => $"{x.BundlePath}\0{x.AssetFileName}\0{x.PathId}", StringComparer.OrdinalIgnoreCase)
 			select x.First()).ToList();
 		return new MissingCardScanResult
 		{
-			Textures = unique,
+			Textures = textures,
 			ScannedBundles = done,
 			TotalBundles = files.Count,
 			Found = (Volatile.Read(in found) != 0)
@@ -312,19 +321,20 @@ public static class IndexService
 		{
 			throw new ArgumentException("资源逻辑路径不能为空。", "logicalPath");
 		}
-		string hash = Crc32(logicalPath).ToString("x8");
-		return Path.Combine(hash.Substring(0, 2), hash);
+		string text = Crc32(logicalPath).ToString("x8");
+		return Path.Combine(text.Substring(0, 2), text);
 	}
 
 	public static IEnumerable<string> CardIllustrationBundleCandidates(string localRoot, string cardKey)
 	{
 		string[] array = new string[2] { "tcg", "ocg" };
-		foreach (string type in array)
+		string[] array2 = array;
+		foreach (string illustrationType in array2)
 		{
-			string path = Path.Combine(localRoot, CardIllustrationRelativePath(cardKey, type));
-			if (File.Exists(path) && IsUnityBundle(path))
+			string text = Path.Combine(localRoot, CardIllustrationRelativePath(cardKey, illustrationType));
+			if (File.Exists(text) && IsUnityBundle(text))
 			{
-				yield return path;
+				yield return text;
 			}
 		}
 	}
@@ -333,19 +343,22 @@ public static class IndexService
 	{
 		if (localFiles == null)
 		{
-			localFiles = (IReadOnlyCollection<FileInfo>?)(object)(from x in Directory.EnumerateFiles(localRoot, "*", SearchOption.AllDirectories)
+			localFiles = (IReadOnlyCollection<FileInfo>)(object)(from x in Directory.EnumerateFiles(localRoot, "*", SearchOption.AllDirectories)
 				select new FileInfo(x)).ToArray();
 		}
 		Dictionary<string, string> available = localFiles.ToDictionary<FileInfo, string, string>((FileInfo x) => Path.GetRelativePath(localRoot, x.FullName), (FileInfo x) => x.FullName, StringComparer.OrdinalIgnoreCase);
-		foreach (int cardId in CardCatalogService.LoadBestAvailable().Entries.Select(entry => entry.CardId).Distinct().OrderBy(id => id))
+		foreach (int cardId in from id in CardCatalogService.LoadBestAvailable().Entries.Select((CardCatalogEntry entry) => entry.CardId).Distinct()
+			orderby id
+			select id)
 		{
 			string[] array = new string[2] { "tcg", "ocg" };
-			foreach (string type in array)
+			string[] array2 = array;
+			foreach (string illustrationType in array2)
 			{
-				string relative = CardIllustrationRelativePath(cardId.ToString(), type);
-				if (available.TryGetValue(relative, out var path) && IsUnityBundle(path))
+				string key = CardIllustrationRelativePath(cardId.ToString(), illustrationType);
+				if (available.TryGetValue(key, out string value) && IsUnityBundle(value))
 				{
-					yield return path;
+					yield return value;
 				}
 			}
 		}
@@ -353,13 +366,13 @@ public static class IndexService
 
 	private static uint Crc32(string value)
 	{
-		uint crc = uint.MaxValue;
+		uint num = uint.MaxValue;
 		byte[] bytes = Encoding.UTF8.GetBytes(value);
-		foreach (byte item in bytes)
+		foreach (byte b in bytes)
 		{
-			crc = Crc32Table[(crc ^ item) & 0xFF] ^ (crc >> 8);
+			num = Crc32Table[(num ^ b) & 0xFF] ^ (num >> 8);
 		}
-		return crc ^ 0xFFFFFFFFu;
+		return num ^ 0xFFFFFFFFu;
 	}
 
 	public static int RemoveSpineAtlasParts(GameIndex index)
@@ -372,13 +385,13 @@ public static class IndexService
 		return index.Textures.RemoveAll((TexRef x) => x.SourceKind == "本地卡图" && x.CardKey.Length == 0);
 	}
 
-	private static bool IsUnityBundle(string path)
+	internal static bool IsUnityBundle(string path)
 	{
 		try
 		{
-			using FileStream stream = File.OpenRead(path);
-			byte[] bytes = new byte[7];
-			return stream.Read(bytes) == 7 && Encoding.ASCII.GetString(bytes) == "UnityFS";
+			using FileStream fileStream = File.OpenRead(path);
+			byte[] array = new byte[7];
+			return fileStream.Read(array) == 7 && Encoding.ASCII.GetString(array) == "UnityFS";
 		}
 		catch
 		{

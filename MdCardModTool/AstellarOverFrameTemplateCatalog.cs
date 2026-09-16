@@ -5,39 +5,30 @@ using System.Linq;
 
 namespace MdCardModTool;
 
-public sealed record AstellarOverFrameTemplate(
-	string Key,
-	IReadOnlyDictionary<string, byte[]> Layers);
-
-/// <summary>
-/// Six-layer transparent-edge frame templates extracted deterministically from
-/// AstellarTool's PSD assets.  These are intentionally separate from the flat,
-/// complete card frames in <see cref="BuiltInCardFrameCatalog"/>.
-/// </summary>
 public static class AstellarOverFrameTemplateCatalog
 {
-	public static readonly string[] LayerNames =
-	[
-		"PeriFrame", "NameBox", "ArtFrame", "EffFrame", "EffBox", "BackGround"
-	];
+	public static readonly string[] LayerNames = new string[6] { "PeriFrame", "NameBox", "ArtFrame", "EffFrame", "EffBox", "BackGround" };
 
-	public static bool IsAvailable(string key) => FindDirectory(key) != null;
+	public static bool IsAvailable(string key)
+	{
+		return FindDirectory(key) != null;
+	}
 
 	public static AstellarOverFrameTemplate Load(string key)
 	{
-		string directory = FindDirectory(key)
-			?? throw new DirectoryNotFoundException($"找不到 Astellar 透明边缘模板：{key}。");
-		Dictionary<string, byte[]> layers = new(StringComparer.Ordinal);
-		foreach (string name in LayerNames)
+		string path = FindDirectory(key) ?? throw new DirectoryNotFoundException("找不到 Astellar 透明边缘模板：" + key + "。");
+		Dictionary<string, byte[]> dictionary = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+		string[] layerNames = LayerNames;
+		foreach (string text in layerNames)
 		{
-			string path = Path.Combine(directory, name + ".png");
-			if (!File.Exists(path))
+			string text2 = Path.Combine(path, text + ".png");
+			if (!File.Exists(text2))
 			{
-				throw new FileNotFoundException($"透明边缘模板 {key} 缺少 {name} 图层。", path);
+				throw new FileNotFoundException($"透明边缘模板 {key} 缺少 {text} 图层。", text2);
 			}
-			layers[name] = File.ReadAllBytes(path);
+			dictionary[text] = File.ReadAllBytes(text2);
 		}
-		return new AstellarOverFrameTemplate(key, layers);
+		return new AstellarOverFrameTemplate(key, dictionary);
 	}
 
 	private static string? FindDirectory(string key)
@@ -46,16 +37,15 @@ public static class AstellarOverFrameTemplateCatalog
 		{
 			return null;
 		}
-		return CandidateRoots()
-			.Select(root => Path.Combine(root, key))
-			.FirstOrDefault(Directory.Exists);
+		return (from root in CandidateRoots()
+			select Path.Combine(root, key)).FirstOrDefault(Directory.Exists);
 	}
 
 	private static IEnumerable<string> CandidateRoots()
 	{
-		foreach (string candidate in AppPaths.CandidatePaths("OverFrameTemplates"))
+		foreach (string item in AppPaths.CandidatePaths("OverFrameTemplates"))
 		{
-			yield return candidate;
+			yield return item;
 		}
 	}
 }

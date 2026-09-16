@@ -30,8 +30,8 @@ public static class CardFrameCatalog
 
 	public static string FriendlyName(string key)
 	{
-		string baseKey = BaseKey(key);
-		if (!FriendlyNames.TryGetValue(baseKey, out string value))
+		string key2 = BaseKey(key);
+		if (!FriendlyNames.TryGetValue(key2, out string value))
 		{
 			return key;
 		}
@@ -42,15 +42,21 @@ public static class CardFrameCatalog
 	{
 		if (key.StartsWith("transparent_gradient_", StringComparison.OrdinalIgnoreCase))
 		{
-			return key["transparent_gradient_".Length..];
+			string text = key;
+			int length = "transparent_gradient_".Length;
+			return text.Substring(length, text.Length - length);
 		}
 		if (key.StartsWith("transparent_", StringComparison.OrdinalIgnoreCase))
 		{
-			return key["transparent_".Length..];
+			string text = key;
+			int length = "transparent_".Length;
+			return text.Substring(length, text.Length - length);
 		}
 		if (key.StartsWith("gradient_", StringComparison.OrdinalIgnoreCase))
 		{
-			return key["gradient_".Length..];
+			string text = key;
+			int length = "gradient_".Length;
+			return text.Substring(length, text.Length - length);
 		}
 		return key;
 	}
@@ -62,77 +68,88 @@ public static class CardFrameCatalog
 
 	public static string DefaultKey(int storedWidth, int storedHeight)
 	{
-		// Texture dimensions describe storage layout, not card rules.  Inferring a
-		// Pendulum frame from 512x1024 caused ordinary cards to acquire a phantom
-		// Pendulum frame whenever catalog data was temporarily unavailable.
 		return "card_frame01";
 	}
 
-	/// <summary>
-	/// Resolves the game's frame from the card catalog instead of guessing from
-	/// Texture2D dimensions.  A 704x1024 over-frame image has no useful size hint,
-	/// and a stale preview selection must not turn a Link monster into a Pendulum
-	/// Xyz card.
-	/// </summary>
 	public static string RecommendedKey(CardCatalogEntry? card, int storedWidth, int storedHeight)
 	{
 		if (card == null)
 		{
 			return DefaultKey(storedWidth, storedHeight);
 		}
-
-		string type = card.Type.Trim();
-		string subType = card.SubType.Trim();
-		if (ContainsAny(type, "魔法", "spell", "magic"))
+		string value = card.Type.Trim();
+		string value2 = card.SubType.Trim();
+		if (ContainsAny(value, "魔法", "spell", "magic"))
 		{
 			return "card_frame07";
 		}
-		if (ContainsAny(type, "陷阱", "trap"))
+		if (ContainsAny(value, "陷阱", "trap"))
 		{
 			return "card_frame08";
 		}
-		if (ContainsAny(subType, "衍生物", "token") || ContainsAny(type, "衍生物", "token"))
+		if (ContainsAny(value2, "衍生物", "token") || ContainsAny(value, "衍生物", "token"))
 		{
 			return "card_frame09";
 		}
-
-		bool pendulum = ContainsAny(subType, "靈擺", "灵摆", "pendulum");
-		if (ContainsAny(subType, "連結", "连接", "链接", "link"))
+		bool flag = ContainsAny(value2, "靈擺", "灵摆", "pendulum");
+		if (ContainsAny(value2, "連結", "连接", "链接", "link"))
 		{
 			return "card_frame18";
 		}
-		if (ContainsAny(subType, "超量", "xyz"))
+		if (ContainsAny(value2, "超量", "xyz"))
 		{
-			return pendulum ? "card_frame15" : "card_frame12";
+			if (!flag)
+			{
+				return "card_frame12";
+			}
+			return "card_frame15";
 		}
-		if (ContainsAny(subType, "同步", "同調", "同调", "synchro"))
+		if (ContainsAny(value2, "同步", "同調", "同调", "synchro"))
 		{
-			return pendulum ? "card_frame16" : "card_frame10";
+			if (!flag)
+			{
+				return "card_frame10";
+			}
+			return "card_frame16";
 		}
-		if (ContainsAny(subType, "融合", "fusion"))
+		if (ContainsAny(value2, "融合", "fusion"))
 		{
-			return pendulum ? "card_frame17" : "card_frame03";
+			if (!flag)
+			{
+				return "card_frame03";
+			}
+			return "card_frame17";
 		}
-		if (ContainsAny(subType, "儀式", "仪式", "ritual"))
+		if (ContainsAny(value2, "儀式", "仪式", "ritual"))
 		{
-			return pendulum ? "card_frame19" : "card_frame02";
+			if (!flag)
+			{
+				return "card_frame02";
+			}
+			return "card_frame19";
 		}
-		if (ContainsAny(subType, "通常", "normal"))
+		if (ContainsAny(value2, "通常", "normal"))
 		{
-			return pendulum ? "card_frame13" : "card_frame00";
+			if (!flag)
+			{
+				return "card_frame00";
+			}
+			return "card_frame13";
 		}
-		return pendulum ? "card_frame14" : "card_frame01";
+		if (!flag)
+		{
+			return "card_frame01";
+		}
+		return "card_frame14";
 	}
 
 	public static IEnumerable<TexRef> CompatibleFrames(IEnumerable<TexRef> frames, int storedWidth, int storedHeight)
 	{
-		return (from x in frames
-			where BuiltInCardFrameCatalog.IsNormalFrame(x) && x.Width == 704 && x.Height == 1024
-			select x).OrderBy<TexRef, string>((TexRef x) => x.Name, StringComparer.OrdinalIgnoreCase);
+		return frames.Where((TexRef x) => BuiltInCardFrameCatalog.IsNormalFrame(x) && x.Width == 704 && x.Height == 1024).OrderBy<TexRef, string>((TexRef x) => x.Name, StringComparer.OrdinalIgnoreCase);
 	}
 
 	private static bool ContainsAny(string value, params string[] needles)
 	{
-		return needles.Any(needle => value.Contains(needle, StringComparison.OrdinalIgnoreCase));
+		return needles.Any((string needle) => value.Contains(needle, StringComparison.OrdinalIgnoreCase));
 	}
 }

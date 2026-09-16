@@ -60,29 +60,30 @@ public sealed class OverFrameForm : Form
 		_artId.Text = selectedCardId ?? "";
 		_mappings.SelectedMappingChanged += delegate
 		{
-			if (_mappings.SelectedMapping is OverFrameMapping overFrameMapping)
+			OverFrameMapping selectedMapping = _mappings.SelectedMapping;
+			if ((object)selectedMapping != null)
 			{
-				_cardId.Text = overFrameMapping.CardId.ToString();
-				_artId.Text = overFrameMapping.ArtId.ToString();
+				_cardId.Text = selectedMapping.CardId.ToString();
+				_artId.Text = selectedMapping.ArtId.ToString();
 			}
 		};
-		Button enable = Button("启用／更新", async delegate
+		Button control = Button("启用／更新", async delegate
 		{
 			await EnableAsync();
 		}, accent: true);
-		Button disable = Button("关闭所选", async delegate
+		Button value = Button("关闭所选", async delegate
 		{
 			await DisableAsync();
 		});
-		Button refresh = Button("刷新列表", async delegate
+		Button value2 = Button("刷新列表", async delegate
 		{
 			await LoadAsync();
 		});
-		Button restore = Button("还原超框表", async delegate
+		Button value3 = Button("还原超框表", async delegate
 		{
 			await RestoreAsync();
 		});
-		TableLayoutPanel top = new TableLayoutPanel
+		TableLayoutPanel tableLayoutPanel = new TableLayoutPanel
 		{
 			Dock = DockStyle.Top,
 			Height = 154,
@@ -91,40 +92,40 @@ public sealed class OverFrameForm : Form
 			RowCount = 3,
 			BackColor = UiTheme.SurfaceAlt
 		};
-		top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-		top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
-		top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-		top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
-		top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 48f));
-		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
-		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
-		top.Controls.Add(Label("显示卡号"), 0, 0);
-		top.Controls.Add(UiTheme.Field(_cardId), 1, 0);
-		top.Controls.Add(Label("高图卡号"), 2, 0);
-		top.Controls.Add(UiTheme.Field(_artId), 3, 0);
-		top.Controls.Add(enable, 4, 0);
-		FlowLayoutPanel actions = new FlowLayoutPanel
+		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 48f));
+		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
+		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
+		tableLayoutPanel.Controls.Add(Label("显示卡号"), 0, 0);
+		tableLayoutPanel.Controls.Add(UiTheme.Field(_cardId), 1, 0);
+		tableLayoutPanel.Controls.Add(Label("高图卡号"), 2, 0);
+		tableLayoutPanel.Controls.Add(UiTheme.Field(_artId), 3, 0);
+		tableLayoutPanel.Controls.Add(control, 4, 0);
+		FlowLayoutPanel flowLayoutPanel = new FlowLayoutPanel
 		{
 			AutoSize = true,
 			Dock = DockStyle.Fill
 		};
-		actions.Controls.Add(disable);
-		actions.Controls.Add(refresh);
-		actions.Controls.Add(restore);
-		top.Controls.Add(actions, 0, 1);
-		top.SetColumnSpan(actions, 5);
-		Label help = new Label
+		flowLayoutPanel.Controls.Add(value);
+		flowLayoutPanel.Controls.Add(value2);
+		flowLayoutPanel.Controls.Add(value3);
+		tableLayoutPanel.Controls.Add(flowLayoutPanel, 0, 1);
+		tableLayoutPanel.SetColumnSpan(flowLayoutPanel, 5);
+		Label control2 = new Label
 		{
 			Text = "超框登记是：显示卡号 → 高图卡号。普通替换时两者填同一个卡号。实际高图须为 704×1024；修改会备份 LocalData 中真正的 of_card_asset，完成后请重启游戏。",
 			AutoSize = true,
 			ForeColor = UiTheme.Primary
 		};
-		top.Controls.Add(help, 0, 2);
-		top.SetColumnSpan(help, 5);
+		tableLayoutPanel.Controls.Add(control2, 0, 2);
+		tableLayoutPanel.SetColumnSpan(control2, 5);
 		base.Controls.Add(_mappings);
 		base.Controls.Add(_status);
-		base.Controls.Add(top);
+		base.Controls.Add(tableLayoutPanel);
 		base.Shown += async delegate
 		{
 			await LoadAsync();
@@ -154,7 +155,7 @@ public sealed class OverFrameForm : Form
 
 	private async Task LoadAsync()
 	{
-		CancellationTokenSource source = new();
+		CancellationTokenSource source = new CancellationTokenSource();
 		Interlocked.Exchange(ref _loadCancellation, source)?.Cancel();
 		CancellationToken cancellationToken = source.Token;
 		int generation = Interlocked.Increment(ref _loadGeneration);
@@ -162,80 +163,74 @@ public sealed class OverFrameForm : Form
 		_status.Text = "正在读取 of_card_asset…";
 		try
 		{
-			object progressGate = new();
+			object progressGate = new object();
 			int lastReported = -250;
-			long nextReportAt = 0;
+			long nextReportAt = 0L;
 			Action<int, int> progress = delegate(int done, int total)
 			{
-				if (cancellationToken.IsCancellationRequested || generation != Volatile.Read(ref _loadGeneration))
+				if (!cancellationToken.IsCancellationRequested && generation == Volatile.Read(in _loadGeneration))
 				{
-					return;
-				}
-				long now = Environment.TickCount64;
-				lock (progressGate)
-				{
-					if (done != total && (done - lastReported < 250 || now < nextReportAt))
+					long tickCount = Environment.TickCount64;
+					lock (progressGate)
 					{
-						return;
-					}
-					lastReported = done;
-					nextReportAt = now + 120;
-				}
-				if (IsDisposed || !IsHandleCreated)
-				{
-					return;
-				}
-				try
-				{
-					BeginInvoke((MethodInvoker)delegate
-					{
-						if (!IsDisposed)
+						if (done != total && (done - lastReported < 250 || tickCount < nextReportAt))
 						{
-							_status.Text = $"首次定位超框表：{done:N0}/{total:N0} Bundle…";
+							return;
 						}
-					});
-				}
-				catch (InvalidOperationException)
-				{
-					// The embedded page can be closed while a background scan reports its
-					// final batch. The next page owns the status surface at that point.
+						lastReported = done;
+						nextReportAt = tickCount + 120;
+					}
+					if (!base.IsDisposed && base.IsHandleCreated)
+					{
+						try
+						{
+							BeginInvoke((MethodInvoker)delegate
+							{
+								if (!base.IsDisposed)
+								{
+									_status.Text = $"首次定位超框表：{done:N0}/{total:N0} Bundle…";
+								}
+							});
+						}
+						catch (InvalidOperationException)
+						{
+						}
+					}
 				}
 			};
-			var snapshot = await Task.Run(() =>
+			(TextAssetRef, List<OverFrameMapping>, bool) tuple = await Task.Run(delegate
 			{
-				TextAssetRef gate = _service.FindGate(_gameRoot, progress, cancellationToken);
-				return (Gate: gate, Mappings: _service.Read(gate), HasBackup: _service.HasBackup(_gameRoot, gate));
+				TextAssetRef textAssetRef2 = _service.FindGate(_gameRoot, progress, cancellationToken);
+				return (Gate: textAssetRef2, Mappings: _service.Read(textAssetRef2), HasBackup: _service.HasBackup(_gameRoot, textAssetRef2));
 			}, cancellationToken);
 			cancellationToken.ThrowIfCancellationRequested();
-			if (generation != Volatile.Read(ref _loadGeneration) || IsDisposed)
+			if (generation == Volatile.Read(in _loadGeneration) && !base.IsDisposed)
 			{
-				return;
+				var (textAssetRef, list, _) = tuple;
+				_mappings.SetMappings(list);
+				Label status = _status;
+				object arg = list.Count;
+				object relativeBundlePath = textAssetRef.RelativeBundlePath;
+				status.Text = string.Format("已读取 {0} 条超框映射  ·  {1}  ·  {2}", arg, relativeBundlePath, tuple.Item3 ? "已有备份" : "首次写入时自动备份");
 			}
-			TextAssetRef gate = snapshot.Gate;
-			List<OverFrameMapping> mappings = snapshot.Mappings;
-			_mappings.SetMappings(mappings);
-			Label status = _status;
-			object arg = mappings.Count;
-			object relativeBundlePath = gate.RelativeBundlePath;
-			status.Text = string.Format("已读取 {0} 条超框映射  ·  {1}  ·  {2}", arg, relativeBundlePath, snapshot.HasBackup ? "已有备份" : "首次写入时自动备份");
 		}
 		catch (OperationCanceledException)
 		{
-			if (!IsDisposed && generation == Volatile.Read(ref _loadGeneration))
+			if (!base.IsDisposed && generation == Volatile.Read(in _loadGeneration))
 			{
 				_status.Text = "读取已取消。";
 			}
 		}
-		catch (Exception ex)
+		catch (Exception ex2)
 		{
-			if (!IsDisposed && generation == Volatile.Read(ref _loadGeneration))
+			if (!base.IsDisposed && generation == Volatile.Read(in _loadGeneration))
 			{
-				_status.Text = "读取失败：" + ex.Message;
+				_status.Text = "读取失败：" + ex2.Message;
 			}
 		}
 		finally
 		{
-			if (!IsDisposed && generation == Volatile.Read(ref _loadGeneration))
+			if (!base.IsDisposed && generation == Volatile.Read(in _loadGeneration))
 			{
 				base.UseWaitCursor = false;
 			}

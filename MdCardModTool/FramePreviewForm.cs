@@ -61,11 +61,11 @@ public sealed class FramePreviewForm : Form
 		ForeColor = UiTheme.Text;
 		Font = new Font("Microsoft YaHei UI", 9f);
 		UiTheme.StyleComboBox(_frames);
-		Button export = Button("导出预览 PNG", delegate
+		Button control = Button("导出预览 PNG", delegate
 		{
 			Export();
 		});
-		TableLayoutPanel top = new TableLayoutPanel
+		TableLayoutPanel tableLayoutPanel = new TableLayoutPanel
 		{
 			Dock = DockStyle.Top,
 			Height = 70,
@@ -73,53 +73,44 @@ public sealed class FramePreviewForm : Form
 			ColumnCount = 3,
 			BackColor = UiTheme.SurfaceAlt
 		};
-		top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-		top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-		top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-		top.Controls.Add(new Label
+		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+		tableLayoutPanel.Controls.Add(new Label
 		{
 			Text = "卡框",
 			AutoSize = true,
 			Anchor = AnchorStyles.Left,
 			ForeColor = Color.FromArgb(160, 195, 255)
 		}, 0, 0);
-		top.Controls.Add(_frames, 1, 0);
-		top.Controls.Add(export, 2, 0);
-		bool directCard = art.Width == 512 && (art.Height == 512 || art.Height == 1024);
-		top.Controls.Add(new Label
+		tableLayoutPanel.Controls.Add(_frames, 1, 0);
+		tableLayoutPanel.Controls.Add(control, 2, 0);
+		bool flag = art.Width == 512 && (art.Height == 512 || art.Height == 1024);
+		tableLayoutPanel.Controls.Add(new Label
 		{
-			Text = (directCard ? "按游戏实际插图区还原显示比例；卡框只用于预览，不会修改全局卡框。" : "按游戏超框层级预览：卡框在下、透明高图在上；只合成显示，不写入游戏。"),
+			Text = (flag ? "按游戏实际插图区还原显示比例；卡框只用于预览，不会修改全局卡框。" : "按游戏超框层级预览：卡框在下、透明高图在上；只合成显示，不写入游戏。"),
 			AutoSize = true,
 			ForeColor = Color.Gainsboro
 		}, 0, 1);
-		top.SetColumnSpan(top.GetControlFromPosition(0, 1), 3);
-		IEnumerable<TexRef> source;
-		if (!directCard)
-		{
-			IEnumerable<TexRef> enumerable = from x in frames
-				where x.Name.StartsWith("card_frame", StringComparison.OrdinalIgnoreCase) && x.Width == 704 && x.Height == 1024
-				orderby x.Name
-				select x;
-			source = enumerable;
-		}
-		else
-		{
-			source = CardFrameCatalog.CompatibleFrames(frames, art.Width, art.Height);
-		}
-		FrameChoice[] choices = source.Select((TexRef x) => new FrameChoice(x)).ToArray();
+		tableLayoutPanel.SetColumnSpan(tableLayoutPanel.GetControlFromPosition(0, 1), 3);
+		FrameChoice[] array = (flag ? CardFrameCatalog.CompatibleFrames(frames, art.Width, art.Height) : (from x in frames
+			where x.Name.StartsWith("card_frame", StringComparison.OrdinalIgnoreCase) && x.Width == 704 && x.Height == 1024
+			orderby x.Name
+			select x)).Select((TexRef x) => new FrameChoice(x)).ToArray();
 		ComboBox.ObjectCollection items = _frames.Items;
-		object[] items2 = choices;
+		object[] array2 = array;
+		object[] items2 = array2;
 		items.AddRange(items2);
 		string wanted = ((art.PreviewFrameKey.Length > 0) ? art.PreviewFrameKey : CardFrameCatalog.DefaultKey(art.Width, art.Height));
-		int defaultIndex = Array.FindIndex(choices, (FrameChoice x) => x.Texture.Name.Equals(wanted, StringComparison.OrdinalIgnoreCase));
-		_frames.SelectedIndex = ((defaultIndex >= 0) ? defaultIndex : 0);
+		int num = Array.FindIndex(array, (FrameChoice x) => x.Texture.Name.Equals(wanted, StringComparison.OrdinalIgnoreCase));
+		_frames.SelectedIndex = ((num >= 0) ? num : 0);
 		_frames.SelectedIndexChanged += async delegate
 		{
 			await RenderAsync();
 		};
 		base.Controls.Add(_preview);
 		base.Controls.Add(_status);
-		base.Controls.Add(top);
+		base.Controls.Add(tableLayoutPanel);
 		base.Shown += async delegate
 		{
 			await RenderAsync();
@@ -152,20 +143,15 @@ public sealed class FramePreviewForm : Form
 			if (generation == _generation)
 			{
 				GameTextureDisplayMapping mapping = GameTextureDisplayMapping.Resolve(_art, choice.Texture.Name);
-				byte[] displayArt = mapping.RequiresMapping
-					? await Task.Run(() => mapping.DecodeForDisplay(sources[0]))
-					: sources[0];
-				byte[] composed = await Task.Run(() => (_art.Width != 704 || _art.Height != 1024)
-					? CardFrameRenderer.ComposeStoredArtPreview(displayArt, sources[1])
-					: FrameComposer.Compose(displayArt, sources[1]));
-				Bitmap output = ((_art.Width == 704 && _art.Height == 1024) ? FrameComposer.PreviewBitmap(composed) : FrameComposer.BitmapFrom(composed));
+				byte[] array = ((!mapping.RequiresMapping) ? sources[0] : (await Task.Run(() => mapping.DecodeForDisplay(sources[0]))));
+				byte[] displayArt = array;
+				byte[] data = await Task.Run(() => (_art.Width == 704 && _art.Height == 1024) ? FrameComposer.Compose(displayArt, sources[1]) : CardFrameRenderer.ComposeStoredArtPreview(displayArt, sources[1]));
+				Bitmap bitmap = ((_art.Width == 704 && _art.Height == 1024) ? FrameComposer.PreviewBitmap(data) : FrameComposer.BitmapFrom(data));
 				_art.PreviewFrameKey = choice.Texture.Name;
 				Image image = _preview.Image;
-				_preview.Image = output;
+				_preview.Image = bitmap;
 				image?.Dispose();
-				_status.Text = mapping.RequiresMapping
-					? $"{_art.Name} + {choice.Texture.Name} · {mapping.EditorSummary}"
-					: $"{_art.Name}  +  {choice.Texture.Name}（{output.Width}×{output.Height}）";
+				_status.Text = (mapping.RequiresMapping ? $"{_art.Name} + {choice.Texture.Name} · {mapping.EditorSummary}" : $"{_art.Name}  +  {choice.Texture.Name}（{bitmap.Width}×{bitmap.Height}）");
 			}
 		}
 		catch (Exception ex)
@@ -184,26 +170,26 @@ public sealed class FramePreviewForm : Form
 		{
 			return;
 		}
-		SaveFileDialog dialog = new SaveFileDialog
+		SaveFileDialog saveFileDialog = new SaveFileDialog
 		{
 			Filter = "PNG 图片|*.png",
 			FileName = Safe(_art.Name) + "_卡框预览.png"
 		};
 		try
 		{
-			if (dialog.ShowDialog(this) == DialogResult.OK)
+			if (saveFileDialog.ShowDialog(this) == DialogResult.OK)
 			{
-				_preview.Image.Save(dialog.FileName, ImageFormat.Png);
+				_preview.Image.Save(saveFileDialog.FileName, ImageFormat.Png);
 			}
 		}
 		finally
 		{
-			((IDisposable)(object)dialog)?.Dispose();
+			((IDisposable)saveFileDialog)?.Dispose();
 		}
 	}
 
 	private static string Safe(string n)
 	{
-		return string.Concat(n.Select((char c) => (!Path.GetInvalidFileNameChars().Contains(c)) ? c : '_'));
+		return string.Concat(n.Select((char c) => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
 	}
 }

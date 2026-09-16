@@ -55,16 +55,16 @@ public static class YgoCdbCardCatalog
 
 	private static void ClassifyTextures(IEnumerable<TexRef> textures, HashSet<string> normalCardIds)
 	{
-		foreach (TexRef texture in textures.Where(IsLocalCardTexture))
+		foreach (TexRef item in textures.Where(IsLocalCardTexture))
 		{
-			bool isNormalCard = normalCardIds.Contains(texture.CardKey);
-			int cardId;
-			bool isInAlternateArtRange = int.TryParse(texture.CardKey, out cardId) && cardId >= 20567 && cardId <= 22747;
-			texture.IsAlternateArt = !isNormalCard && isInAlternateArtRange;
-			texture.IsTokenOrMisc = !isNormalCard && !isInAlternateArtRange;
-			if (texture.Width == 512 && texture.Height == 512)
+			bool flag = normalCardIds.Contains(item.CardKey);
+			int result;
+			bool flag2 = int.TryParse(item.CardKey, out result) && result >= 20567 && result <= 22747;
+			item.IsAlternateArt = !flag && flag2;
+			item.IsTokenOrMisc = !flag && !flag2;
+			if (item.Width == 512 && item.Height == 512)
 			{
-				texture.Category = (texture.IsAlternateArt ? "异画卡图" : (texture.IsTokenOrMisc ? "Token／杂图" : "卡图缩略图"));
+				item.Category = (item.IsAlternateArt ? "异画卡图" : (item.IsTokenOrMisc ? "Token／杂图" : "卡图缩略图"));
 			}
 		}
 		ApplyForcedOverrides(textures);
@@ -72,32 +72,31 @@ public static class YgoCdbCardCatalog
 
 	public static int ApplyForcedOverrides(IEnumerable<TexRef> textures)
 	{
-		int changed = 0;
-		foreach (TexRef texture in textures.Where(IsLocalCardTexture))
+		int num = 0;
+		foreach (TexRef item in textures.Where(IsLocalCardTexture))
 		{
-			if (!int.TryParse(texture.CardKey, out var cardId))
+			if (!int.TryParse(item.CardKey, out var result))
 			{
 				continue;
 			}
-			bool forceNormal = cardId >= 30000 && cardId <= 30064;
-			bool flag = ((cardId >= 3401 && (cardId <= 3899 || cardId == 19736 || cardId == 20040)) ? true : false);
-			bool forceAlternate = flag;
-			if (forceNormal || forceAlternate)
+			bool num2 = result >= 30000 && result <= 30064;
+			bool flag = ((result >= 3401 && (result <= 3899 || result == 19736 || result == 20040)) ? true : false);
+			if (num2 || flag)
 			{
-				string category = (forceAlternate ? "异画卡图" : "卡图缩略图");
-				if (texture.IsAlternateArt != forceAlternate || texture.IsTokenOrMisc || texture.Category != category)
+				string text = (flag ? "异画卡图" : "卡图缩略图");
+				if (item.IsAlternateArt != flag || item.IsTokenOrMisc || item.Category != text)
 				{
-					changed++;
+					num++;
 				}
-				texture.IsAlternateArt = forceAlternate;
-				texture.IsTokenOrMisc = false;
-				if (texture.Width == 512 && texture.Height == 512)
+				item.IsAlternateArt = flag;
+				item.IsTokenOrMisc = false;
+				if (item.Width == 512 && item.Height == 512)
 				{
-					texture.Category = category;
+					item.Category = text;
 				}
 			}
 		}
-		return changed;
+		return num;
 	}
 
 	private static bool IsLocalCardTexture(TexRef texture)
@@ -116,10 +115,10 @@ public static class YgoCdbCardCatalog
 		{
 			try
 			{
-				Cache cached = JsonSerializer.Deserialize<Cache>(await File.ReadAllTextAsync(path));
-				if (cached != null && cached.Version == 1 && cached.CardIds.Count > 0)
+				Cache cache = JsonSerializer.Deserialize<Cache>(await File.ReadAllTextAsync(path));
+				if (cache != null && cache.Version == 1 && cache.CardIds.Count > 0)
 				{
-					return cached.CardIds;
+					return cache.CardIds;
 				}
 			}
 			catch
@@ -132,17 +131,20 @@ public static class YgoCdbCardCatalog
 		await using (Stream source = await response.Content.ReadAsStreamAsync())
 		{
 			using ZipArchive zip = new ZipArchive(source, ZipArchiveMode.Read);
-			ZipArchiveEntry entry = zip.GetEntry("cards.json") ?? throw new InvalidDataException("百鸽 cards.zip 中未找到 cards.json。");
+			ZipArchiveEntry zipArchiveEntry = zip.GetEntry("cards.json") ?? throw new InvalidDataException("百鸽 cards.zip 中未找到 cards.json。");
 			HashSet<string> hashSet;
-			await using (Stream json = entry.Open())
+			await using (Stream json = zipArchiveEntry.Open())
 			{
 				using JsonDocument document = await JsonDocument.ParseAsync(json);
 				if (document.RootElement.ValueKind != JsonValueKind.Object)
 				{
 					throw new InvalidDataException("百鸽 cards.json 格式不正确。");
 				}
-				HashSet<string> ids = new HashSet<string>(from x in document.RootElement.EnumerateObject()
-					select x.Name, StringComparer.Ordinal);
+				HashSet<string> ids = new HashSet<string>(document.RootElement.EnumerateObject().Select(delegate(JsonProperty x)
+				{
+					JsonProperty jsonProperty = x;
+					return jsonProperty.Name;
+				}), StringComparer.Ordinal);
 				if (ids.Count == 0)
 				{
 					throw new InvalidDataException("百鸽 cards.json 未包含卡号。");

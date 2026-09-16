@@ -18,12 +18,16 @@ public static class PortableIndexService
 	{
 		index = new GameIndex();
 		buildId = "";
+		if (ResourceSource.IsMobile(gameRoot))
+		{
+			return false;
+		}
 		if (!File.Exists(BundledPath))
 		{
 			return false;
 		}
-		PortableGameIndex portable = Read(BundledPath);
-		if (portable.FormatVersion != 1 || portable.Textures.Count < 1000)
+		PortableGameIndex portableGameIndex = Read(BundledPath);
+		if (portableGameIndex.FormatVersion != 1 || portableGameIndex.Textures.Count < 1000)
 		{
 			throw new InvalidDataException("随包预绑定索引格式错误或内容不完整。");
 		}
@@ -31,8 +35,8 @@ public static class PortableIndexService
 		string streamingRoot = IndexService.StreamingRoot(gameRoot);
 		index = new GameIndex
 		{
-			AlternateArtIndexVersion = portable.AlternateArtIndexVersion,
-			Textures = portable.Textures.Select((PortableTextureEntry x) => new TexRef
+			AlternateArtIndexVersion = portableGameIndex.AlternateArtIndexVersion,
+			Textures = portableGameIndex.Textures.Select((PortableTextureEntry x) => new TexRef
 			{
 				BundlePath = ResolveInside(SourceRoot(gameRoot, localRoot, streamingRoot, x.SourceKind), x.RelativeBundlePath),
 				RelativeBundlePath = x.RelativeBundlePath.Replace('/', Path.DirectorySeparatorChar),
@@ -48,7 +52,7 @@ public static class PortableIndexService
 				CardKey = x.CardKey
 			}).ToList()
 		};
-		buildId = portable.GameBuildId;
+		buildId = portableGameIndex.GameBuildId;
 		return true;
 	}
 
@@ -63,21 +67,21 @@ public static class PortableIndexService
 		{
 			return true;
 		}
-		HashSet<string> known = repaired.Textures.Select(TextureLogicalIdentity).ToHashSet<string>(StringComparer.OrdinalIgnoreCase);
+		HashSet<string> hashSet = repaired.Textures.Select(TextureLogicalIdentity).ToHashSet<string>(StringComparer.OrdinalIgnoreCase);
 		foreach (TexRef texture in existing.Textures)
 		{
-			if (File.Exists(texture.BundlePath) && known.Add(TextureLogicalIdentity(texture)))
+			if (File.Exists(texture.BundlePath) && hashSet.Add(TextureLogicalIdentity(texture)))
 			{
 				repaired.Textures.Add(texture);
 				retainedExtras++;
 			}
 		}
-		HashSet<string> checkedPaths = repaired.CheckedLocalBundlePaths.ToHashSet<string>(StringComparer.OrdinalIgnoreCase);
-		foreach (string path in existing.CheckedLocalBundlePaths)
+		HashSet<string> hashSet2 = repaired.CheckedLocalBundlePaths.ToHashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (string checkedLocalBundlePath in existing.CheckedLocalBundlePaths)
 		{
-			if (checkedPaths.Add(path))
+			if (hashSet2.Add(checkedLocalBundlePath))
 			{
-				repaired.CheckedLocalBundlePaths.Add(path);
+				repaired.CheckedLocalBundlePaths.Add(checkedLocalBundlePath);
 			}
 		}
 		repaired.Textures.Sort((TexRef a, TexRef b) => string.Compare($"{a.SourceKind}\0{a.Category}\0{a.Name}\0{a.Width:D8}", $"{b.SourceKind}\0{b.Category}\0{b.Name}\0{b.Width:D8}", StringComparison.Ordinal));
@@ -86,25 +90,25 @@ public static class PortableIndexService
 
 	public static void Export(string gameRoot, GameIndex index, string outputPath)
 	{
-		List<PortableTextureEntry> entries = index.Textures.Select(ToPortable).ToList();
-		NormalizeBackedUpBundles(gameRoot, index.Textures, entries);
-		PortableGameIndex portable = new PortableGameIndex
+		List<PortableTextureEntry> list = index.Textures.Select(ToPortable).ToList();
+		NormalizeBackedUpBundles(gameRoot, index.Textures, list);
+		PortableGameIndex value = new PortableGameIndex
 		{
 			GameBuildId = GetGameBuildId(gameRoot),
 			AlternateArtIndexVersion = index.AlternateArtIndexVersion,
-			Textures = entries
+			Textures = list
 		};
 		Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)));
-		using FileStream file = File.Create(outputPath);
-		using BrotliStream brotli = new BrotliStream(file, CompressionLevel.SmallestSize);
-		JsonSerializer.Serialize(brotli, portable);
+		using FileStream stream = File.Create(outputPath);
+		using BrotliStream utf8Json = new BrotliStream(stream, CompressionLevel.SmallestSize);
+		JsonSerializer.Serialize(utf8Json, value);
 	}
 
 	public static PortableGameIndex Read(string path)
 	{
-		using FileStream file = File.OpenRead(path);
-		using BrotliStream brotli = new BrotliStream(file, CompressionMode.Decompress);
-		return JsonSerializer.Deserialize<PortableGameIndex>(brotli) ?? throw new InvalidDataException("无法读取随包预绑定索引。");
+		using FileStream stream = File.OpenRead(path);
+		using BrotliStream utf8Json = new BrotliStream(stream, CompressionMode.Decompress);
+		return JsonSerializer.Deserialize<PortableGameIndex>(utf8Json) ?? throw new InvalidDataException("无法读取随包预绑定索引。");
 	}
 
 	private static PortableTextureEntry ToPortable(TexRef x)
@@ -132,31 +136,31 @@ public static class PortableIndexService
 
 	private static void NormalizeBackedUpBundles(string gameRoot, IReadOnlyList<TexRef> textures, List<PortableTextureEntry> entries)
 	{
-		ModEngine engine = new ModEngine();
+		ModEngine modEngine = new ModEngine();
 		for (int i = 0; i < textures.Count; i++)
 		{
 			TexRef texture = textures[i];
-			string backupRoot = Path.Combine(gameRoot, "_MD卡图备份", texture.SourceKind);
-			string backup = Path.Combine(backupRoot, texture.RelativeBundlePath);
-			if (!File.Exists(backup))
+			string text = Path.Combine(gameRoot, "_MD卡图备份", texture.SourceKind);
+			string text2 = Path.Combine(text, texture.RelativeBundlePath);
+			if (!File.Exists(text2))
 			{
 				continue;
 			}
 			try
 			{
-				TexRef original = engine.ScanBundle(backup, backupRoot, texture.SourceKind, includeDependencies: false).Textures.FirstOrDefault((TexRef x) => x.PathId == texture.PathId && x.AssetFileName == texture.AssetFileName);
-				if (original == null)
+				TexRef texRef = modEngine.ScanBundle(text2, text, texture.SourceKind, includeDependencies: false).Textures.FirstOrDefault((TexRef x) => x.PathId == texture.PathId && x.AssetFileName == texture.AssetFileName);
+				if (texRef == null)
 				{
 					continue;
 				}
-				string category = original.Category;
+				string category = texRef.Category;
 				if (texture.SourceKind == "本地卡图")
 				{
-					if (original.Width == 512 && original.Height == 1024)
+					if (texRef.Width == 512 && texRef.Height == 1024)
 					{
 						category = "灵摆卡图";
 					}
-					else if (original.Width == 512 && original.Height == 512)
+					else if (texRef.Width == 512 && texRef.Height == 512)
 					{
 						category = (texture.IsAlternateArt ? "异画卡图" : (texture.IsTokenOrMisc ? "Token／杂图" : "卡图缩略图"));
 					}
@@ -167,8 +171,8 @@ public static class PortableIndexService
 					PathId = entries[i].PathId,
 					AssetFileName = entries[i].AssetFileName,
 					Name = entries[i].Name,
-					Width = original.Width,
-					Height = original.Height,
+					Width = texRef.Width,
+					Height = texRef.Height,
 					Category = category,
 					IsAlternateArt = entries[i].IsAlternateArt,
 					IsTokenOrMisc = entries[i].IsTokenOrMisc,
@@ -201,9 +205,9 @@ public static class PortableIndexService
 		{
 			throw new InvalidDataException("预绑定索引包含无效路径。");
 		}
-		string fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-		string fullPath = Path.GetFullPath(Path.Combine(fullRoot, relative.Replace('/', Path.DirectorySeparatorChar)));
-		if (!fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
+		string text = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+		string fullPath = Path.GetFullPath(Path.Combine(text, relative.Replace('/', Path.DirectorySeparatorChar)));
+		if (!fullPath.StartsWith(text, StringComparison.OrdinalIgnoreCase))
 		{
 			throw new InvalidDataException("预绑定索引路径越出了游戏目录。");
 		}
@@ -212,14 +216,18 @@ public static class PortableIndexService
 
 	public static string GetGameBuildId(string gameRoot)
 	{
+		if (ResourceSource.IsMobile(gameRoot))
+		{
+			return "mobile";
+		}
 		try
 		{
-			string manifest = Path.GetFullPath(Path.Combine(gameRoot, "..", "..", "appmanifest_1449850.acf"));
-			if (!File.Exists(manifest))
+			string fullPath = Path.GetFullPath(Path.Combine(gameRoot, "..", "..", "appmanifest_1449850.acf"));
+			if (!File.Exists(fullPath))
 			{
 				return "";
 			}
-			Match match = Regex.Match(File.ReadAllText(manifest), "\\\"buildid\\\"\\s+\\\"(?<id>\\d+)\\\"", RegexOptions.IgnoreCase);
+			Match match = Regex.Match(File.ReadAllText(fullPath), "\\\"buildid\\\"\\s+\\\"(?<id>\\d+)\\\"", RegexOptions.IgnoreCase);
 			return match.Success ? match.Groups["id"].Value : "";
 		}
 		catch

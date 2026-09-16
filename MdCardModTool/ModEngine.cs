@@ -26,22 +26,18 @@ public sealed class ModEngine
 
 	private AssetsManager NewManager()
 	{
-		AssetsManager manager = _threadManager ?? (_threadManager = new AssetsManager());
-		if (manager.ClassPackage == null && File.Exists(_classData))
+		AssetsManager assetsManager = _threadManager ?? (_threadManager = new AssetsManager());
+		if (assetsManager.ClassPackage == null && File.Exists(_classData))
 		{
-			manager.LoadClassPackage(_classData);
+			assetsManager.LoadClassPackage(_classData);
 		}
-		return manager;
+		return assetsManager;
 	}
 
 	private void EnsureDatabase(AssetsManager manager, AssetsFileInstance assets)
 	{
 		if (manager.ClassPackage != null)
 		{
-			// A single worker thread may scan bundles written by different Unity
-			// versions. AssetsManager keeps the previously selected database after
-			// UnloadAll(), so select it for every serialized file instead of reusing
-			// a stale schema.
 			manager.LoadClassDatabaseFromPackage(assets.file.Metadata.UnityVersion);
 		}
 	}
@@ -148,50 +144,57 @@ public sealed class ModEngine
 
 	public List<MonsterAnimationAssetRef> ScanAnimationAssetsFast(string bundlePath, string root, string? ownerCardId = null)
 	{
-		var ownedPaths = ownerCardId == null ? new List<string>() : ReadAssetBundleContainerPaths(bundlePath)
-			.Where(p => System.Text.RegularExpressions.Regex.IsMatch(p.Replace('\\', '/'),
-				"/monstercutin/(?:tcg|ocg)/p" + Regex.Escape(ownerCardId) + "/", RegexOptions.IgnoreCase)).ToList();
-		List<MonsterAnimationAssetRef> result = new List<MonsterAnimationAssetRef>();
-		AssetsManager manager = NewManager();
+		List<string> source = ((ownerCardId == null) ? new List<string>() : (from p in ReadAssetBundleContainerPaths(bundlePath)
+			where Regex.IsMatch(p.Replace('\\', '/'), "/monstercutin/(?:tcg|ocg)/p" + Regex.Escape(ownerCardId) + "/", RegexOptions.IgnoreCase)
+			select p).ToList());
+		List<MonsterAnimationAssetRef> list = new List<MonsterAnimationAssetRef>();
+		AssetsManager assetsManager = NewManager();
 		try
 		{
-			BundleFileInstance bundle = manager.LoadBundleFile(bundlePath);
-			foreach (string entry in bundle.file.GetAllFileNames())
+			BundleFileInstance bundleFileInstance = assetsManager.LoadBundleFile(bundlePath);
+			foreach (string allFileName in bundleFileInstance.file.GetAllFileNames())
 			{
 				try
 				{
-					AssetsFileInstance assets = manager.LoadAssetsFileFromBundle(bundle, entry);
+					AssetsFileInstance assetsFileInstance = assetsManager.LoadAssetsFileFromBundle(bundleFileInstance, allFileName);
 					AssetClassID[] array = new AssetClassID[2]
 					{
 						AssetClassID.Texture2D,
 						AssetClassID.TextAsset
 					};
-					foreach (AssetClassID type in array)
+					foreach (AssetClassID assetClassID in array)
 					{
-						foreach (AssetFileInfo info in assets.file.GetAssetsOfType(type))
+						foreach (AssetFileInfo item in assetsFileInstance.file.GetAssetsOfType(assetClassID))
 						{
-							AssetsFileReader reader = assets.file.Reader;
-							long end = info.GetAbsoluteByteStart(assets.file) + info.ByteSize;
-							reader.Position = info.GetAbsoluteByteStart(assets.file);
+							AssetsFileReader reader = assetsFileInstance.file.Reader;
+							long end = item.GetAbsoluteByteStart(assetsFileInstance.file) + item.ByteSize;
+							reader.Position = item.GetAbsoluteByteStart(assetsFileInstance.file);
 							string name = ReadAlignedString(reader, end);
-							bool recognized = TryAnimationName(name, type, out string cardId, out MonsterAnimationAssetKind kind);
+							string cardId;
+							MonsterAnimationAssetKind kind;
+							bool flag = TryAnimationName(name, assetClassID, out cardId, out kind);
 							if (ownerCardId != null)
 							{
-								recognized = ownedPaths.Any(p => p.EndsWith("/" + name + ".json", StringComparison.OrdinalIgnoreCase)) && kind == MonsterAnimationAssetKind.Skeleton;
-								string extension = type == AssetClassID.Texture2D ? ".png" : ".txt";
-								bool textureOrAtlas = ownedPaths.Any(p => p.EndsWith("/" + name + extension, StringComparison.OrdinalIgnoreCase))
-									&& (type == AssetClassID.Texture2D || name.EndsWith(".atlas", StringComparison.OrdinalIgnoreCase));
-								if (textureOrAtlas) { recognized = true; kind = type == AssetClassID.Texture2D ? MonsterAnimationAssetKind.Texture : MonsterAnimationAssetKind.Atlas; }
-								if (recognized) cardId = ownerCardId;
+								flag = source.Any((string p) => p.EndsWith("/" + name + ".json", StringComparison.OrdinalIgnoreCase)) && kind == MonsterAnimationAssetKind.Skeleton;
+								string extension = ((assetClassID == AssetClassID.Texture2D) ? ".png" : ".txt");
+								if (source.Any((string p) => p.EndsWith("/" + name + extension, StringComparison.OrdinalIgnoreCase)) && (assetClassID == AssetClassID.Texture2D || name.EndsWith(".atlas", StringComparison.OrdinalIgnoreCase)))
+								{
+									flag = true;
+									kind = ((assetClassID == AssetClassID.Texture2D) ? MonsterAnimationAssetKind.Texture : MonsterAnimationAssetKind.Atlas);
+								}
+								if (flag)
+								{
+									cardId = ownerCardId;
+								}
 							}
-							if (recognized)
+							if (flag)
 							{
-								result.Add(new MonsterAnimationAssetRef
+								list.Add(new MonsterAnimationAssetRef
 								{
 									BundlePath = bundlePath,
 									RelativeBundlePath = Path.GetRelativePath(root, bundlePath),
-									AssetFileName = entry,
-									PathId = info.PathId,
+									AssetFileName = allFileName,
+									PathId = item.PathId,
 									Name = name,
 									CardId = cardId,
 									Kind = kind
@@ -204,11 +207,11 @@ public sealed class ModEngine
 				{
 				}
 			}
-			return result;
+			return list;
 		}
 		finally
 		{
-			manager.UnloadAll();
+			assetsManager.UnloadAll();
 		}
 	}
 
@@ -262,12 +265,12 @@ public sealed class ModEngine
 
 	private static string CategoryForSource(string name, int width, int height, string sourceKind)
 	{
-		if (sourceKind == VisualAssetIndexService.LocalSourceKind || sourceKind == VisualAssetIndexService.BuiltInSourceKind)
+		if (sourceKind == "视觉资源" || sourceKind == "基础视觉资源")
 		{
-			string? visualCategory = VisualAssetClassifier.CategoryFor(name);
-			if (visualCategory != null)
+			string text = VisualAssetClassifier.CategoryFor(name);
+			if (text != null)
 			{
-				return visualCategory;
+				return text;
 			}
 		}
 		return CategoryFor(name, width, height);
@@ -285,22 +288,22 @@ public sealed class ModEngine
 
 	public BundleSummary InspectBundle(string bundlePath, string root)
 	{
-		AssetsManager manager = NewManager();
+		AssetsManager assetsManager = NewManager();
 		try
 		{
-			BundleFileInstance bundle = manager.LoadBundleFile(bundlePath);
-			Dictionary<string, int> types = new Dictionary<string, int>();
-			int serialized = 0;
-			foreach (string entry in bundle.file.GetAllFileNames())
+			BundleFileInstance bundleFileInstance = assetsManager.LoadBundleFile(bundlePath);
+			Dictionary<string, int> dictionary = new Dictionary<string, int>();
+			int num = 0;
+			foreach (string allFileName in bundleFileInstance.file.GetAllFileNames())
 			{
 				try
 				{
-					AssetsFileInstance assetsFileInstance = manager.LoadAssetsFileFromBundle(bundle, entry);
-					serialized++;
+					AssetsFileInstance assetsFileInstance = assetsManager.LoadAssetsFileFromBundle(bundleFileInstance, allFileName);
+					num++;
 					foreach (AssetFileInfo assetInfo in assetsFileInstance.file.AssetInfos)
 					{
-						string name = ((AssetClassID)assetInfo.TypeId/*cast due to .constrained prefix*/).ToString();
-						types[name] = types.GetValueOrDefault(name) + 1;
+						string key = ((AssetClassID)assetInfo.TypeId/*cast due to .constrained prefix*/).ToString();
+						dictionary[key] = dictionary.GetValueOrDefault(key) + 1;
 					}
 				}
 				catch
@@ -310,43 +313,45 @@ public sealed class ModEngine
 			return new BundleSummary
 			{
 				RelativePath = Path.GetRelativePath(root, bundlePath),
-				SerializedFiles = serialized,
-				AssetTypes = types
+				SerializedFiles = num,
+				AssetTypes = dictionary
 			};
 		}
 		finally
 		{
-			manager.UnloadAll();
+			assetsManager.UnloadAll();
 		}
 	}
 
 	public List<string> ReadAssetBundleContainerPaths(string bundlePath, bool dependencies = false)
 	{
-		List<string> result = new List<string>();
-		AssetsManager manager = NewManager();
+		List<string> list = new List<string>();
+		AssetsManager assetsManager = NewManager();
 		try
 		{
-			BundleFileInstance bundle = manager.LoadBundleFile(bundlePath);
-			foreach (string entry in bundle.file.GetAllFileNames())
+			BundleFileInstance bundleFileInstance = assetsManager.LoadBundleFile(bundlePath);
+			foreach (string allFileName in bundleFileInstance.file.GetAllFileNames())
 			{
 				try
 				{
-					AssetsFileInstance assets = manager.LoadAssetsFileFromBundle(bundle, entry);
-					EnsureDatabase(manager, assets);
-					foreach (AssetFileInfo info in assets.file.GetAssetsOfType(AssetClassID.AssetBundle))
+					AssetsFileInstance assetsFileInstance = assetsManager.LoadAssetsFileFromBundle(bundleFileInstance, allFileName);
+					EnsureDatabase(assetsManager, assetsFileInstance);
+					foreach (AssetFileInfo item in assetsFileInstance.file.GetAssetsOfType(AssetClassID.AssetBundle))
 					{
 						if (dependencies)
 						{
-							foreach (var dependency in manager.GetBaseField(assets, info)["m_Dependencies"]["Array"].Children)
-								result.Add(dependency.AsString);
+							foreach (AssetTypeValueField child in assetsManager.GetBaseField(assetsFileInstance, item)["m_Dependencies"]["Array"].Children)
+							{
+								list.Add(child.AsString);
+							}
 							continue;
 						}
-						foreach (AssetTypeValueField child in manager.GetBaseField(assets, info)["m_Container"]["Array"].Children)
+						foreach (AssetTypeValueField child2 in assetsManager.GetBaseField(assetsFileInstance, item)["m_Container"]["Array"].Children)
 						{
-							string path = child["first"].AsString;
-							if (!string.IsNullOrWhiteSpace(path))
+							string asString = child2["first"].AsString;
+							if (!string.IsNullOrWhiteSpace(asString))
 							{
-								result.Add(path);
+								list.Add(asString);
 							}
 						}
 					}
@@ -355,39 +360,39 @@ public sealed class ModEngine
 				{
 				}
 			}
-			return result;
+			return list;
 		}
 		finally
 		{
-			manager.UnloadAll();
+			assetsManager.UnloadAll();
 		}
 	}
 
 	public List<TextAssetRef> ReadTextAssets(string bundlePath)
 	{
-		List<TextAssetRef> result = new List<TextAssetRef>();
-		AssetsManager manager = NewManager();
+		List<TextAssetRef> list = new List<TextAssetRef>();
+		AssetsManager assetsManager = NewManager();
 		try
 		{
-			BundleFileInstance bundle = manager.LoadBundleFile(bundlePath);
-			foreach (string entry in bundle.file.GetAllFileNames())
+			BundleFileInstance bundleFileInstance = assetsManager.LoadBundleFile(bundlePath);
+			foreach (string allFileName in bundleFileInstance.file.GetAllFileNames())
 			{
 				try
 				{
-					AssetsFileInstance assets = manager.LoadAssetsFileFromBundle(bundle, entry);
-					EnsureDatabase(manager, assets);
-					foreach (AssetFileInfo info in assets.file.GetAssetsOfType(AssetClassID.TextAsset))
+					AssetsFileInstance assetsFileInstance = assetsManager.LoadAssetsFileFromBundle(bundleFileInstance, allFileName);
+					EnsureDatabase(assetsManager, assetsFileInstance);
+					foreach (AssetFileInfo item in assetsFileInstance.file.GetAssetsOfType(AssetClassID.TextAsset))
 					{
-						AssetTypeValueField field = manager.GetBaseField(assets, info);
-						result.Add(new TextAssetRef
+						AssetTypeValueField baseField = assetsManager.GetBaseField(assetsFileInstance, item);
+						list.Add(new TextAssetRef
 						{
 							BundlePath = bundlePath,
 							RelativeBundlePath = Path.GetFileName(bundlePath),
-							AssetFileName = entry,
-							Name = field["m_Name"].AsString,
-							PathName = (field["m_PathName"].IsDummy ? "" : field["m_PathName"].AsString),
-							PathId = info.PathId,
-							Data = field["m_Script"].AsByteArray
+							AssetFileName = allFileName,
+							Name = baseField["m_Name"].AsString,
+							PathName = (baseField["m_PathName"].IsDummy ? "" : baseField["m_PathName"].AsString),
+							PathId = item.PathId,
+							Data = baseField["m_Script"].AsByteArray
 						});
 					}
 				}
@@ -395,40 +400,40 @@ public sealed class ModEngine
 				{
 				}
 			}
-			return result;
+			return list;
 		}
 		finally
 		{
-			manager.UnloadAll();
+			assetsManager.UnloadAll();
 		}
 	}
 
 	public TextAssetRef? FindTextAsset(string bundlePath, string root, string name)
 	{
-		AssetsManager manager = NewManager();
+		AssetsManager assetsManager = NewManager();
 		try
 		{
-			BundleFileInstance bundle = manager.LoadBundleFile(bundlePath);
-			foreach (string entry in bundle.file.GetAllFileNames())
+			BundleFileInstance bundleFileInstance = assetsManager.LoadBundleFile(bundlePath);
+			foreach (string allFileName in bundleFileInstance.file.GetAllFileNames())
 			{
 				try
 				{
-					AssetsFileInstance assets = manager.LoadAssetsFileFromBundle(bundle, entry);
-					EnsureDatabase(manager, assets);
-					foreach (AssetFileInfo info in assets.file.GetAssetsOfType(AssetClassID.TextAsset))
+					AssetsFileInstance assetsFileInstance = assetsManager.LoadAssetsFileFromBundle(bundleFileInstance, allFileName);
+					EnsureDatabase(assetsManager, assetsFileInstance);
+					foreach (AssetFileInfo item in assetsFileInstance.file.GetAssetsOfType(AssetClassID.TextAsset))
 					{
-						AssetTypeValueField field = manager.GetBaseField(assets, info);
-						if (string.Equals(field["m_Name"].AsString, name, StringComparison.OrdinalIgnoreCase))
+						AssetTypeValueField baseField = assetsManager.GetBaseField(assetsFileInstance, item);
+						if (string.Equals(baseField["m_Name"].AsString, name, StringComparison.OrdinalIgnoreCase))
 						{
 							return new TextAssetRef
 							{
 								BundlePath = bundlePath,
 								RelativeBundlePath = Path.GetRelativePath(root, bundlePath),
-								AssetFileName = entry,
-								Name = field["m_Name"].AsString,
-								PathName = (field["m_PathName"].IsDummy ? "" : field["m_PathName"].AsString),
-								PathId = info.PathId,
-								Data = field["m_Script"].AsByteArray
+								AssetFileName = allFileName,
+								Name = baseField["m_Name"].AsString,
+								PathName = (baseField["m_PathName"].IsDummy ? "" : baseField["m_PathName"].AsString),
+								PathId = item.PathId,
+								Data = baseField["m_Script"].AsByteArray
 							};
 						}
 					}
@@ -441,7 +446,7 @@ public sealed class ModEngine
 		}
 		finally
 		{
-			manager.UnloadAll();
+			assetsManager.UnloadAll();
 		}
 	}
 
@@ -451,61 +456,61 @@ public sealed class ModEngine
 		{
 			throw new ArgumentException("动画纹理不是 TextAsset。", "asset");
 		}
-		AssetsManager manager = NewManager();
+		AssetsManager assetsManager = NewManager();
 		try
 		{
-			BundleFileInstance bundle = manager.LoadBundleFile(asset.BundlePath);
-			AssetsFileInstance assets = manager.LoadAssetsFileFromBundle(bundle, asset.AssetFileName);
-			EnsureDatabase(manager, assets);
-			AssetFileInfo info = assets.file.GetAssetsOfType(AssetClassID.TextAsset).First((AssetFileInfo x) => x.PathId == asset.PathId);
-			AssetTypeValueField field = manager.GetBaseField(assets, info);
+			BundleFileInstance bunInst = assetsManager.LoadBundleFile(asset.BundlePath);
+			AssetsFileInstance assetsFileInstance = assetsManager.LoadAssetsFileFromBundle(bunInst, asset.AssetFileName);
+			EnsureDatabase(assetsManager, assetsFileInstance);
+			AssetFileInfo assetFileInfo = assetsFileInstance.file.GetAssetsOfType(AssetClassID.TextAsset).First((AssetFileInfo x) => x.PathId == asset.PathId);
+			AssetTypeValueField baseField = assetsManager.GetBaseField(assetsFileInstance, assetFileInfo);
 			return new TextAssetRef
 			{
 				BundlePath = asset.BundlePath,
 				RelativeBundlePath = asset.RelativeBundlePath,
 				AssetFileName = asset.AssetFileName,
-				Name = field["m_Name"].AsString,
-				PathName = (field["m_PathName"].IsDummy ? "" : field["m_PathName"].AsString),
-				PathId = info.PathId,
-				Data = field["m_Script"].AsByteArray
+				Name = baseField["m_Name"].AsString,
+				PathName = (baseField["m_PathName"].IsDummy ? "" : baseField["m_PathName"].AsString),
+				PathId = assetFileInfo.PathId,
+				Data = baseField["m_Script"].AsByteArray
 			};
 		}
 		finally
 		{
-			manager.UnloadAll();
+			assetsManager.UnloadAll();
 		}
 	}
 
 	public TextAssetRef? FindTextAssetFast(string bundlePath, string root, string name)
 	{
-		AssetsManager manager = new AssetsManager();
+		AssetsManager assetsManager = new AssetsManager();
 		try
 		{
-			BundleFileInstance bundle = manager.LoadBundleFile(bundlePath);
-			foreach (string entry in bundle.file.GetAllFileNames())
+			BundleFileInstance bundleFileInstance = assetsManager.LoadBundleFile(bundlePath);
+			foreach (string allFileName in bundleFileInstance.file.GetAllFileNames())
 			{
 				try
 				{
-					AssetsFileInstance assets = manager.LoadAssetsFileFromBundle(bundle, entry);
-					foreach (AssetFileInfo info in assets.file.GetAssetsOfType(AssetClassID.TextAsset))
+					AssetsFileInstance assetsFileInstance = assetsManager.LoadAssetsFileFromBundle(bundleFileInstance, allFileName);
+					foreach (AssetFileInfo item in assetsFileInstance.file.GetAssetsOfType(AssetClassID.TextAsset))
 					{
-						AssetsFileReader reader = assets.file.Reader;
-						long start = info.GetAbsoluteByteStart(assets.file);
-						long end = start + info.ByteSize;
-						reader.Position = start;
-						string assetName = ReadAlignedString(reader, end);
-						if (string.Equals(assetName, name, StringComparison.OrdinalIgnoreCase))
+						AssetsFileReader reader = assetsFileInstance.file.Reader;
+						long absoluteByteStart = item.GetAbsoluteByteStart(assetsFileInstance.file);
+						long num = absoluteByteStart + item.ByteSize;
+						reader.Position = absoluteByteStart;
+						string text = ReadAlignedString(reader, num);
+						if (string.Equals(text, name, StringComparison.OrdinalIgnoreCase))
 						{
-							byte[] data = ReadAlignedBytes(reader, end);
-							string pathName = ((reader.Position < end) ? ReadAlignedString(reader, end) : "");
+							byte[] data = ReadAlignedBytes(reader, num);
+							string pathName = ((reader.Position < num) ? ReadAlignedString(reader, num) : "");
 							return new TextAssetRef
 							{
 								BundlePath = bundlePath,
 								RelativeBundlePath = Path.GetRelativePath(root, bundlePath),
-								AssetFileName = entry,
-								Name = assetName,
+								AssetFileName = allFileName,
+								Name = text,
 								PathName = pathName,
-								PathId = info.PathId,
+								PathId = item.PathId,
 								Data = data
 							};
 						}
@@ -519,7 +524,7 @@ public sealed class ModEngine
 		}
 		finally
 		{
-			manager.UnloadAll();
+			assetsManager.UnloadAll();
 		}
 	}
 
@@ -529,12 +534,12 @@ public sealed class ModEngine
 		{
 			throw new InvalidDataException("TextAsset string length is missing.");
 		}
-		int length = reader.ReadInt32();
-		if (length < 0 || reader.Position + length > end)
+		int num = reader.ReadInt32();
+		if (num < 0 || reader.Position + num > end)
 		{
 			throw new InvalidDataException("TextAsset string length is invalid.");
 		}
-		string result = Encoding.UTF8.GetString(reader.ReadBytes(length));
+		string result = Encoding.UTF8.GetString(reader.ReadBytes(num));
 		reader.Align();
 		return result;
 	}
@@ -545,162 +550,174 @@ public sealed class ModEngine
 		{
 			throw new InvalidDataException("TextAsset data length is missing.");
 		}
-		int length = reader.ReadInt32();
-		if (length < 0 || reader.Position + length > end)
+		int num = reader.ReadInt32();
+		if (num < 0 || reader.Position + num > end)
 		{
 			throw new InvalidDataException("TextAsset data length is invalid.");
 		}
-		byte[] result = reader.ReadBytes(length);
+		byte[] result = reader.ReadBytes(num);
 		reader.Align();
 		return result;
 	}
 
 	public void ReplaceTextAsset(TextAssetRef asset, byte[] data, string backupRoot)
 	{
-		string backup = Path.Combine(backupRoot, asset.RelativeBundlePath);
-		Directory.CreateDirectory(Path.GetDirectoryName(backup));
-		if (!File.Exists(backup))
+		string text = Path.Combine(backupRoot, asset.RelativeBundlePath);
+		Directory.CreateDirectory(Path.GetDirectoryName(text));
+		if (!File.Exists(text))
 		{
-			File.Copy(asset.BundlePath, backup);
+			File.Copy(asset.BundlePath, text);
 		}
-		string temporary = asset.BundlePath + ".mdcardtool.tmp";
-		AssetsManager manager = NewManager();
+		string text2 = asset.BundlePath + ".mdcardtool.tmp";
+		AssetsManager assetsManager = NewManager();
 		try
 		{
-			BundleFileInstance bundle = manager.LoadBundleFile(asset.BundlePath);
-			AssetsFileInstance assets = manager.LoadAssetsFileFromBundle(bundle, asset.AssetFileName);
-			EnsureDatabase(manager, assets);
-			AssetFileInfo info = assets.file.GetAssetsOfType(AssetClassID.TextAsset).First((AssetFileInfo x) => x.PathId == asset.PathId);
-			AssetTypeValueField field = manager.GetBaseField(assets, info);
-			field["m_Script"].AsByteArray = data;
-			List<AssetsReplacer> replacements = new List<AssetsReplacer>
+			BundleFileInstance bundleFileInstance = assetsManager.LoadBundleFile(asset.BundlePath);
+			AssetsFileInstance assetsFileInstance = assetsManager.LoadAssetsFileFromBundle(bundleFileInstance, asset.AssetFileName);
+			EnsureDatabase(assetsManager, assetsFileInstance);
+			AssetFileInfo info = assetsFileInstance.file.GetAssetsOfType(AssetClassID.TextAsset).First((AssetFileInfo x) => x.PathId == asset.PathId);
+			AssetTypeValueField baseField = assetsManager.GetBaseField(assetsFileInstance, info);
+			baseField["m_Script"].AsByteArray = data;
+			List<AssetsReplacer> replacers = new List<AssetsReplacer>
 			{
-				new AssetsReplacerFromMemory(assets.file, info, field)
+				new AssetsReplacerFromMemory(assetsFileInstance.file, info, baseField)
 			};
-			byte[] serialized;
-			using (MemoryStream stream = new MemoryStream())
+			byte[] buffer;
+			using (MemoryStream memoryStream = new MemoryStream())
 			{
-				using AssetsFileWriter writer = new AssetsFileWriter(stream);
-				assets.file.Write(writer, 0L, replacements);
-				serialized = stream.ToArray();
+				using AssetsFileWriter writer = new AssetsFileWriter(memoryStream);
+				assetsFileInstance.file.Write(writer, 0L, replacers);
+				buffer = memoryStream.ToArray();
 			}
-			using AssetsFileWriter bundleWriter = new AssetsFileWriter(temporary);
-			AssetBundleFile file = bundle.file;
+			using AssetsFileWriter writer2 = new AssetsFileWriter(text2);
+			AssetBundleFile file = bundleFileInstance.file;
 			int num = 1;
 			List<BundleReplacer> list = new List<BundleReplacer>(num);
 			CollectionsMarshal.SetCount(list, num);
 			Span<BundleReplacer> span = CollectionsMarshal.AsSpan(list);
 			int num2 = 0;
-			span[num2] = new BundleReplacerFromMemory(assets.name, assets.name, hasSerializedData: true, serialized, -1L);
+			span[num2] = new BundleReplacerFromMemory(assetsFileInstance.name, assetsFileInstance.name, hasSerializedData: true, buffer, -1L);
 			num2++;
-			file.Write(bundleWriter, list);
+			file.Write(writer2, list);
 		}
 		finally
 		{
-			manager.UnloadAll();
+			assetsManager.UnloadAll();
 		}
-		File.Move(temporary, asset.BundlePath, overwrite: true);
+		File.Move(text2, asset.BundlePath, overwrite: true);
 	}
 
 	public byte[] DecodePng(TexRef texture, int maxSize = 0)
 	{
 		if (BuiltInCardFrameCatalog.IsTransparentGradientFrame(texture))
 		{
-			byte[] generated = BuiltInCardFrameCatalog.DecodeTransparentGradientFrame(texture);
-			if (maxSize <= 0) return generated;
-			using Image<Rgba32> image = Image.Load<Rgba32>(generated);
+			byte[] array = BuiltInCardFrameCatalog.DecodeTransparentGradientFrame(texture);
+			if (maxSize <= 0)
+			{
+				return array;
+			}
+			using Image<Rgba32> image = Image.Load<Rgba32>(array);
 			if (image.Width > maxSize || image.Height > maxSize)
 			{
-				image.Mutate(context => context.Resize(new ResizeOptions
+				image.Mutate(delegate(IImageProcessingContext context)
 				{
-					Size = new Size(maxSize, maxSize),
-					Mode = ResizeMode.Max
-				}));
+					context.Resize(new ResizeOptions
+					{
+						Size = new Size(maxSize, maxSize),
+						Mode = ResizeMode.Max
+					});
+				});
 			}
-			using MemoryStream output = new();
-			image.Save(output, TransparentRgbPngEncoder());
-			return output.ToArray();
+			using MemoryStream memoryStream = new MemoryStream();
+			image.Save(memoryStream, TransparentRgbPngEncoder());
+			return memoryStream.ToArray();
 		}
 		if (BuiltInCardFrameCatalog.IsPackagedFrame(texture))
 		{
 			return DecodeLocalPng(texture.ActiveBundlePath, maxSize);
 		}
-		Exception firstError;
+		Exception ex2;
 		try
 		{
 			return DecodePngCore(texture, maxSize);
 		}
 		catch (Exception ex)
 		{
-			firstError = ex;
+			ex2 = ex;
 		}
-		TexRef? resolved = ResolveTextureReference(texture);
-		if (resolved == null)
+		TexRef texRef = ResolveTextureReference(texture);
+		if (texRef == null)
 		{
-			throw new InvalidDataException($"找不到可对应 {texture.Name} 的 Texture2D；索引或手工 Mod 的资源结构可能已经改变。", firstError);
+			throw new InvalidDataException("找不到可对应 " + texture.Name + " 的 Texture2D；索引或手工 Mod 的资源结构可能已经改变。", ex2);
 		}
-		bool changed = !PathEquals(texture.ActiveBundlePath, resolved.BundlePath) || texture.PathId != resolved.PathId || !string.Equals(texture.AssetFileName, resolved.AssetFileName, StringComparison.Ordinal);
-		ApplyResolvedReference(texture, resolved);
-		if (!changed)
+		bool num = !PathEquals(texture.ActiveBundlePath, texRef.BundlePath) || texture.PathId != texRef.PathId || !string.Equals(texture.AssetFileName, texRef.AssetFileName, StringComparison.Ordinal);
+		ApplyResolvedReference(texture, texRef);
+		if (!num)
 		{
-			throw new InvalidDataException($"已定位 Texture2D {texture.Name}，但当前纹理格式无法解码：{firstError.Message}", firstError);
+			throw new InvalidDataException("已定位 Texture2D " + texture.Name + "，但当前纹理格式无法解码：" + ex2.Message, ex2);
 		}
 		try
 		{
 			return DecodePngCore(texture, maxSize);
 		}
-		catch (Exception retryError)
+		catch (Exception ex3)
 		{
-			throw new InvalidDataException($"已重新定位 Texture2D {texture.Name}，但仍无法解码：{retryError.Message}", retryError);
+			throw new InvalidDataException("已重新定位 Texture2D " + texture.Name + "，但仍无法解码：" + ex3.Message, ex3);
 		}
 	}
 
 	private static byte[] DecodeLocalPng(string path, int maxSize)
 	{
-		if (!File.Exists(path)) throw new FileNotFoundException("内置卡框文件不存在。", path);
+		if (!File.Exists(path))
+		{
+			throw new FileNotFoundException("内置卡框文件不存在。", path);
+		}
 		using Image<Rgba32> image = Image.Load<Rgba32>(path);
 		if (maxSize > 0 && (image.Width > maxSize || image.Height > maxSize))
 		{
-			image.Mutate(context => context.Resize(new ResizeOptions
+			image.Mutate(delegate(IImageProcessingContext context)
 			{
-				Size = new Size(maxSize, maxSize),
-				Mode = ResizeMode.Max
-			}));
+				context.Resize(new ResizeOptions
+				{
+					Size = new Size(maxSize, maxSize),
+					Mode = ResizeMode.Max
+				});
+			});
 		}
-		using MemoryStream output = new();
-		image.Save(output, TransparentRgbPngEncoder());
-		return output.ToArray();
+		using MemoryStream memoryStream = new MemoryStream();
+		image.Save(memoryStream, TransparentRgbPngEncoder());
+		return memoryStream.ToArray();
 	}
 
 	private byte[] DecodePngCore(TexRef texture, int maxSize)
 	{
-		AssetsManager manager = NewManager();
+		AssetsManager assetsManager = NewManager();
 		try
 		{
-			BundleFileInstance bundle = manager.LoadBundleFile(texture.ActiveBundlePath);
-			AssetsFileInstance assets = manager.LoadAssetsFileFromBundle(bundle, texture.AssetFileName);
-			EnsureDatabase(manager, assets);
-			AssetFileInfo info = assets.file.GetAssetsOfType(AssetClassID.Texture2D).First((AssetFileInfo x) => x.PathId == texture.PathId);
-			AssetTypeValueField baseField = manager.GetBaseField(assets, info);
-			int width = baseField["m_Width"].AsInt;
-			int height = baseField["m_Height"].AsInt;
+			BundleFileInstance bunInst = assetsManager.LoadBundleFile(texture.ActiveBundlePath);
+			AssetsFileInstance assetsFileInstance = assetsManager.LoadAssetsFileFromBundle(bunInst, texture.AssetFileName);
+			EnsureDatabase(assetsManager, assetsFileInstance);
+			AssetFileInfo info = assetsFileInstance.file.GetAssetsOfType(AssetClassID.Texture2D).First((AssetFileInfo x) => x.PathId == texture.PathId);
+			AssetTypeValueField baseField = assetsManager.GetBaseField(assetsFileInstance, info);
+			int asInt = baseField["m_Width"].AsInt;
+			int asInt2 = baseField["m_Height"].AsInt;
 			TextureFile textureFile = TextureFile.ReadTextureFile(baseField);
-			byte[] pixels = textureFile.GetTextureData(assets);
-			if (pixels == null || pixels.Length < width * height * 4)
+			byte[] textureData = textureFile.GetTextureData(assetsFileInstance);
+			if (textureData == null || textureData.Length < asInt * asInt2 * 4)
 			{
 				throw new InvalidDataException($"贴图 {texture.Name} 的解码数据不足（格式 {textureFile.m_TextureFormat}）。");
 			}
-			using Image<Bgra32> image = Image.LoadPixelData<Bgra32>(pixels.AsSpan(0, width * height * 4), width, height);
+			using Image<Bgra32> image = Image.LoadPixelData<Bgra32>(textureData.AsSpan(0, asInt * asInt2 * 4), asInt, asInt2);
 			image.Mutate(delegate(IImageProcessingContext x)
 			{
 				x.Flip(FlipMode.Vertical);
 			});
 			if (maxSize <= 0)
 			{
-				using (MemoryStream original = new MemoryStream())
+				using (MemoryStream memoryStream = new MemoryStream())
 				{
-					image.Save(original, TransparentRgbPngEncoder());
-					return original.ToArray();
+					image.Save(memoryStream, TransparentRgbPngEncoder());
+					return memoryStream.ToArray();
 				}
 			}
 			if (image.Width > maxSize || image.Height > maxSize)
@@ -714,46 +731,43 @@ public sealed class ModEngine
 					});
 				});
 			}
-			using MemoryStream resized = new MemoryStream();
-			image.Save(resized, TransparentRgbPngEncoder());
-			return resized.ToArray();
+			using MemoryStream memoryStream2 = new MemoryStream();
+			image.Save(memoryStream2, TransparentRgbPngEncoder());
+			return memoryStream2.ToArray();
 		}
 		finally
 		{
-			manager.UnloadAll();
+			assetsManager.UnloadAll();
 		}
 	}
 
-	private static PngEncoder TransparentRgbPngEncoder() => new()
+	private static PngEncoder TransparentRgbPngEncoder()
 	{
-		ColorType = PngColorType.RgbWithAlpha,
-		// Master Duel stores shader-visible RGB below zero alpha. Explicitly
-		// preserving it keeps decode -> edit -> write round-trips lossless.
-		TransparentColorMode = PngTransparentColorMode.Preserve,
-		CompressionLevel = PngCompressionLevel.BestCompression
-	};
+		return new PngEncoder
+		{
+			ColorType = PngColorType.RgbWithAlpha,
+			TransparentColorMode = PngTransparentColorMode.Preserve,
+			CompressionLevel = PngCompressionLevel.Level9
+		};
+	}
 
 	public TexRef? ResolveTextureReference(TexRef texture)
 	{
-		string root = FindReferenceRoot(texture);
-		string? streamingRoot = FindStreamingRoot(root);
-		List<string> bundlePaths = CandidateBundlePaths(texture, root, streamingRoot).ToList();
-		List<TexRef> candidates = new List<TexRef>();
-		HashSet<string> identities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		foreach (string bundlePath in bundlePaths)
+		string text = FindReferenceRoot(texture);
+		string text2 = FindStreamingRoot(text);
+		List<string> list = CandidateBundlePaths(texture, text, text2).ToList();
+		List<TexRef> list2 = new List<TexRef>();
+		HashSet<string> hashSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (string item in list)
 		{
 			try
 			{
-				string scanRoot = IsInsideRoot(bundlePath, root)
-					? root
-					: (streamingRoot != null && IsInsideRoot(bundlePath, streamingRoot)
-						? streamingRoot
-						: (Path.GetDirectoryName(bundlePath) ?? root));
-				foreach (TexRef candidate in ScanBundle(bundlePath, scanRoot, texture.SourceKind, includeDependencies: false).Textures)
+				string root = (IsInsideRoot(item, text) ? text : ((text2 != null && IsInsideRoot(item, text2)) ? text2 : (Path.GetDirectoryName(item) ?? text)));
+				foreach (TexRef texture2 in ScanBundle(item, root, texture.SourceKind, includeDependencies: false).Textures)
 				{
-					if (identities.Add($"{Path.GetFullPath(candidate.BundlePath)}\0{candidate.AssetFileName}\0{candidate.PathId}"))
+					if (hashSet.Add($"{Path.GetFullPath(texture2.BundlePath)}\0{texture2.AssetFileName}\0{texture2.PathId}"))
 					{
-						candidates.Add(candidate);
+						list2.Add(texture2);
 					}
 				}
 			}
@@ -761,131 +775,137 @@ public sealed class ModEngine
 			{
 			}
 		}
-		if (candidates.Count == 0)
+		if (list2.Count == 0)
 		{
 			return null;
 		}
-		TexRef? resolved = SelectUnambiguous(candidates.Where((TexRef x) => string.Equals(x.Name, texture.Name, StringComparison.OrdinalIgnoreCase)), texture);
-		if (resolved != null)
+		TexRef texRef = SelectUnambiguous(list2.Where((TexRef x) => string.Equals(x.Name, texture.Name, StringComparison.OrdinalIgnoreCase)), texture);
+		if (texRef != null)
 		{
-			return resolved;
+			return texRef;
 		}
 		string normalizedName = NormalizeTextureName(texture.Name);
 		if (normalizedName.Length > 0)
 		{
-			resolved = SelectUnambiguous(candidates.Where((TexRef x) => NormalizeTextureName(x.Name) == normalizedName), texture);
-			if (resolved != null)
+			texRef = SelectUnambiguous(list2.Where((TexRef x) => NormalizeTextureName(x.Name) == normalizedName), texture);
+			if (texRef != null)
 			{
-				return resolved;
+				return texRef;
 			}
 		}
 		if (texture.CardKey.Length > 0)
 		{
-			resolved = SelectUnambiguous(candidates.Where((TexRef x) => x.CardKey == texture.CardKey), texture);
-			if (resolved != null)
+			texRef = SelectUnambiguous(list2.Where((TexRef x) => x.CardKey == texture.CardKey), texture);
+			if (texRef != null)
 			{
-				return resolved;
+				return texRef;
 			}
 		}
 		if (texture.Width > 0 && texture.Height > 0)
 		{
-			resolved = SelectUnambiguous(candidates.Where((TexRef x) => x.Width == texture.Width && x.Height == texture.Height), texture);
-			if (resolved != null)
+			texRef = SelectUnambiguous(list2.Where((TexRef x) => x.Width == texture.Width && x.Height == texture.Height), texture);
+			if (texRef != null)
 			{
-				return resolved;
+				return texRef;
 			}
 		}
-		return SelectUnambiguous(candidates, texture);
+		return SelectUnambiguous(list2, texture);
 	}
 
 	private static TexRef? SelectUnambiguous(IEnumerable<TexRef> source, TexRef expected)
 	{
-		TexRef[] choices = source.ToArray();
-		if (choices.Length == 0)
+		TexRef[] array = source.ToArray();
+		if (array.Length == 0)
 		{
 			return null;
 		}
-		if (choices.Length == 1)
+		if (array.Length == 1)
 		{
-			return choices[0];
+			return array[0];
 		}
+		int bestScore = ((IEnumerable<TexRef>)array).Max((Func<TexRef, int>)Score);
+		TexRef[] array2 = array.Where((TexRef x) => Score(x) == bestScore).Take(2).ToArray();
+		if (array2.Length != 1)
+		{
+			return null;
+		}
+		return array2[0];
 		int Score(TexRef candidate)
 		{
-			int score = 0;
+			int num = 0;
 			if (PathEquals(candidate.BundlePath, expected.ActiveBundlePath))
 			{
-				score += 16;
+				num += 16;
 			}
 			if (PathEquals(candidate.BundlePath, expected.BundlePath))
 			{
-				score += 8;
+				num += 8;
 			}
 			if (string.Equals(candidate.AssetFileName, expected.AssetFileName, StringComparison.Ordinal))
 			{
-				score += 4;
+				num += 4;
 			}
 			if (candidate.PathId == expected.PathId)
 			{
-				score += 2;
+				num += 2;
 			}
 			if (candidate.Width == expected.Width && candidate.Height == expected.Height)
 			{
-				score++;
+				num++;
 			}
-			return score;
+			return num;
 		}
-		int bestScore = choices.Max(Score);
-		TexRef[] best = choices.Where((TexRef x) => Score(x) == bestScore).Take(2).ToArray();
-		return (best.Length == 1) ? best[0] : null;
 	}
 
 	private static IEnumerable<string> CandidateBundlePaths(TexRef texture, string root, string? streamingRoot)
 	{
 		HashSet<string> yielded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (string item in Add(texture.ActiveBundlePath))
+		{
+			yield return item;
+		}
+		foreach (string item2 in Add(texture.BundlePath))
+		{
+			yield return item2;
+		}
+		if (!Path.IsPathRooted(texture.RelativeBundlePath))
+		{
+			foreach (string item3 in Add(Path.Combine(root, texture.RelativeBundlePath)))
+			{
+				yield return item3;
+			}
+			if (streamingRoot != null && !PathEquals(streamingRoot, root))
+			{
+				foreach (string item4 in Add(Path.Combine(streamingRoot, texture.RelativeBundlePath)))
+				{
+					yield return item4;
+				}
+			}
+		}
+		if (!(texture.SourceKind == "本地卡图") || texture.CardKey.Length <= 0 || !texture.CardKey.All(char.IsAsciiDigit))
+		{
+			yield break;
+		}
+		foreach (string item5 in IndexService.CardIllustrationBundleCandidates(root, texture.CardKey).SelectMany(Add))
+		{
+			yield return item5;
+		}
+		if (streamingRoot == null || PathEquals(streamingRoot, root))
+		{
+			yield break;
+		}
+		foreach (string item6 in IndexService.CardIllustrationBundleCandidates(streamingRoot, texture.CardKey).SelectMany(Add))
+		{
+			yield return item6;
+		}
 		IEnumerable<string> Add(string? path)
 		{
 			if (!string.IsNullOrWhiteSpace(path))
 			{
-				string full = Path.GetFullPath(path);
-				if (File.Exists(full) && yielded.Add(full))
+				string fullPath = Path.GetFullPath(path);
+				if (File.Exists(fullPath) && yielded.Add(fullPath))
 				{
-					yield return full;
-				}
-			}
-		}
-		foreach (string path in Add(texture.ActiveBundlePath))
-		{
-			yield return path;
-		}
-		foreach (string path in Add(texture.BundlePath))
-		{
-			yield return path;
-		}
-		if (!Path.IsPathRooted(texture.RelativeBundlePath))
-		{
-			foreach (string path in Add(Path.Combine(root, texture.RelativeBundlePath)))
-			{
-				yield return path;
-			}
-			if (streamingRoot != null && !PathEquals(streamingRoot, root))
-			{
-				foreach (string path in Add(Path.Combine(streamingRoot, texture.RelativeBundlePath)))
-				{
-					yield return path;
-				}
-			}
-		}
-		if (texture.SourceKind == "本地卡图" && texture.CardKey.Length > 0 && texture.CardKey.All(char.IsAsciiDigit))
-		{
-			foreach (string path in IndexService.CardIllustrationBundleCandidates(root, texture.CardKey).SelectMany(Add))
-			{
-				yield return path;
-			}
-			if (streamingRoot != null && !PathEquals(streamingRoot, root))
-			{
-				foreach (string path in IndexService.CardIllustrationBundleCandidates(streamingRoot, texture.CardKey).SelectMany(Add))
-				{
-					yield return path;
+					yield return fullPath;
 				}
 			}
 		}
@@ -895,17 +915,22 @@ public sealed class ModEngine
 	{
 		try
 		{
-			DirectoryInfo root = new(Path.GetFullPath(referenceRoot));
-			if (root.Name.Equals("AssetBundle", StringComparison.OrdinalIgnoreCase)
-				&& root.Parent?.Name.Equals("StreamingAssets", StringComparison.OrdinalIgnoreCase) == true)
+			DirectoryInfo directoryInfo = new DirectoryInfo(Path.GetFullPath(referenceRoot));
+			if (directoryInfo.Name.Equals("AssetBundle", StringComparison.OrdinalIgnoreCase))
 			{
-				return root.FullName;
+				DirectoryInfo? parent = directoryInfo.Parent;
+				if (parent != null && parent.Name.Equals("StreamingAssets", StringComparison.OrdinalIgnoreCase))
+				{
+					return directoryInfo.FullName;
+				}
 			}
-			if (root.Name.Equals("0000", StringComparison.OrdinalIgnoreCase)
-				&& root.Parent?.Parent?.Name.Equals("LocalData", StringComparison.OrdinalIgnoreCase) == true
-				&& root.Parent.Parent.Parent != null)
+			if (directoryInfo.Name.Equals("0000", StringComparison.OrdinalIgnoreCase))
 			{
-				return IndexService.StreamingRoot(root.Parent.Parent.Parent.FullName);
+				DirectoryInfo? parent2 = directoryInfo.Parent;
+				if (parent2 != null && parent2.Parent?.Name.Equals("LocalData", StringComparison.OrdinalIgnoreCase) == true && directoryInfo.Parent.Parent.Parent != null)
+				{
+					return IndexService.StreamingRoot(directoryInfo.Parent.Parent.Parent.FullName);
+				}
 			}
 		}
 		catch
@@ -916,43 +941,49 @@ public sealed class ModEngine
 
 	private static string FindReferenceRoot(TexRef texture)
 	{
-		string bundlePath = Path.GetFullPath(texture.BundlePath);
+		string fullPath = Path.GetFullPath(texture.BundlePath);
 		if (!Path.IsPathRooted(texture.RelativeBundlePath) && texture.RelativeBundlePath.Length > 0)
 		{
-			string[] parts = texture.RelativeBundlePath.Split(new char[2]
+			string[] array = texture.RelativeBundlePath.Split(new char[2]
 			{
 				Path.DirectorySeparatorChar,
 				Path.AltDirectorySeparatorChar
 			}, StringSplitOptions.RemoveEmptyEntries);
-			string? candidate = bundlePath;
-			for (int i = 0; i < parts.Length && candidate != null; i++)
+			string text = fullPath;
+			for (int i = 0; i < array.Length; i++)
 			{
-				candidate = Path.GetDirectoryName(candidate);
+				if (text == null)
+				{
+					break;
+				}
+				text = Path.GetDirectoryName(text);
 			}
-			if (candidate != null && PathEquals(Path.Combine(candidate, texture.RelativeBundlePath), bundlePath))
+			if (text != null && PathEquals(Path.Combine(text, texture.RelativeBundlePath), fullPath))
 			{
-				return candidate;
+				return text;
 			}
 		}
 		if (texture.SourceKind == "本地卡图")
 		{
-			DirectoryInfo? directory = new FileInfo(bundlePath).Directory;
-			while (directory != null)
+			for (DirectoryInfo directoryInfo = new FileInfo(fullPath).Directory; directoryInfo != null; directoryInfo = directoryInfo.Parent)
 			{
-				if (directory.Name == "0000")
+				if (directoryInfo.Name == "0000")
 				{
-					return directory.FullName;
+					return directoryInfo.FullName;
 				}
-				directory = directory.Parent;
 			}
 		}
-		return Path.GetDirectoryName(bundlePath) ?? bundlePath;
+		return Path.GetDirectoryName(fullPath) ?? fullPath;
 	}
 
 	private static bool IsInsideRoot(string path, string root)
 	{
-		string relative = Path.GetRelativePath(Path.GetFullPath(root), Path.GetFullPath(path));
-		return relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) && !Path.IsPathRooted(relative);
+		string relativePath = Path.GetRelativePath(Path.GetFullPath(root), Path.GetFullPath(path));
+		if (relativePath != ".." && !relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+		{
+			return !Path.IsPathRooted(relativePath);
+		}
+		return false;
 	}
 
 	private static bool PathEquals(string left, string right)
@@ -994,32 +1025,36 @@ public sealed class ModEngine
 
 	private static AssetTypeValueField FindTextureImageDataField(AssetTypeValueField root)
 	{
+		foreach (AssetTypeValueField child in root.Children)
+		{
+			switch (FieldKey(child.TemplateField.Name))
+			{
+			case "imagedata":
+			case "mimagedata":
+			case "picturedata":
+			case "texturedata":
+			{
+				AssetTypeValueField assetTypeValueField = (child.IsDummy ? AssetTypeValueField.DUMMY_FIELD : child["Array"]);
+				return assetTypeValueField.IsDummy ? child : assetTypeValueField;
+			}
+			}
+		}
+		foreach (AssetTypeValueField child2 in root.Children)
+		{
+			if (!child2.TemplateField.IsArray)
+			{
+				AssetTypeValueField assetTypeValueField2 = FindTextureImageDataField(child2);
+				if (!assetTypeValueField2.IsDummy)
+				{
+					return assetTypeValueField2;
+				}
+			}
+		}
+		return AssetTypeValueField.DUMMY_FIELD;
 		static string FieldKey(string value)
 		{
 			return new string(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 		}
-		foreach (AssetTypeValueField child in root.Children)
-		{
-			string key = FieldKey(child.TemplateField.Name);
-			if (key == "imagedata" || key == "mimagedata" || key == "picturedata" || key == "texturedata")
-			{
-				AssetTypeValueField array = child.IsDummy ? AssetTypeValueField.DUMMY_FIELD : child["Array"];
-				return array.IsDummy ? child : array;
-			}
-		}
-		foreach (AssetTypeValueField child in root.Children)
-		{
-			if (child.TemplateField.IsArray)
-			{
-				continue;
-			}
-			AssetTypeValueField nested = FindTextureImageDataField(child);
-			if (!nested.IsDummy)
-			{
-				return nested;
-			}
-		}
-		return AssetTypeValueField.DUMMY_FIELD;
 	}
 
 	private static void SetTextureImageData(AssetTypeValueField field, byte[] data)
@@ -1030,14 +1065,14 @@ public sealed class ModEngine
 			return;
 		}
 		field.AsArray = new AssetTypeArrayInfo(data.Length);
-		List<AssetTypeValueField> children = new List<AssetTypeValueField>(data.Length);
-		foreach (byte value in data)
+		List<AssetTypeValueField> list = new List<AssetTypeValueField>(data.Length);
+		foreach (byte asByte in data)
 		{
-			AssetTypeValueField child = ValueBuilder.DefaultValueFieldFromArrayTemplate(field);
-			child.AsByte = value;
-			children.Add(child);
+			AssetTypeValueField assetTypeValueField = ValueBuilder.DefaultValueFieldFromArrayTemplate(field);
+			assetTypeValueField.AsByte = asByte;
+			list.Add(assetTypeValueField);
 		}
-		field.Children = children;
+		field.Children = list;
 	}
 
 	public void Replace(TexRef texture, string imagePath, string backupRoot)
@@ -1058,9 +1093,9 @@ public sealed class ModEngine
 		{
 			x.Flip(FlipMode.Vertical);
 		});
-		byte[] pixels = new byte[image.Width * image.Height * 4];
-		image.CopyPixelDataTo(pixels);
-		ReplaceTextureData(texture, image.Width, image.Height, 4, pixels, backupRoot);
+		byte[] array = new byte[image.Width * image.Height * 4];
+		image.CopyPixelDataTo(array);
+		ReplaceTextureData(texture, image.Width, image.Height, 4, array, backupRoot);
 	}
 
 	public void ReplaceAnimationAtlas(MonsterAnimationAssetRef asset, Image<Rgba32> atlas, string backupRoot)
@@ -1072,66 +1107,72 @@ public sealed class ModEngine
 		ReplaceAnimationAtlas(asset, EncodeAnimationAtlas(atlas), backupRoot);
 	}
 
-	public AnimationAtlasTextureData EncodeAnimationAtlas(Image<Rgba32> atlas)
+	public AnimationAtlasTextureData EncodeAnimationAtlas(Image<Rgba32> atlas, bool mobile = false)
 	{
-		string texconv = AppPaths.ResolveFile("tools", "texconv.exe");
-		if (!File.Exists(texconv))
+		if (mobile)
 		{
-			throw new FileNotFoundException("缺少动画图集编码器 data\\tools\\texconv.exe，请使用完整分享包。", texconv);
-		}
-		string temporary = Path.Combine(Path.GetTempPath(), "MDCardModTool", "texconv_" + Guid.NewGuid().ToString("N"));
-		Directory.CreateDirectory(temporary);
-		try
-		{
-			string input = Path.Combine(temporary, "atlas.png");
-			using (Image<Rgba32> flipped = atlas.Clone(delegate(IImageProcessingContext x)
+			using (Image<Rgba32> image = atlas.Clone(delegate(IImageProcessingContext x)
 			{
 				x.Flip(FlipMode.Vertical);
 			}))
 			{
-				flipped.SaveAsPng(input);
+				byte[] array = new byte[checked(atlas.Width * atlas.Height * 4)];
+				image.CopyPixelDataTo(array);
+				return new AnimationAtlasTextureData(atlas.Width, atlas.Height, array, 4);
 			}
-			ProcessStartInfo start = new ProcessStartInfo
+		}
+		string text = AppPaths.ResolveFile("tools", "texconv.exe");
+		if (!File.Exists(text))
+		{
+			throw new FileNotFoundException("缺少动画图集编码器 data\\tools\\texconv.exe，请使用完整分享包。", text);
+		}
+		string text2 = Path.Combine(Path.GetTempPath(), "MDCardModTool", "texconv_" + Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(text2);
+		try
+		{
+			string text3 = Path.Combine(text2, "atlas.png");
+			using (Image<Rgba32> source = atlas.Clone(delegate(IImageProcessingContext x)
 			{
-				FileName = texconv,
+				x.Flip(FlipMode.Vertical);
+			}))
+			{
+				source.SaveAsPng(text3);
+			}
+			ProcessStartInfo processStartInfo = new ProcessStartInfo
+			{
+				FileName = text,
 				UseShellExecute = false,
 				CreateNoWindow = true,
 				RedirectStandardError = true,
 				RedirectStandardOutput = true
 			};
-			// Use the encoder's default BC7 search instead of forcing exhaustive
-			// search for every HD/SD atlas. Format and alpha handling are unchanged.
-			string[] array = new string[9]
+			string[] array2 = new string[9] { "-nologo", "-y", "-f", "BC7_UNORM", "-m", "1", "-o", text2, text3 };
+			foreach (string item in array2)
 			{
-				"-nologo", "-y", "-f", "BC7_UNORM", "-m", "1", "-o", temporary,
-				input
-			};
-			foreach (string arg in array)
-			{
-				start.ArgumentList.Add(arg);
+				processStartInfo.ArgumentList.Add(item);
 			}
-			using Process process = Process.Start(start) ?? throw new InvalidOperationException("无法启动 texconv.exe。");
-			Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
-			Task<string> standardError = process.StandardError.ReadToEndAsync();
+			using Process process = Process.Start(processStartInfo) ?? throw new InvalidOperationException("无法启动 texconv.exe。");
+			Task<string> task = process.StandardOutput.ReadToEndAsync();
+			Task<string> task2 = process.StandardError.ReadToEndAsync();
 			process.WaitForExit();
-			Task.WaitAll(standardOutput, standardError);
+			Task.WaitAll(task, task2);
 			if (process.ExitCode != 0)
 			{
-				throw new InvalidDataException("texconv 无法压缩动画图集：" + (standardError.Result + " " + standardOutput.Result).Trim());
+				throw new InvalidDataException("texconv 无法压缩动画图集：" + (task2.Result + " " + task.Result).Trim());
 			}
-			byte[] bytes = File.ReadAllBytes(Directory.EnumerateFiles(temporary, "*.dds", SearchOption.TopDirectoryOnly).FirstOrDefault() ?? Directory.EnumerateFiles(temporary, "*.DDS", SearchOption.TopDirectoryOnly).FirstOrDefault() ?? throw new InvalidDataException("texconv 没有生成 DDS 数据。"));
-			int expected = (atlas.Width + 3) / 4 * ((atlas.Height + 3) / 4) * 16;
-			if (bytes.Length < expected + 128 || !bytes.AsSpan(0, 4).SequenceEqual("DDS "u8))
+			byte[] array3 = File.ReadAllBytes(Directory.EnumerateFiles(text2, "*.dds", SearchOption.TopDirectoryOnly).FirstOrDefault() ?? Directory.EnumerateFiles(text2, "*.DDS", SearchOption.TopDirectoryOnly).FirstOrDefault() ?? throw new InvalidDataException("texconv 没有生成 DDS 数据。"));
+			int num2 = (atlas.Width + 3) / 4 * ((atlas.Height + 3) / 4) * 16;
+			if (array3.Length < num2 + 128 || !array3.AsSpan(0, 4).SequenceEqual("DDS "u8))
 			{
 				throw new InvalidDataException("texconv 生成的 DDS/BC7 数据不完整。");
 			}
-			return new AnimationAtlasTextureData(atlas.Width, atlas.Height, bytes.AsSpan(bytes.Length - expected, expected).ToArray());
+			return new AnimationAtlasTextureData(atlas.Width, atlas.Height, array3.AsSpan(array3.Length - num2, num2).ToArray());
 		}
 		finally
 		{
 			try
 			{
-				Directory.Delete(temporary, recursive: true);
+				Directory.Delete(text2, recursive: true);
 			}
 			catch
 			{
@@ -1145,162 +1186,180 @@ public sealed class ModEngine
 		{
 			throw new ArgumentException("目标不是动画 Texture2D。", "asset");
 		}
-		ReplaceTextureData(asset.AsTexture(), encoded.Width, encoded.Height, 25, encoded.Data, backupRoot, forceLinearColorSpace: true);
+		ReplaceTextureData(asset.AsTexture(), encoded.Width, encoded.Height, encoded.TextureFormat, encoded.Data, backupRoot, forceLinearColorSpace: true);
 	}
 
 	public AnimationTextureMetadata ReadAnimationTextureMetadata(MonsterAnimationAssetRef asset)
 	{
 		if (asset.Kind != MonsterAnimationAssetKind.Texture)
 		{
-			throw new ArgumentException("目标不是动画 Texture2D。", nameof(asset));
+			throw new ArgumentException("目标不是动画 Texture2D。", "asset");
 		}
-		AssetsManager manager = NewManager();
+		AssetsManager assetsManager = NewManager();
 		try
 		{
-			BundleFileInstance bundle = manager.LoadBundleFile(asset.BundlePath);
-			AssetsFileInstance assets = manager.LoadAssetsFileFromBundle(bundle, asset.AssetFileName);
-			EnsureDatabase(manager, assets);
-			AssetFileInfo info = assets.file.GetAssetsOfType(AssetClassID.Texture2D)
-				.First(item => item.PathId == asset.PathId);
-			AssetTypeValueField field = manager.GetBaseField(assets, info);
-			AssetTypeValueField imageData = FindTextureImageDataField(field);
-			AssetTypeValueField streamData = field["m_StreamData"];
-			int inlineSize = 0;
-			if (imageData != null && !imageData.IsDummy)
+			BundleFileInstance bunInst = assetsManager.LoadBundleFile(asset.BundlePath);
+			AssetsFileInstance assetsFileInstance = assetsManager.LoadAssetsFileFromBundle(bunInst, asset.AssetFileName);
+			EnsureDatabase(assetsManager, assetsFileInstance);
+			AssetFileInfo info = assetsFileInstance.file.GetAssetsOfType(AssetClassID.Texture2D).First((AssetFileInfo item) => item.PathId == asset.PathId);
+			AssetTypeValueField baseField = assetsManager.GetBaseField(assetsFileInstance, info);
+			AssetTypeValueField assetTypeValueField = FindTextureImageDataField(baseField);
+			AssetTypeValueField assetTypeValueField2 = baseField["m_StreamData"];
+			int num = 0;
+			if (assetTypeValueField != null && !assetTypeValueField.IsDummy)
 			{
-				inlineSize = imageData.TemplateField.ValueType == AssetValueType.ByteArray
-					? imageData.AsByteArray?.Length ?? 0
-					: imageData.Children.Count;
+				int num2;
+				if (assetTypeValueField.TemplateField.ValueType != AssetValueType.ByteArray)
+				{
+					num2 = assetTypeValueField.Children.Count;
+				}
+				else
+				{
+					byte[] asByteArray = assetTypeValueField.AsByteArray;
+					num2 = ((asByteArray != null) ? asByteArray.Length : 0);
+				}
+				num = num2;
 			}
-			return new AnimationTextureMetadata(
-				field["m_Width"].AsInt,
-				field["m_Height"].AsInt,
-				field["m_TextureFormat"].AsInt,
-				OptionalInt(field["m_ColorSpace"], -1),
-				OptionalInt(field["m_MipCount"], 1),
-				OptionalLong(field["m_CompleteImageSize"], inlineSize),
-				streamData == null || streamData.IsDummy ? 0 : OptionalLong(streamData["size"], 0),
-				streamData == null || streamData.IsDummy ? "" : OptionalString(streamData["path"]),
-				inlineSize);
+			return new AnimationTextureMetadata(baseField["m_Width"].AsInt, baseField["m_Height"].AsInt, baseField["m_TextureFormat"].AsInt, OptionalInt(baseField["m_ColorSpace"], -1), OptionalInt(baseField["m_MipCount"], 1), OptionalLong(baseField["m_CompleteImageSize"], num), (assetTypeValueField2 == null || assetTypeValueField2.IsDummy) ? 0 : OptionalLong(assetTypeValueField2["size"], 0L), (assetTypeValueField2 == null || assetTypeValueField2.IsDummy) ? "" : OptionalString(assetTypeValueField2["path"]), num);
 		}
 		finally
 		{
-			manager.UnloadAll();
+			assetsManager.UnloadAll();
 		}
 	}
 
-	private static int OptionalInt(AssetTypeValueField? field, int fallback) =>
-		field == null || field.IsDummy ? fallback : field.AsInt;
+	private static int OptionalInt(AssetTypeValueField? field, int fallback)
+	{
+		if (field != null && !field.IsDummy)
+		{
+			return field.AsInt;
+		}
+		return fallback;
+	}
 
-	private static long OptionalLong(AssetTypeValueField? field, long fallback) =>
-		field == null || field.IsDummy ? fallback : field.AsLong;
+	private static long OptionalLong(AssetTypeValueField? field, long fallback)
+	{
+		if (field != null && !field.IsDummy)
+		{
+			return field.AsLong;
+		}
+		return fallback;
+	}
 
-	private static string OptionalString(AssetTypeValueField? field) =>
-		field == null || field.IsDummy ? "" : field.AsString;
+	private static string OptionalString(AssetTypeValueField? field)
+	{
+		if (field != null && !field.IsDummy)
+		{
+			return field.AsString;
+		}
+		return "";
+	}
 
-	public void RewriteAnimationTemplateBundle(string bundlePath, MonsterAnimationAssetRef templateAsset,
-		string targetCardId, string targetContainerPath, AnimationAtlasTextureData? textureData, byte[]? textData)
+	public void RewriteAnimationTemplateBundle(string bundlePath, MonsterAnimationAssetRef templateAsset, string targetCardId, string targetContainerPath, AnimationAtlasTextureData? textureData, byte[]? textData)
 	{
 		if (string.IsNullOrWhiteSpace(targetCardId) || !targetCardId.All(char.IsAsciiDigit))
 		{
-			throw new ArgumentException("目标卡号必须是纯数字。", nameof(targetCardId));
+			throw new ArgumentException("目标卡号必须是纯数字。", "targetCardId");
 		}
 		if (!File.Exists(bundlePath))
 		{
 			throw new FileNotFoundException("动画模板 Bundle 不存在。", bundlePath);
 		}
-		string targetName = templateAsset.Kind switch
+		string asString = templateAsset.Kind switch
 		{
 			MonsterAnimationAssetKind.Texture => "P" + targetCardId,
 			MonsterAnimationAssetKind.Atlas => "P" + targetCardId + ".atlas",
 			MonsterAnimationAssetKind.Skeleton => "P" + targetCardId + "JS",
-			_ => throw new ArgumentOutOfRangeException(nameof(templateAsset))
+			_ => throw new ArgumentOutOfRangeException("templateAsset"),
 		};
 		if (templateAsset.Kind == MonsterAnimationAssetKind.Texture && textureData == null)
 		{
-			throw new ArgumentNullException(nameof(textureData));
+			throw new ArgumentNullException("textureData");
 		}
 		if (templateAsset.Kind != MonsterAnimationAssetKind.Texture && textData == null)
 		{
-			throw new ArgumentNullException(nameof(textData));
+			throw new ArgumentNullException("textData");
 		}
-
-		string temporary = bundlePath + ".rewrite.tmp";
-		AssetsManager manager = NewManager();
+		string text = bundlePath + ".rewrite.tmp";
+		AssetsManager assetsManager = NewManager();
 		try
 		{
-			BundleFileInstance bundle = manager.LoadBundleFile(bundlePath);
-			AssetsFileInstance assets = manager.LoadAssetsFileFromBundle(bundle, templateAsset.AssetFileName);
-			EnsureDatabase(manager, assets);
-			AssetClassID classId = templateAsset.Kind == MonsterAnimationAssetKind.Texture
-				? AssetClassID.Texture2D
-				: AssetClassID.TextAsset;
-			AssetFileInfo targetInfo = assets.file.GetAssetsOfType(classId)
-				.FirstOrDefault(info => info.PathId == templateAsset.PathId)
-				?? throw new InvalidDataException("模板 Bundle 中找不到预期的动画资源。" );
-			AssetTypeValueField target = manager.GetBaseField(assets, targetInfo);
-			target["m_Name"].AsString = targetName;
+			BundleFileInstance bundleFileInstance = assetsManager.LoadBundleFile(bundlePath);
+			AssetsFileInstance assetsFileInstance = assetsManager.LoadAssetsFileFromBundle(bundleFileInstance, templateAsset.AssetFileName);
+			EnsureDatabase(assetsManager, assetsFileInstance);
+			AssetClassID typeId = ((templateAsset.Kind == MonsterAnimationAssetKind.Texture) ? AssetClassID.Texture2D : AssetClassID.TextAsset);
+			AssetFileInfo info = assetsFileInstance.file.GetAssetsOfType(typeId).FirstOrDefault((AssetFileInfo assetFileInfo) => assetFileInfo.PathId == templateAsset.PathId) ?? throw new InvalidDataException("模板 Bundle 中找不到预期的动画资源。");
+			AssetTypeValueField baseField = assetsManager.GetBaseField(assetsFileInstance, info);
+			baseField["m_Name"].AsString = asString;
 			if (templateAsset.Kind == MonsterAnimationAssetKind.Texture)
 			{
-				AnimationAtlasTextureData encoded = textureData!;
-				ConfigureTextureField(target, encoded.Width, encoded.Height, 25, encoded.Data);
+				ConfigureTextureField(baseField, textureData.Width, textureData.Height, 25, textureData.Data);
 			}
 			else
 			{
-				target["m_Script"].AsByteArray = textData!;
-				AssetTypeValueField pathName = target["m_PathName"];
-				if (pathName != null && !pathName.IsDummy && pathName.AsString.Length > 0)
+				baseField["m_Script"].AsByteArray = textData;
+				AssetTypeValueField assetTypeValueField = baseField["m_PathName"];
+				if (assetTypeValueField != null && !assetTypeValueField.IsDummy && assetTypeValueField.AsString.Length > 0)
 				{
-					pathName.AsString = Regex.Replace(pathName.AsString, "P" + Regex.Escape(templateAsset.CardId),
-						"P" + targetCardId, RegexOptions.IgnoreCase);
+					assetTypeValueField.AsString = Regex.Replace(assetTypeValueField.AsString, "P" + Regex.Escape(templateAsset.CardId), "P" + targetCardId, RegexOptions.IgnoreCase);
 				}
 			}
-
-			List<AssetsReplacer> replacements = [new AssetsReplacerFromMemory(assets.file, targetInfo, target)];
-			foreach (AssetFileInfo bundleInfo in assets.file.GetAssetsOfType(AssetClassID.AssetBundle))
+			int num = 1;
+			List<AssetsReplacer> list = new List<AssetsReplacer>(num);
+			CollectionsMarshal.SetCount(list, num);
+			Span<AssetsReplacer> span = CollectionsMarshal.AsSpan(list);
+			int num2 = 0;
+			span[num2] = new AssetsReplacerFromMemory(assetsFileInstance.file, info, baseField);
+			num2++;
+			List<AssetsReplacer> list2 = list;
+			foreach (AssetFileInfo item in assetsFileInstance.file.GetAssetsOfType(AssetClassID.AssetBundle))
 			{
-				AssetTypeValueField bundleField = manager.GetBaseField(assets, bundleInfo);
-				AssetTypeValueField container = bundleField["m_Container"]["Array"];
-				bool changed = false;
-				if (container != null && !container.IsDummy)
+				AssetTypeValueField baseField2 = assetsManager.GetBaseField(assetsFileInstance, item);
+				AssetTypeValueField assetTypeValueField2 = baseField2["m_Container"]["Array"];
+				bool flag = false;
+				if (assetTypeValueField2 != null && !assetTypeValueField2.IsDummy)
 				{
-					foreach (AssetTypeValueField child in container.Children)
+					foreach (AssetTypeValueField child in assetTypeValueField2.Children)
 					{
-						AssetTypeValueField first = child["first"];
-						if (first != null && !first.IsDummy
-							&& Regex.IsMatch(first.AsString, "(?:^|/)p" + Regex.Escape(templateAsset.CardId) + "(?:/|\\.|$)", RegexOptions.IgnoreCase))
+						AssetTypeValueField assetTypeValueField3 = child["first"];
+						if (assetTypeValueField3 != null && !assetTypeValueField3.IsDummy && Regex.IsMatch(assetTypeValueField3.AsString, "(?:^|/)p" + Regex.Escape(templateAsset.CardId) + "(?:/|\\.|$)", RegexOptions.IgnoreCase))
 						{
-							first.AsString = targetContainerPath;
-							changed = true;
+							assetTypeValueField3.AsString = targetContainerPath;
+							flag = true;
 						}
 					}
 				}
-				if (changed)
+				if (flag)
 				{
-					replacements.Add(new AssetsReplacerFromMemory(assets.file, bundleInfo, bundleField));
+					list2.Add(new AssetsReplacerFromMemory(assetsFileInstance.file, item, baseField2));
 				}
 			}
-
-			byte[] serialized;
-			using (MemoryStream stream = new())
+			byte[] buffer;
+			using (MemoryStream memoryStream = new MemoryStream())
 			{
-				using AssetsFileWriter writer = new(stream);
-				assets.file.Write(writer, 0L, replacements);
-				serialized = stream.ToArray();
+				using AssetsFileWriter writer = new AssetsFileWriter(memoryStream);
+				assetsFileInstance.file.Write(writer, 0L, list2);
+				buffer = memoryStream.ToArray();
 			}
-			using (AssetsFileWriter writer = new(temporary))
-			{
-				bundle.file.Write(writer,
-				[
-					new BundleReplacerFromMemory(assets.name, assets.name, hasSerializedData: true, serialized, -1L)
-				]);
-			}
+			using AssetsFileWriter writer2 = new AssetsFileWriter(text);
+			AssetBundleFile file = bundleFileInstance.file;
+			num2 = 1;
+			List<BundleReplacer> list3 = new List<BundleReplacer>(num2);
+			CollectionsMarshal.SetCount(list3, num2);
+			Span<BundleReplacer> span2 = CollectionsMarshal.AsSpan(list3);
+			num = 0;
+			span2[num] = new BundleReplacerFromMemory(assetsFileInstance.name, assetsFileInstance.name, hasSerializedData: true, buffer, -1L);
+			num++;
+			file.Write(writer2, list3);
 		}
 		catch
 		{
 			try
 			{
-				if (File.Exists(temporary)) File.Delete(temporary);
+				if (File.Exists(text))
+				{
+					File.Delete(text);
+				}
 			}
 			catch
 			{
@@ -1309,156 +1368,172 @@ public sealed class ModEngine
 		}
 		finally
 		{
-			manager.UnloadAll();
+			assetsManager.UnloadAll();
 		}
-		File.Move(temporary, bundlePath, overwrite: true);
+		File.Move(text, bundlePath, overwrite: true);
 	}
 
 	private static void ConfigureTextureField(AssetTypeValueField field, int width, int height, int textureFormat, byte[] pixels)
 	{
-		AssetTypeValueField widthField = field["m_Width"];
-		AssetTypeValueField heightField = field["m_Height"];
-		AssetTypeValueField formatField = field["m_TextureFormat"];
-		AssetTypeValueField imageDataField = FindTextureImageDataField(field);
-		if (widthField == null || widthField.IsDummy || heightField == null || heightField.IsDummy
-			|| formatField == null || formatField.IsDummy || imageDataField == null || imageDataField.IsDummy)
+		AssetTypeValueField assetTypeValueField = field["m_Width"];
+		AssetTypeValueField assetTypeValueField2 = field["m_Height"];
+		AssetTypeValueField assetTypeValueField3 = field["m_TextureFormat"];
+		AssetTypeValueField assetTypeValueField4 = FindTextureImageDataField(field);
+		if (assetTypeValueField == null || assetTypeValueField.IsDummy || assetTypeValueField2 == null || assetTypeValueField2.IsDummy || assetTypeValueField3 == null || assetTypeValueField3.IsDummy || assetTypeValueField4 == null || assetTypeValueField4.IsDummy)
 		{
-			throw new InvalidDataException("动画模板 Texture2D 缺少必要像素字段。" );
+			throw new InvalidDataException("动画模板 Texture2D 缺少必要像素字段。");
 		}
-		widthField.AsInt = width;
-		heightField.AsInt = height;
-		formatField.AsInt = textureFormat;
-		AssetTypeValueField mipCount = field["m_MipCount"];
-		if (mipCount != null && !mipCount.IsDummy) mipCount.AsInt = 1;
-		AssetTypeValueField completeSize = field["m_CompleteImageSize"];
-		if (completeSize != null && !completeSize.IsDummy) completeSize.AsInt = pixels.Length;
-		// Master Duel's cut-in atlases are sampled as linear PMA textures. Leaving
-		// the template's sRGB flag enabled produces dark fringes and can make a
-		// generated atlas fail the same path used by official Spine resources.
-		AssetTypeValueField colorSpace = field["m_ColorSpace"];
-		if (colorSpace != null && !colorSpace.IsDummy) colorSpace.AsInt = 0;
-		SetTextureImageData(imageDataField, pixels);
-		AssetTypeValueField streamData = field["m_StreamData"];
-		if (streamData != null && !streamData.IsDummy)
+		assetTypeValueField.AsInt = width;
+		assetTypeValueField2.AsInt = height;
+		assetTypeValueField3.AsInt = textureFormat;
+		AssetTypeValueField assetTypeValueField5 = field["m_MipCount"];
+		if (assetTypeValueField5 != null && !assetTypeValueField5.IsDummy)
 		{
-			AssetTypeValueField offset = streamData["offset"];
-			AssetTypeValueField size = streamData["size"];
-			AssetTypeValueField path = streamData["path"];
-			if (offset != null && !offset.IsDummy) offset.AsLong = 0;
-			if (size != null && !size.IsDummy) size.AsLong = 0;
-			if (path != null && !path.IsDummy) path.AsString = "";
+			assetTypeValueField5.AsInt = 1;
+		}
+		AssetTypeValueField assetTypeValueField6 = field["m_CompleteImageSize"];
+		if (assetTypeValueField6 != null && !assetTypeValueField6.IsDummy)
+		{
+			assetTypeValueField6.AsInt = pixels.Length;
+		}
+		AssetTypeValueField assetTypeValueField7 = field["m_ColorSpace"];
+		if (assetTypeValueField7 != null && !assetTypeValueField7.IsDummy)
+		{
+			assetTypeValueField7.AsInt = 0;
+		}
+		SetTextureImageData(assetTypeValueField4, pixels);
+		AssetTypeValueField assetTypeValueField8 = field["m_StreamData"];
+		if (assetTypeValueField8 != null && !assetTypeValueField8.IsDummy)
+		{
+			AssetTypeValueField assetTypeValueField9 = assetTypeValueField8["offset"];
+			AssetTypeValueField assetTypeValueField10 = assetTypeValueField8["size"];
+			AssetTypeValueField assetTypeValueField11 = assetTypeValueField8["path"];
+			if (assetTypeValueField9 != null && !assetTypeValueField9.IsDummy)
+			{
+				assetTypeValueField9.AsLong = 0L;
+			}
+			if (assetTypeValueField10 != null && !assetTypeValueField10.IsDummy)
+			{
+				assetTypeValueField10.AsLong = 0L;
+			}
+			if (assetTypeValueField11 != null && !assetTypeValueField11.IsDummy)
+			{
+				assetTypeValueField11.AsString = "";
+			}
 		}
 	}
 
-	private void ReplaceTextureData(TexRef texture, int width, int height, int textureFormat, byte[] pixels,
-		string backupRoot, bool forceLinearColorSpace = false)
+	private void ReplaceTextureData(TexRef texture, int width, int height, int textureFormat, byte[] pixels, string backupRoot, bool forceLinearColorSpace = false)
 	{
 		TexRef resolved = ResolveTextureReference(texture) ?? throw new InvalidDataException($"当前 Bundle 中找不到可写入的 Texture2D：{texture.Name}（卡号 {texture.CardKey}）。");
 		ApplyResolvedReference(texture, resolved);
-		string targetPath = texture.ActiveBundlePath;
-		string backup = Path.Combine(backupRoot, texture.RelativeBundlePath);
-		Directory.CreateDirectory(Path.GetDirectoryName(backup) ?? backupRoot);
-		if (!File.Exists(backup))
+		string activeBundlePath = texture.ActiveBundlePath;
+		string text = Path.Combine(backupRoot, texture.RelativeBundlePath);
+		Directory.CreateDirectory(Path.GetDirectoryName(text) ?? backupRoot);
+		if (!File.Exists(text))
 		{
-			File.Copy(targetPath, backup);
+			File.Copy(activeBundlePath, text);
 		}
-		string temporary = targetPath + ".mdcardtool.tmp";
-		AssetsManager manager = NewManager();
+		string text2 = activeBundlePath + ".mdcardtool.tmp";
+		AssetsManager assetsManager = NewManager();
 		try
 		{
-			BundleFileInstance bundle = manager.LoadBundleFile(targetPath);
-			AssetsFileInstance assets = manager.LoadAssetsFileFromBundle(bundle, texture.AssetFileName);
-			EnsureDatabase(manager, assets);
-			AssetFileInfo info = assets.file.GetAssetsOfType(AssetClassID.Texture2D).First((AssetFileInfo x) => x.PathId == texture.PathId);
-			AssetTypeValueField field = manager.GetBaseField(assets, info);
-			AssetTypeValueField widthField = field["m_Width"];
-			if (widthField == null || widthField.IsDummy)
+			BundleFileInstance bundleFileInstance = assetsManager.LoadBundleFile(activeBundlePath);
+			AssetsFileInstance assetsFileInstance = assetsManager.LoadAssetsFileFromBundle(bundleFileInstance, texture.AssetFileName);
+			EnsureDatabase(assetsManager, assetsFileInstance);
+			AssetFileInfo info = assetsFileInstance.file.GetAssetsOfType(AssetClassID.Texture2D).First((AssetFileInfo x) => x.PathId == texture.PathId);
+			AssetTypeValueField baseField = assetsManager.GetBaseField(assetsFileInstance, info);
+			AssetTypeValueField assetTypeValueField = baseField["m_Width"];
+			if (assetTypeValueField == null || assetTypeValueField.IsDummy)
 			{
-				goto IL_01c6;
+				goto IL_0383;
 			}
-			AssetTypeValueField heightField = field["m_Height"];
-			if (heightField == null || heightField.IsDummy)
+			AssetTypeValueField assetTypeValueField2 = baseField["m_Height"];
+			if (assetTypeValueField2 == null || assetTypeValueField2.IsDummy)
 			{
-				goto IL_01c6;
+				goto IL_0383;
 			}
-			AssetTypeValueField formatField = field["m_TextureFormat"];
-			if (formatField == null || formatField.IsDummy)
+			AssetTypeValueField assetTypeValueField3 = baseField["m_TextureFormat"];
+			if (assetTypeValueField3 == null || assetTypeValueField3.IsDummy)
 			{
-				goto IL_01c6;
+				goto IL_0383;
 			}
-			AssetTypeValueField imageDataField = FindTextureImageDataField(field);
-			if (imageDataField == null || imageDataField.IsDummy)
+			AssetTypeValueField assetTypeValueField4 = FindTextureImageDataField(baseField);
+			if (assetTypeValueField4 == null || assetTypeValueField4.IsDummy)
 			{
-				goto IL_01c6;
+				goto IL_0383;
 			}
-			widthField.AsInt = width;
-			heightField.AsInt = height;
-			formatField.AsInt = textureFormat;
-			AssetTypeValueField mipCountField = field["m_MipCount"];
-			if (mipCountField != null && !mipCountField.IsDummy)
+			assetTypeValueField.AsInt = width;
+			assetTypeValueField2.AsInt = height;
+			assetTypeValueField3.AsInt = textureFormat;
+			AssetTypeValueField assetTypeValueField5 = baseField["m_MipCount"];
+			if (assetTypeValueField5 != null && !assetTypeValueField5.IsDummy)
 			{
-				mipCountField.AsInt = 1;
+				assetTypeValueField5.AsInt = 1;
 			}
-			AssetTypeValueField size = field["m_CompleteImageSize"];
-			if (size != null && !size.IsDummy)
+			AssetTypeValueField assetTypeValueField6 = baseField["m_CompleteImageSize"];
+			if (assetTypeValueField6 != null && !assetTypeValueField6.IsDummy)
 			{
-				size.AsInt = pixels.Length;
+				assetTypeValueField6.AsInt = pixels.Length;
 			}
 			if (forceLinearColorSpace)
 			{
-				AssetTypeValueField colorSpace = field["m_ColorSpace"];
-				if (colorSpace != null && !colorSpace.IsDummy) colorSpace.AsInt = 0;
-			}
-			SetTextureImageData(imageDataField, pixels);
-			AssetTypeValueField streamData = field["m_StreamData"];
-			if (streamData != null && !streamData.IsDummy)
-			{
-				AssetTypeValueField offsetField = streamData["offset"];
-				if (offsetField != null && !offsetField.IsDummy)
+				AssetTypeValueField assetTypeValueField7 = baseField["m_ColorSpace"];
+				if (assetTypeValueField7 != null && !assetTypeValueField7.IsDummy)
 				{
-					offsetField.AsLong = 0L;
-				}
-				AssetTypeValueField streamSizeField = streamData["size"];
-				if (streamSizeField != null && !streamSizeField.IsDummy)
-				{
-					streamSizeField.AsLong = 0L;
-				}
-				AssetTypeValueField pathField = streamData["path"];
-				if (pathField != null && !pathField.IsDummy)
-				{
-					pathField.AsString = "";
+					assetTypeValueField7.AsInt = 0;
 				}
 			}
-			List<AssetsReplacer> replacements = new List<AssetsReplacer>
+			SetTextureImageData(assetTypeValueField4, pixels);
+			AssetTypeValueField assetTypeValueField8 = baseField["m_StreamData"];
+			if (assetTypeValueField8 != null && !assetTypeValueField8.IsDummy)
 			{
-				new AssetsReplacerFromMemory(assets.file, info, field)
+				AssetTypeValueField assetTypeValueField9 = assetTypeValueField8["offset"];
+				if (assetTypeValueField9 != null && !assetTypeValueField9.IsDummy)
+				{
+					assetTypeValueField9.AsLong = 0L;
+				}
+				AssetTypeValueField assetTypeValueField10 = assetTypeValueField8["size"];
+				if (assetTypeValueField10 != null && !assetTypeValueField10.IsDummy)
+				{
+					assetTypeValueField10.AsLong = 0L;
+				}
+				AssetTypeValueField assetTypeValueField11 = assetTypeValueField8["path"];
+				if (assetTypeValueField11 != null && !assetTypeValueField11.IsDummy)
+				{
+					assetTypeValueField11.AsString = "";
+				}
+			}
+			List<AssetsReplacer> replacers = new List<AssetsReplacer>
+			{
+				new AssetsReplacerFromMemory(assetsFileInstance.file, info, baseField)
 			};
-			byte[] serialized;
-			using (MemoryStream stream = new MemoryStream())
+			byte[] buffer;
+			using (MemoryStream memoryStream = new MemoryStream())
 			{
-				using AssetsFileWriter writer = new AssetsFileWriter(stream);
-				assets.file.Write(writer, 0L, replacements);
-				serialized = stream.ToArray();
+				using AssetsFileWriter writer = new AssetsFileWriter(memoryStream);
+				assetsFileInstance.file.Write(writer, 0L, replacers);
+				buffer = memoryStream.ToArray();
 			}
-			using (AssetsFileWriter bundleWriter = new AssetsFileWriter(temporary))
+			using (AssetsFileWriter writer2 = new AssetsFileWriter(text2))
 			{
-				bundle.file.Write(bundleWriter, new List<BundleReplacer>
+				bundleFileInstance.file.Write(writer2, new List<BundleReplacer>
 				{
-					new BundleReplacerFromMemory(assets.name, assets.name, hasSerializedData: true, serialized, -1L)
+					new BundleReplacerFromMemory(assetsFileInstance.name, assetsFileInstance.name, hasSerializedData: true, buffer, -1L)
 				});
 			}
-			goto end_IL_00f5;
-			IL_01c6:
+			goto end_IL_00de;
+			IL_0383:
 			throw new InvalidDataException("当前手工 Mod 的 Texture2D 缺少必要像素字段，无法安全写入。");
-			end_IL_00f5:;
+			end_IL_00de:;
 		}
 		catch
 		{
 			try
 			{
-				if (File.Exists(temporary))
+				if (File.Exists(text2))
 				{
-					File.Delete(temporary);
+					File.Delete(text2);
 				}
 			}
 			catch
@@ -1468,9 +1543,9 @@ public sealed class ModEngine
 		}
 		finally
 		{
-			manager.UnloadAll();
+			assetsManager.UnloadAll();
 		}
-		File.Move(temporary, targetPath, overwrite: true);
+		File.Move(text2, activeBundlePath, overwrite: true);
 		texture.Width = width;
 		texture.Height = height;
 		texture.Category = CategoryForSource(texture.Name, width, height, texture.SourceKind);
@@ -1478,7 +1553,7 @@ public sealed class ModEngine
 
 	public (int Width, int Height) ImageDimensions(string imagePath)
 	{
-		ImageInfo info = Image.Identify(imagePath) ?? throw new InvalidDataException("无法读取图片尺寸。");
-		return (Width: info.Width, Height: info.Height);
+		ImageInfo imageInfo = Image.Identify(imagePath) ?? throw new InvalidDataException("无法读取图片尺寸。");
+		return (Width: imageInfo.Width, Height: imageInfo.Height);
 	}
 }

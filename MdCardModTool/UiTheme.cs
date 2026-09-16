@@ -50,8 +50,10 @@ public static class UiTheme
 	[DllImport("dwmapi.dll")]
 	private static extern int DwmSetWindowAttribute(nint hwnd, int attribute, ref int value, int size);
 
-	public static int Scale(Control control, int logicalPixels) =>
-		Math.Max(1, (int)Math.Round(logicalPixels * Math.Max(96, control.DeviceDpi) / 96d));
+	public static int Scale(Control control, int logicalPixels)
+	{
+		return Math.Max(1, (int)Math.Round((double)(logicalPixels * Math.Max(96, control.DeviceDpi)) / 96.0));
+	}
 
 	public static void QueueStableRepaint(Control root)
 	{
@@ -63,25 +65,15 @@ public static class UiTheme
 		{
 			root.BeginInvoke((MethodInvoker)delegate
 			{
-				if (root.IsDisposed || !root.IsHandleCreated)
+				if (!root.IsDisposed && root.IsHandleCreated)
 				{
-					return;
+					root.PerformLayout();
+					root.Invalidate(invalidateChildren: true);
 				}
-				// Per-monitor DPI and nested TableLayoutPanel containers settle over more
-				// than one layout wave.  Repaint the complete descendant tree only after
-				// that wave so pixels from the former child bounds cannot survive.
-				root.PerformLayout();
-				root.Invalidate(true);
-				// Do not synchronously Update here. QueueStableRepaint is commonly called
-				// from page switches and async preview completion; forcing WM_PAINT before
-				// the remaining layout messages have drained is what allows old child
-				// bounds to be painted into the new layout. The normal message loop now
-				// performs the final paint after this callback returns.
 			});
 		}
 		catch (InvalidOperationException)
 		{
-			// The window may be closing between the handle check and BeginInvoke.
 		}
 	}
 
@@ -102,7 +94,7 @@ public static class UiTheme
 		box.DrawMode = DrawMode.OwnerDrawFixed;
 		box.ItemHeight = 24;
 		box.IntegralHeight = false;
-		box.DropDownHeight = 24 * 9;
+		box.DropDownHeight = 216;
 		box.Font = new Font("Microsoft YaHei UI", 9f);
 		box.DrawItem += delegate(object? _, DrawItemEventArgs e)
 		{
@@ -112,11 +104,9 @@ public static class UiTheme
 			}
 			bool flag = (e.State & DrawItemState.Selected) != 0;
 			using SolidBrush brush = new SolidBrush(flag ? Selection : SurfaceAlt);
-			using SolidBrush brush2 = new SolidBrush(flag ? Color.White : Text);
+			using SolidBrush solidBrush = new SolidBrush(flag ? Color.White : Text);
 			e.Graphics.FillRectangle(brush, e.Bounds);
-			TextRenderer.DrawText(e.Graphics, box.Items[e.Index]?.ToString() ?? "", box.Font,
-				new Rectangle(e.Bounds.X + 9, e.Bounds.Y, Math.Max(1, e.Bounds.Width - 38), e.Bounds.Height),
-				brush2.Color, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+			TextRenderer.DrawText(e.Graphics, box.Items[e.Index]?.ToString() ?? "", box.Font, new Rectangle(e.Bounds.X + 9, e.Bounds.Y, Math.Max(1, e.Bounds.Width - 38), e.Bounds.Height), solidBrush.Color, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.VerticalCenter);
 		};
 	}
 
@@ -180,86 +170,65 @@ public static class UiTheme
 
 	public static Button Button(string text, EventHandler click, ButtonTone tone = ButtonTone.Neutral)
 	{
-		Color normal = tone switch
+		Color color = tone switch
 		{
 			ButtonTone.Primary => PrimaryDark,
 			ButtonTone.Gold => Color.FromArgb(132, 100, 42),
 			ButtonTone.Danger => Color.FromArgb(102, 45, 59),
 			_ => Elevated,
 		};
-		Color hover = tone switch
+		Color hoverColor = tone switch
 		{
 			ButtonTone.Primary => Color.FromArgb(38, 148, 203),
 			ButtonTone.Gold => Color.FromArgb(160, 121, 49),
 			ButtonTone.Danger => Danger,
 			_ => Color.FromArgb(34, 53, 81),
 		};
-		Color border = tone switch
+		Color borderColor = tone switch
 		{
 			ButtonTone.Primary => Primary,
 			ButtonTone.Gold => Gold,
 			ButtonTone.Danger => Color.FromArgb(226, 112, 128),
 			_ => Border,
 		};
-		RoundedButton button = new RoundedButton();
-		button.Text = text;
-		button.AutoSize = true;
-		button.Height = 34;
-		button.MinimumSize = new Size(0, 34);
-		button.Padding = new Padding(12, 0, 12, 0);
-		button.Margin = new Padding(5, 4, 0, 4);
-		button.NormalColor = normal;
-		button.HoverColor = hover;
-		button.BackColor = normal;
-		button.ForeColor = Text;
-		button.Cursor = Cursors.Hand;
-		Button button2 = button;
+		RoundedButton obj = new RoundedButton
+		{
+			Text = text,
+			AutoSize = true,
+			Height = 34,
+			MinimumSize = new Size(0, 34),
+			Padding = new Padding(12, 0, 12, 0),
+			Margin = new Padding(5, 4, 0, 4),
+			NormalColor = color,
+			HoverColor = hoverColor,
+			BackColor = color,
+			ForeColor = Text,
+			Cursor = Cursors.Hand
+		};
 		bool flag = (uint)(tone - 1) <= 1u;
-		button2.Font = new Font("Microsoft YaHei UI", 9f, flag ? FontStyle.Bold : FontStyle.Regular);
-		RoundedButton button3 = button;
-		button3.BorderColor = border;
-		button3.Click += click;
-		return button3;
+		obj.Font = new Font("Microsoft YaHei UI", 9f, flag ? FontStyle.Bold : FontStyle.Regular);
+		obj.BorderColor = borderColor;
+		obj.Click += click;
+		return obj;
 	}
 
-	public static RoundedField Field(Control control) => new(control) { Dock = DockStyle.Fill };
+	public static RoundedField Field(Control control)
+	{
+		return new RoundedField(control)
+		{
+			Dock = DockStyle.Fill
+		};
+	}
 
 	public static GraphicsPath RoundedPath(Rectangle bounds, int radius)
 	{
-		int diameter = Math.Max(1, Math.Min(Math.Min(bounds.Width, bounds.Height), radius * 2));
-		GraphicsPath path = new();
-		path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180, 90);
-		path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270, 90);
-		path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
-		path.AddArc(bounds.Left, bounds.Bottom - diameter, diameter, diameter, 90, 90);
-		path.CloseFigure();
-		return path;
-	}
-}
-
-internal static class GraphicsRoundedExtensions
-{
-	public static void FillRoundedRectangle(this Graphics graphics, Brush brush, RectangleF bounds, float radius)
-	{
-		using GraphicsPath path = Rounded(bounds, radius);
-		graphics.FillPath(brush, path);
-	}
-
-	public static void DrawRoundedRectangle(this Graphics graphics, Pen pen, RectangleF bounds, float radius)
-	{
-		using GraphicsPath path = Rounded(bounds, radius);
-		graphics.DrawPath(pen, path);
-	}
-
-	private static GraphicsPath Rounded(RectangleF bounds, float radius)
-	{
-		float diameter = Math.Max(1, Math.Min(Math.Min(bounds.Width, bounds.Height), radius * 2));
-		GraphicsPath path = new();
-		path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180, 90);
-		path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270, 90);
-		path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
-		path.AddArc(bounds.Left, bounds.Bottom - diameter, diameter, diameter, 90, 90);
-		path.CloseFigure();
-		return path;
+		int num = Math.Max(1, Math.Min(Math.Min(bounds.Width, bounds.Height), radius * 2));
+		GraphicsPath graphicsPath = new GraphicsPath();
+		graphicsPath.AddArc(bounds.Left, bounds.Top, num, num, 180f, 90f);
+		graphicsPath.AddArc(bounds.Right - num, bounds.Top, num, num, 270f, 90f);
+		graphicsPath.AddArc(bounds.Right - num, bounds.Bottom - num, num, num, 0f, 90f);
+		graphicsPath.AddArc(bounds.Left, bounds.Bottom - num, num, num, 90f, 90f);
+		graphicsPath.CloseFigure();
+		return graphicsPath;
 	}
 }

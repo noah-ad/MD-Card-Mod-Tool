@@ -11,126 +11,218 @@ using SixLabors.ImageSharp.PixelFormats;
 
 namespace MdCardModTool;
 
-/// <summary>Replaces an existing cut-in as a complete paired rig, never mixes individual limbs.</summary>
 public static class MonsterAnimationTransferService
 {
 	public static int Replace(string gameRoot, MonsterAnimationSet target, MonsterAnimationSet donor, Action<int>? afterCommit = null)
 	{
 		EnsureGameClosed();
 		AnimationWriteLease.Preflight(target);
-		if (target.CardId == donor.CardId) throw new InvalidOperationException("来源卡与目标卡不能相同。");
-		var targets = MonsterAnimationAssetPairing.FindComplete(target);
-		var sources = MonsterAnimationAssetPairing.FindComplete(donor);
-		if (!targets.Any(x => x.Tier == "SD") || !targets.Any(x => x.Tier == "HighEnd_HD"))
+		if (target.CardId == donor.CardId)
+		{
+			throw new InvalidOperationException("来源卡与目标卡不能相同。");
+		}
+		IReadOnlyList<MonsterAnimationAssetTriplet> readOnlyList = MonsterAnimationAssetPairing.FindComplete(target);
+		IReadOnlyList<MonsterAnimationAssetTriplet> source = MonsterAnimationAssetPairing.FindComplete(donor);
+		if (readOnlyList.Count == 0 || (!target.IsMobile && (!readOnlyList.Any((MonsterAnimationAssetTriplet x) => x.Tier == "SD") || !readOnlyList.Any((MonsterAnimationAssetTriplet x) => x.Tier == "HighEnd_HD"))))
+		{
 			throw new InvalidOperationException("目标卡必须已有完整 HD/SD 原生动画；此操作不会为无动画卡创建召唤触发。");
-		ModEngine engine = new();
-		string stage = Path.Combine(Path.GetDirectoryName(targets[0].Texture.BundlePath)!, ".md-animation-" + Guid.NewGuid().ToString("N"));
+		}
+		ModEngine engine = new ModEngine();
+		string stage = Path.Combine(Path.GetDirectoryName(readOnlyList[0].Texture.BundlePath), ".md-animation-" + Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(stage);
-		var pending = new Dictionary<string, (MonsterAnimationAssetRef Original, MonsterAnimationAssetRef Staged, string Snapshot, string Hash)>(StringComparer.OrdinalIgnoreCase);
-		var encoded = new Dictionary<string, AnimationAtlasTextureData>(StringComparer.OrdinalIgnoreCase);
-		bool preserveRecovery = false;
+		Dictionary<string, (MonsterAnimationAssetRef Original, MonsterAnimationAssetRef Staged, string Snapshot, string Hash)> pending = new Dictionary<string, (MonsterAnimationAssetRef, MonsterAnimationAssetRef, string, string)>(StringComparer.OrdinalIgnoreCase);
+		Dictionary<string, AnimationAtlasTextureData> dictionary = new Dictionary<string, AnimationAtlasTextureData>(StringComparer.OrdinalIgnoreCase);
+		bool flag = false;
 		try
 		{
-			foreach (var pair in targets)
+			foreach (MonsterAnimationAssetTriplet pair in readOnlyList)
 			{
-				var source = sources.Where(x => x.Tier == pair.Tier)
-					.OrderByDescending(x => x.Region == pair.Region).ThenByDescending(x => x.Scale == pair.Scale).FirstOrDefault()
-					?? throw new InvalidDataException("来源卡缺少 " + pair.Tier + " 动画。");
-				if (!encoded.TryGetValue(source.Texture.BundlePath, out var texture))
+				MonsterAnimationAssetTriplet monsterAnimationAssetTriplet = (from x in source
+					where x.Tier == pair.Tier
+					orderby x.Region == pair.Region descending, x.Scale == pair.Scale descending
+					select x).FirstOrDefault() ?? throw new InvalidDataException("来源卡缺少 " + pair.Tier + " 动画。");
+				if (!dictionary.TryGetValue(monsterAnimationAssetTriplet.Texture.BundlePath, out var texture))
 				{
-					using Image<Rgba32> image = Image.Load<Rgba32>(engine.DecodePng(source.Texture.AsTexture()));
-					texture = engine.EncodeAnimationAtlas(image);
-					encoded.Add(source.Texture.BundlePath, texture);
+					using Image<Rgba32> atlas = Image.Load<Rgba32>(engine.DecodePng(monsterAnimationAssetTriplet.Texture.AsTexture()));
+					texture = engine.EncodeAnimationAtlas(atlas, ResourceSource.IsMobile(gameRoot));
+					dictionary.Add(monsterAnimationAssetTriplet.Texture.BundlePath, texture);
 				}
-				string atlas = Encoding.UTF8.GetString(engine.ReadTextAsset(source.Atlas).Data).TrimEnd('\0').Replace("\r", "");
-				string[] lines = atlas.Split('\n');
-				if (lines.Count(line => line.Trim().EndsWith(".png", StringComparison.OrdinalIgnoreCase)) != 1)
+				string text = Encoding.UTF8.GetString(engine.ReadTextAsset(monsterAnimationAssetTriplet.Atlas).Data).TrimEnd('\0').Replace("\r", "");
+				string[] lines = text.Split('\n');
+				if (lines.Count((string line) => line.Trim().EndsWith(".png", StringComparison.OrdinalIgnoreCase)) != 1)
+				{
 					throw new InvalidDataException("来源动画使用多页图集，当前不能整套移植；可预览，或向该卡导入视频替换。");
-				int page = Array.FindIndex(lines, x => !string.IsNullOrWhiteSpace(x));
-				if (page < 0) throw new InvalidDataException("来源 Atlas 为空。");
-				lines[page] = pair.Texture.Name + ".png";
-				var sourceJson = JsonNode.Parse(Encoding.UTF8.GetString(engine.ReadTextAsset(source.Skeleton).Data).TrimEnd('\0'))!.AsObject();
-				var targetTemplate = MonsterAnimationTemplate.Parse(engine.ReadTextAsset(pair.Skeleton).Data);
-				var sourceTemplate = MonsterAnimationTemplate.Parse(Encoding.UTF8.GetBytes(sourceJson.ToJsonString()));
-				if (sourceTemplate.SpineVersion.Split('.')[0..2].SequenceEqual(targetTemplate.SpineVersion.Split('.')[0..2]) == false)
+				}
+				int num = Array.FindIndex(lines, (string x) => !string.IsNullOrWhiteSpace(x));
+				if (num < 0)
+				{
+					throw new InvalidDataException("来源 Atlas 为空。");
+				}
+				lines[num] = pair.Texture.Name + ".png";
+				JsonObject sourceJson = JsonNode.Parse(Encoding.UTF8.GetString(engine.ReadTextAsset(monsterAnimationAssetTriplet.Skeleton).Data).TrimEnd('\0')).AsObject();
+				MonsterAnimationTemplate monsterAnimationTemplate = MonsterAnimationTemplate.Parse(engine.ReadTextAsset(pair.Skeleton).Data);
+				if (!MonsterAnimationTemplate.Parse(Encoding.UTF8.GetBytes(sourceJson.ToJsonString())).SpineVersion.Split('.')[0..2].SequenceEqual(monsterAnimationTemplate.SpineVersion.Split('.')[0..2]))
+				{
 					throw new InvalidDataException("来源与目标的 Spine 主次版本不兼容。");
-				var animations = sourceJson["animations"]!.AsObject();
-				JsonNode first = animations.First().Value ?? throw new InvalidDataException("来源动画为空。");
-				foreach (string name in targetTemplate.EffectiveAnimationNames)
-					if (!animations.ContainsKey(name)) animations[name] = first.DeepClone();
-				Prepare(pair.Texture, temp => engine.ReplaceAnimationAtlas(temp, texture, Path.Combine(stage, "work-backups")));
-				Prepare(pair.Atlas, temp => engine.ReplaceTextAsset(engine.ReadTextAsset(temp), Encoding.UTF8.GetBytes(string.Join("\n", lines)), Path.Combine(stage, "work-backups")));
-				Prepare(pair.Skeleton, temp => engine.ReplaceTextAsset(engine.ReadTextAsset(temp), Encoding.UTF8.GetBytes(sourceJson.ToJsonString()), Path.Combine(stage, "work-backups")));
+				}
+				JsonObject jsonObject = sourceJson["animations"].AsObject();
+				JsonNode jsonNode = jsonObject.First().Value ?? throw new InvalidDataException("来源动画为空。");
+				foreach (string effectiveAnimationName in monsterAnimationTemplate.EffectiveAnimationNames)
+				{
+					if (!jsonObject.ContainsKey(effectiveAnimationName))
+					{
+						jsonObject[effectiveAnimationName] = jsonNode.DeepClone();
+					}
+				}
+				Prepare(pair.Texture, delegate(MonsterAnimationAssetRef temp)
+				{
+					engine.ReplaceAnimationAtlas(temp, texture, Path.Combine(stage, "work-backups"));
+				});
+				Prepare(pair.Atlas, delegate(MonsterAnimationAssetRef temp)
+				{
+					engine.ReplaceTextAsset(engine.ReadTextAsset(temp), Encoding.UTF8.GetBytes(string.Join("\n", lines)), Path.Combine(stage, "work-backups"));
+				});
+				Prepare(pair.Skeleton, delegate(MonsterAnimationAssetRef temp)
+				{
+					engine.ReplaceTextAsset(engine.ReadTextAsset(temp), Encoding.UTF8.GetBytes(sourceJson.ToJsonString()), Path.Combine(stage, "work-backups"));
+				});
 			}
-			var stagedSet = new MonsterAnimationSet { CardId = target.CardId, Assets = pending.Values.Select(x => x.Staged).ToList() };
-			var stagedPairs = MonsterAnimationAssetPairing.FindComplete(stagedSet);
-			if (stagedPairs.Count != targets.Count) throw new InvalidDataException("临时资源的配对校验失败。");
-			foreach (var pair in stagedPairs)
+			IReadOnlyList<MonsterAnimationAssetTriplet> readOnlyList2 = MonsterAnimationAssetPairing.FindComplete(new MonsterAnimationSet
 			{
-				using Image image = Image.Load(engine.DecodePng(pair.Texture.AsTexture()));
-				string atlas = Encoding.UTF8.GetString(engine.ReadTextAsset(pair.Atlas).Data).TrimStart('\r', '\n');
-				if (!atlas.StartsWith(pair.Texture.Name + ".png", StringComparison.Ordinal)) throw new InvalidDataException("图集页名不匹配。");
-				_ = MonsterAnimationTemplate.Parse(engine.ReadTextAsset(pair.Skeleton).Data);
+				CardId = target.CardId,
+				Assets = pending.Values.Select<(MonsterAnimationAssetRef, MonsterAnimationAssetRef, string, string), MonsterAnimationAssetRef>(((MonsterAnimationAssetRef Original, MonsterAnimationAssetRef Staged, string Snapshot, string Hash) x) => x.Staged).ToList()
+			});
+			if (readOnlyList2.Count != readOnlyList.Count)
+			{
+				throw new InvalidDataException("临时资源的配对校验失败。");
+			}
+			foreach (MonsterAnimationAssetTriplet item in readOnlyList2)
+			{
+				using (Image.Load(engine.DecodePng(item.Texture.AsTexture())))
+				{
+					if (!Encoding.UTF8.GetString(engine.ReadTextAsset(item.Atlas).Data).TrimStart('\r', '\n').StartsWith(item.Texture.Name + ".png", StringComparison.Ordinal))
+					{
+						throw new InvalidDataException("图集页名不匹配。");
+					}
+					MonsterAnimationTemplate.Parse(engine.ReadTextAsset(item.Skeleton).Data);
+				}
 			}
 			EnsureGameClosed();
-			foreach (var item in pending.Values)
+			foreach (var value in pending.Values)
 			{
-				if (Hash(item.Original.BundlePath) != item.Hash) throw new IOException("目标动画在制作期间被其他程序修改，请重新加载。");
-				string backup = Path.Combine(gameRoot, "_MD卡图备份", item.Original.ModSourceKind, item.Original.RelativeBundlePath);
-				Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
-				if (!File.Exists(backup)) File.Copy(item.Snapshot, backup);
-			}
-			var committed = new List<(string Path, string Snapshot)>();
-			using var lease = AnimationWriteLease.Acquire(pending.Keys);
-			foreach (var item in pending.Values)
-				if (Convert.ToHexString(SHA256.HashData(lease.Streams[item.Original.BundlePath])) != item.Hash)
-					throw new IOException("目标动画在制作期间已改变，未提交，请重新载入。");
-			try
-			{
-				foreach (var item in pending.Values)
+				if (Hash(value.Original.BundlePath) != value.Hash)
 				{
-					File.Replace(item.Staged.BundlePath, item.Original.BundlePath, null);
-					committed.Add((item.Original.BundlePath, item.Snapshot));
-					afterCommit?.Invoke(committed.Count);
+					throw new IOException("目标动画在制作期间被其他程序修改，请重新加载。");
+				}
+				string text2 = Path.Combine(gameRoot, "_MD卡图备份", value.Original.ModSourceKind, value.Original.RelativeBundlePath);
+				Directory.CreateDirectory(Path.GetDirectoryName(text2));
+				if (!File.Exists(text2))
+				{
+					File.Copy(value.Snapshot, text2);
 				}
 			}
-			catch (Exception commitError)
+			List<(string, string)> list = new List<(string, string)>();
+			using AnimationWriteLease animationWriteLease = AnimationWriteLease.Acquire(pending.Keys);
+			foreach (var value2 in pending.Values)
 			{
-				try { foreach (var item in committed) File.Copy(item.Snapshot, item.Path, overwrite: true); }
-				catch (Exception restoreError)
+				if (Convert.ToHexString(SHA256.HashData(animationWriteLease.Streams[value2.Original.BundlePath])) != value2.Hash)
 				{
-					preserveRecovery = true;
-					throw new AggregateException("提交与回滚失败；恢复副本保留于 " + stage, commitError, restoreError);
+					throw new IOException("目标动画在制作期间已改变，未提交，请重新载入。");
+				}
+			}
+			try
+			{
+				foreach (var value3 in pending.Values)
+				{
+					File.Replace(value3.Staged.BundlePath, value3.Original.BundlePath, null);
+					list.Add((value3.Original.BundlePath, value3.Snapshot));
+					afterCommit?.Invoke(list.Count);
+				}
+			}
+			catch (Exception ex)
+			{
+				try
+				{
+					foreach (var item2 in list)
+					{
+						File.Copy(item2.Item2, item2.Item1, overwrite: true);
+					}
+				}
+				catch (Exception ex2)
+				{
+					flag = true;
+					throw new AggregateException("提交与回滚失败；恢复副本保留于 " + stage, ex, ex2);
 				}
 				throw;
 			}
 			return pending.Count;
-
-			void Prepare(MonsterAnimationAssetRef asset, Action<MonsterAnimationAssetRef> write)
+		}
+		finally
+		{
+			if (!flag)
 			{
-				if (pending.ContainsKey(asset.BundlePath)) return;
-				string file = Path.Combine(stage, pending.Count + ".bundle");
-				string snapshot = file + ".original";
-				File.Copy(asset.BundlePath, snapshot);
-				File.Copy(snapshot, file);
-				var temp = AtPath(asset, file);
-				pending.Add(asset.BundlePath, (asset, temp, snapshot, Hash(snapshot)));
-				write(temp);
+				try
+				{
+					Directory.Delete(stage, recursive: true);
+				}
+				catch
+				{
+				}
 			}
 		}
-		finally { if (!preserveRecovery) { try { Directory.Delete(stage, recursive: true); } catch { } } }
+		void Prepare(MonsterAnimationAssetRef asset, Action<MonsterAnimationAssetRef> write)
+		{
+			if (!pending.ContainsKey(asset.BundlePath))
+			{
+				string text3 = Path.Combine(stage, pending.Count + ".bundle");
+				string text4 = text3 + ".original";
+				File.Copy(asset.BundlePath, text4);
+				File.Copy(text4, text3);
+				MonsterAnimationAssetRef monsterAnimationAssetRef = AtPath(asset, text3);
+				pending.Add(asset.BundlePath, (asset, monsterAnimationAssetRef, text4, Hash(text4)));
+				write(monsterAnimationAssetRef);
+			}
+		}
 	}
 
-	internal static MonsterAnimationAssetRef AtPath(MonsterAnimationAssetRef asset, string path) => new()
+	internal static MonsterAnimationAssetRef AtPath(MonsterAnimationAssetRef asset, string path)
 	{
-		BundlePath = path, RelativeBundlePath = asset.RelativeBundlePath, AssetFileName = asset.AssetFileName,
-		PathId = asset.PathId, Name = asset.Name, CardId = asset.CardId, Kind = asset.Kind, StorageKind = asset.StorageKind
-	};
-	private static string Hash(string path) { using var file = File.OpenRead(path); return Convert.ToHexString(SHA256.HashData(file)); }
+		return new MonsterAnimationAssetRef
+		{
+			BundlePath = path,
+			RelativeBundlePath = asset.RelativeBundlePath,
+			AssetFileName = asset.AssetFileName,
+			PathId = asset.PathId,
+			Name = asset.Name,
+			CardId = asset.CardId,
+			Kind = asset.Kind,
+			StorageKind = asset.StorageKind
+		};
+	}
+
+	private static string Hash(string path)
+	{
+		using FileStream source = File.OpenRead(path);
+		return Convert.ToHexString(SHA256.HashData(source));
+	}
+
 	private static void EnsureGameClosed()
 	{
-		var games = Process.GetProcessesByName("masterduel");
-		try { if (games.Length != 0) throw new InvalidOperationException("请完全退出 Master Duel 后再替换动画。"); }
-		finally { foreach (var game in games) game.Dispose(); }
+		Process[] processesByName = Process.GetProcessesByName("masterduel");
+		try
+		{
+			if (processesByName.Length != 0)
+			{
+				throw new InvalidOperationException("请完全退出 Master Duel 后再替换动画。");
+			}
+		}
+		finally
+		{
+			Process[] array = processesByName;
+			for (int i = 0; i < array.Length; i++)
+			{
+				array[i].Dispose();
+			}
+		}
 	}
 }

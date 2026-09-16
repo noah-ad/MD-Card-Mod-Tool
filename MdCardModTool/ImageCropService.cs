@@ -19,11 +19,11 @@ public static class ImageCropService
 		{
 			context.AutoOrient();
 		});
-		using MemoryStream stream = new MemoryStream();
-		image.Save(stream, new PngEncoder());
-		stream.Position = 0L;
-		using System.Drawing.Image drawingImage = System.Drawing.Image.FromStream(stream);
-		return new Bitmap(drawingImage);
+		using MemoryStream memoryStream = new MemoryStream();
+		image.Save(memoryStream, new PngEncoder());
+		memoryStream.Position = 0L;
+		using System.Drawing.Image original = System.Drawing.Image.FromStream(memoryStream);
+		return new Bitmap(original);
 	}
 
 	public static byte[] RenderToTarget(string sourcePath, ImageRenderSpec spec, int targetWidth, int targetHeight)
@@ -38,30 +38,30 @@ public static class ImageCropService
 
 	public static byte[] RenderToTarget(Bitmap source, ImageRenderSpec spec, int targetWidth, int targetHeight)
 	{
-		ArgumentNullException.ThrowIfNull(source);
+		ArgumentNullException.ThrowIfNull(source, "source");
 		if (spec.VisualWidth <= 0f || spec.VisualHeight <= 0f || spec.ImageScale <= 0f)
 		{
-			throw new ArgumentException("裁剪布局无效。", nameof(spec));
+			throw new ArgumentException("裁剪布局无效。", "spec");
 		}
-		using Bitmap output = new Bitmap(targetWidth, targetHeight, PixelFormat.Format32bppArgb);
-		using (Graphics graphics = Graphics.FromImage(output))
+		using Bitmap bitmap = new Bitmap(targetWidth, targetHeight, PixelFormat.Format32bppArgb);
+		using (Graphics graphics = Graphics.FromImage(bitmap))
 		{
 			graphics.CompositingMode = CompositingMode.SourceCopy;
 			graphics.Clear(System.Drawing.Color.Transparent);
 			graphics.CompositingMode = CompositingMode.SourceOver;
 			CardFrameRenderer.Configure(graphics);
-			float scaleX = (float)targetWidth / spec.VisualWidth;
-			float scaleY = (float)targetHeight / spec.VisualHeight;
-			float visualWidth = (float)source.Width * spec.ImageScale;
-			float visualHeight = (float)source.Height * spec.ImageScale;
-			float left = spec.VisualWidth / 2f + spec.OffsetX - visualWidth / 2f;
-			float top = spec.VisualHeight / 2f + spec.OffsetY - visualHeight / 2f;
-			System.Drawing.RectangleF destination = new System.Drawing.RectangleF(left * scaleX, top * scaleY, visualWidth * scaleX, visualHeight * scaleY);
-			graphics.DrawImage(source, destination);
+			float num = (float)targetWidth / spec.VisualWidth;
+			float num2 = (float)targetHeight / spec.VisualHeight;
+			float num3 = (float)source.Width * spec.ImageScale;
+			float num4 = (float)source.Height * spec.ImageScale;
+			float num5 = spec.VisualWidth / 2f + spec.OffsetX - num3 / 2f;
+			float num6 = spec.VisualHeight / 2f + spec.OffsetY - num4 / 2f;
+			System.Drawing.RectangleF rect = new System.Drawing.RectangleF(num5 * num, num6 * num2, num3 * num, num4 * num2);
+			graphics.DrawImage(source, rect);
 		}
-		using MemoryStream stream = new MemoryStream();
-		output.Save(stream, ImageFormat.Png);
-		return stream.ToArray();
+		using MemoryStream memoryStream = new MemoryStream();
+		bitmap.Save(memoryStream, ImageFormat.Png);
+		return memoryStream.ToArray();
 	}
 
 	public static byte[] CropAndResize(string sourcePath, System.Drawing.RectangleF sourceCrop, int targetWidth, int targetHeight)
@@ -71,18 +71,18 @@ public static class ImageCropService
 		{
 			context.AutoOrient();
 		});
-		double aspect = (double)targetWidth / (double)targetHeight;
+		double num = (double)targetWidth / (double)targetHeight;
 		int cropWidth = Math.Clamp((int)Math.Round(sourceCrop.Width), 1, image.Width);
-		int cropHeight = Math.Max(1, (int)Math.Round((double)cropWidth / aspect));
+		int cropHeight = Math.Max(1, (int)Math.Round((double)cropWidth / num));
 		if (cropHeight > image.Height)
 		{
 			cropHeight = image.Height;
-			cropWidth = Math.Clamp((int)Math.Round((double)cropHeight * aspect), 1, image.Width);
+			cropWidth = Math.Clamp((int)Math.Round((double)cropHeight * num), 1, image.Width);
 		}
-		float centerX = Math.Clamp(sourceCrop.Left + sourceCrop.Width / 2f, 0f, image.Width);
-		float centerY = Math.Clamp(sourceCrop.Top + sourceCrop.Height / 2f, 0f, image.Height);
-		int x = Math.Clamp((int)Math.Round(centerX - (float)cropWidth / 2f), 0, image.Width - cropWidth);
-		int y = Math.Clamp((int)Math.Round(centerY - (float)cropHeight / 2f), 0, image.Height - cropHeight);
+		float num2 = Math.Clamp(sourceCrop.Left + sourceCrop.Width / 2f, 0f, image.Width);
+		float num3 = Math.Clamp(sourceCrop.Top + sourceCrop.Height / 2f, 0f, image.Height);
+		int x = Math.Clamp((int)Math.Round(num2 - (float)cropWidth / 2f), 0, image.Width - cropWidth);
+		int y = Math.Clamp((int)Math.Round(num3 - (float)cropHeight / 2f), 0, image.Height - cropHeight);
 		image.Mutate(delegate(IImageProcessingContext context)
 		{
 			context.Crop(new SixLabors.ImageSharp.Rectangle(x, y, cropWidth, cropHeight)).Resize(new ResizeOptions
@@ -92,31 +92,34 @@ public static class ImageCropService
 				Sampler = KnownResamplers.Lanczos3
 			});
 		});
-		using MemoryStream output = new MemoryStream();
-		image.Save(output, new PngEncoder());
-		return output.ToArray();
+		using MemoryStream memoryStream = new MemoryStream();
+		image.Save(memoryStream, new PngEncoder());
+		return memoryStream.ToArray();
 	}
 
 	public static byte[] RenderCoverToTarget(string sourcePath, int targetWidth, int targetHeight)
 	{
 		if (targetWidth <= 0 || targetHeight <= 0)
 		{
-			throw new ArgumentOutOfRangeException(nameof(targetWidth), "目标尺寸必须大于 0。");
+			throw new ArgumentOutOfRangeException("targetWidth", "目标尺寸必须大于 0。");
 		}
 		using Image<Rgba32> image = SixLabors.ImageSharp.Image.Load<Rgba32>(sourcePath);
-		image.Mutate(context => context.AutoOrient().Resize(new ResizeOptions
+		image.Mutate(delegate(IImageProcessingContext context)
 		{
-			Size = new SixLabors.ImageSharp.Size(targetWidth, targetHeight),
-			Mode = ResizeMode.Crop,
-			Position = AnchorPositionMode.Center,
-			Sampler = KnownResamplers.Lanczos3
-		}));
-		using MemoryStream output = new();
-		image.Save(output, new PngEncoder
+			context.AutoOrient().Resize(new ResizeOptions
+			{
+				Size = new SixLabors.ImageSharp.Size(targetWidth, targetHeight),
+				Mode = ResizeMode.Crop,
+				Position = AnchorPositionMode.Center,
+				Sampler = KnownResamplers.Lanczos3
+			});
+		});
+		using MemoryStream memoryStream = new MemoryStream();
+		image.Save(memoryStream, new PngEncoder
 		{
 			ColorType = PngColorType.RgbWithAlpha,
 			TransparentColorMode = PngTransparentColorMode.Preserve
 		});
-		return output.ToArray();
+		return memoryStream.ToArray();
 	}
 }

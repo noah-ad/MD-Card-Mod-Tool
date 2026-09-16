@@ -14,7 +14,7 @@ public sealed class MonsterAnimationForm : Form
 {
 	private readonly string _gameRoot;
 
-	private readonly Dictionary<Control, string> _localizedControls = new();
+	private readonly Dictionary<Control, string> _localizedControls = new Dictionary<Control, string>();
 
 	private readonly MonsterAnimationService _service = new MonsterAnimationService();
 
@@ -131,6 +131,7 @@ public sealed class MonsterAnimationForm : Form
 	private readonly Button _apply;
 
 	private readonly Button _chooseMedia;
+
 	private readonly Button _chooseDonor;
 
 	private readonly Button _restore;
@@ -142,7 +143,7 @@ public sealed class MonsterAnimationForm : Form
 		Interval = 380
 	};
 
-	private readonly Stopwatch _playClock = new();
+	private readonly Stopwatch _playClock = new Stopwatch();
 
 	private readonly List<Bitmap> _previewFrames = new List<Bitmap>();
 
@@ -188,6 +189,12 @@ public sealed class MonsterAnimationForm : Form
 
 	private bool _legacyCreation;
 
+	public string CardQuery => _cardId.Text.Trim();
+
+	public string? LocatedCardId => _set?.CardId;
+
+	public string? PreviewSourceCardId => _previewSet?.CardId;
+
 	public MonsterAnimationForm(string gameRoot, string? initialCardId = null)
 	{
 		_gameRoot = gameRoot;
@@ -202,13 +209,29 @@ public sealed class MonsterAnimationForm : Form
 		base.AutoScaleMode = AutoScaleMode.Dpi;
 		base.KeyPreview = true;
 		AllowDrop = true;
-		DpiChanged += delegate { UiTheme.QueueStableRepaint(this); };
-		ResizeEnd += delegate { UiTheme.QueueStableRepaint(this); };
+		base.DpiChanged += delegate
+		{
+			UiTheme.QueueStableRepaint(this);
+		};
+		base.ResizeEnd += delegate
+		{
+			UiTheme.QueueStableRepaint(this);
+		};
 		UiTheme.StyleTextBox(_cardId);
 		UiTheme.StyleComboBox(_frameEdge);
 		UiTheme.StyleComboBox(_atlasEdge);
 		UiTheme.StyleComboBox(_animationSelector);
-		_frameEdge.Items.AddRange(new object[8] { Localizer.T("animation.quality.auto"), "512", "768", "1024", "1280", "1600", "1920", "2048" });
+		_frameEdge.Items.AddRange(new object[8]
+		{
+			Localizer.T("animation.quality.auto"),
+			"512",
+			"768",
+			"1024",
+			"1280",
+			"1600",
+			"1920",
+			"2048"
+		});
 		_frameEdge.SelectedIndex = 0;
 		_atlasEdge.Items.AddRange(new object[3] { "2048", "4096", "8192" });
 		_atlasEdge.SelectedItem = "4096";
@@ -216,36 +239,44 @@ public sealed class MonsterAnimationForm : Form
 		_animationSelector.SelectedIndex = 0;
 		_animationSelector.SelectedIndexChanged += async delegate
 		{
-			if (!_updatingAnimationSelector && !_busy && _media == null && _previewSet?.IsComplete == true)
+			if (!_updatingAnimationSelector && !_busy && _media == null && (_previewSet?.IsComplete ?? false))
 			{
 				await LoadCurrentAnimationPreviewAsync(_previewSet);
 			}
 		};
 		_preview.ViewChanged += delegate
 		{
-			decimal percent = Math.Clamp(_preview.ScalePercent, (int)_scale.Minimum, (int)_scale.Maximum);
-			if (_scale.Value != percent) _scale.Value = percent;
+			decimal num2 = Math.Clamp(_preview.ScalePercent, (int)_scale.Minimum, (int)_scale.Maximum);
+			if (_scale.Value != num2)
+			{
+				_scale.Value = num2;
+			}
 		};
 		_cardId.Text = ((initialCardId != null && initialCardId.All(char.IsAsciiDigit)) ? initialCardId : "");
 		_cardLookupDebounce.Tick += async delegate
 		{
 			_cardLookupDebounce.Stop();
-			string query = _cardId.Text.Trim();
-			if (!_busy && !_cardId.IsImeComposing && query.Length > 0 && query.All(char.IsAsciiDigit))
+			string text = _cardId.Text.Trim();
+			if (!_busy && !_cardId.IsImeComposing && text.Length > 0 && text.All(char.IsAsciiDigit))
 			{
 				await LocateAsync();
 			}
 		};
 		_cardId.TextChanged += delegate
 		{
-			if (_suppressCardLookup || _cardId.IsImeComposing)
+			if (!_suppressCardLookup && !_cardId.IsImeComposing)
 			{
-				return;
+				ScheduleAutomaticCardLookup();
 			}
+		};
+		_cardId.ImeCompositionStarted += delegate
+		{
+			_cardLookupDebounce.Stop();
+		};
+		_cardId.ImeCompositionEnded += delegate
+		{
 			ScheduleAutomaticCardLookup();
 		};
-		_cardId.ImeCompositionStarted += delegate { _cardLookupDebounce.Stop(); };
-		_cardId.ImeCompositionEnded += delegate { ScheduleAutomaticCardLookup(); };
 		_cardId.KeyDown += async delegate(object? _, KeyEventArgs e)
 		{
 			if (e.KeyCode == Keys.Return)
@@ -283,25 +314,25 @@ public sealed class MonsterAnimationForm : Form
 		};
 		base.DragEnter += delegate(object? _, DragEventArgs e)
 		{
-			IDataObject? data = e.Data;
+			IDataObject data = e.Data;
 			e.Effect = ((data != null && data.GetDataPresent(DataFormats.FileDrop)) ? DragDropEffects.Copy : DragDropEffects.None);
 		};
 		base.DragDrop += async delegate(object? _, DragEventArgs e)
 		{
-			if (e.Data?.GetData(DataFormats.FileDrop) is string[] files && files.Length != 0)
+			if (e.Data?.GetData(DataFormats.FileDrop) is string[] array2 && array2.Length != 0)
 			{
-				await LoadMediaAsync(files.All(IsImageFile) ? files : [files[0]]);
+				await LoadMediaAsync(array2.All(IsImageFile) ? array2 : new string[1] { array2[0] });
 			}
 		};
-		Button locate = Bind(UiTheme.Button("", async delegate
+		Button control = Bind(UiTheme.Button("", async delegate
 		{
 			await LocateAsync();
 		}, ButtonTone.Primary), "animation.action.locate");
-		Button rebuild = Bind(UiTheme.Button("", async delegate
+		Button control2 = Bind(UiTheme.Button("", async delegate
 		{
 			await RebuildIndexAsync();
 		}), "animation.action.rebuild");
-		TableLayoutPanel cardRow = new TableLayoutPanel
+		TableLayoutPanel tableLayoutPanel = new TableLayoutPanel
 		{
 			Dock = DockStyle.Fill,
 			Margin = Padding.Empty,
@@ -310,22 +341,25 @@ public sealed class MonsterAnimationForm : Form
 			ColumnCount = 5,
 			RowCount = 1
 		};
-		cardRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-		cardRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-		cardRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-		cardRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-		cardRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-		cardRow.Controls.Add(Bind(Label("", UiTheme.Gold), "animation.field.card"), 0, 0);
-		cardRow.Controls.Add(_cardId, 1, 0);
-		cardRow.Controls.Add(locate, 2, 0);
-		cardRow.Controls.Add(_resourceStatus, 3, 0);
-		cardRow.Controls.Add(rebuild, 4, 0);
+		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+		tableLayoutPanel.Controls.Add(Bind(Label("", UiTheme.Gold), "animation.field.card"), 0, 0);
+		tableLayoutPanel.Controls.Add(_cardId, 1, 0);
+		tableLayoutPanel.Controls.Add(control, 2, 0);
+		tableLayoutPanel.Controls.Add(_resourceStatus, 3, 0);
+		tableLayoutPanel.Controls.Add(control2, 4, 0);
 		_chooseMedia = Bind(UiTheme.Button("", async delegate
 		{
 			await ChooseMediaAsync();
 		}, ButtonTone.Primary), "animation.action.choose");
 		_chooseMedia.Enabled = false;
-		_chooseDonor = Bind(UiTheme.Button("", async (_, _) => await ChooseDonorAsync(), ButtonTone.Primary), "animation.donor.action");
+		_chooseDonor = Bind(UiTheme.Button("", async delegate
+		{
+			await ChooseDonorAsync();
+		}, ButtonTone.Primary), "animation.donor.action");
 		_chooseDonor.Enabled = false;
 		_play = Bind(UiTheme.Button("", delegate
 		{
@@ -341,7 +375,7 @@ public sealed class MonsterAnimationForm : Form
 			await RestoreAsync();
 		}, ButtonTone.Danger), "animation.action.restore");
 		_restore.Enabled = false;
-		TableLayoutPanel buttons = new TableLayoutPanel
+		TableLayoutPanel tableLayoutPanel2 = new TableLayoutPanel
 		{
 			Dock = DockStyle.Fill,
 			Margin = Padding.Empty,
@@ -350,25 +384,25 @@ public sealed class MonsterAnimationForm : Form
 			Padding = new Padding(0, 6, 0, 4),
 			BackColor = UiTheme.Surface
 		};
-		buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
-		buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
-		buttons.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
-		buttons.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
-		buttons.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
-		Button[] array = [_chooseMedia, _chooseDonor, _play, _apply, _restore];
+		tableLayoutPanel2.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+		tableLayoutPanel2.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+		tableLayoutPanel2.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
+		tableLayoutPanel2.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
+		tableLayoutPanel2.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
+		Button[] array = new Button[5] { _chooseMedia, _chooseDonor, _play, _apply, _restore };
 		foreach (Button obj in array)
 		{
 			obj.AutoSize = false;
 			obj.Dock = DockStyle.Fill;
 			obj.Margin = new Padding(3);
 		}
-		buttons.Controls.Add(_chooseMedia, 0, 0);
-		buttons.Controls.Add(_chooseDonor, 1, 0);
-		buttons.Controls.Add(_play, 0, 1);
-		buttons.SetColumnSpan(_play, 2);
-		buttons.Controls.Add(_apply, 0, 2);
-		buttons.Controls.Add(_restore, 1, 2);
-		TableLayoutPanel options = new TableLayoutPanel
+		tableLayoutPanel2.Controls.Add(_chooseMedia, 0, 0);
+		tableLayoutPanel2.Controls.Add(_chooseDonor, 1, 0);
+		tableLayoutPanel2.Controls.Add(_play, 0, 1);
+		tableLayoutPanel2.SetColumnSpan(_play, 2);
+		tableLayoutPanel2.Controls.Add(_apply, 0, 2);
+		tableLayoutPanel2.Controls.Add(_restore, 1, 2);
+		TableLayoutPanel tableLayoutPanel3 = new TableLayoutPanel
 		{
 			Dock = DockStyle.Top,
 			Height = 277,
@@ -377,56 +411,56 @@ public sealed class MonsterAnimationForm : Form
 			Padding = new Padding(0, 4, 0, 4),
 			BackColor = UiTheme.Surface
 		};
-		options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58f));
-		options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42f));
-		AddOption(options, 0, "animation.field.name", _animationSelector);
-		AddOption(options, 1, "animation.field.fps", _fps);
-		AddOption(options, 2, "animation.field.start", _startSeconds);
-		AddOption(options, 3, "animation.field.frames", _maxFrames);
-		AddOption(options, 4, "animation.field.quality", _frameEdge);
-		AddOption(options, 5, "animation.field.atlas", _atlasEdge);
-		AddOption(options, 6, "animation.field.scale", _scale);
-		AddOption(options, 7, "animation.field.chroma", _removeGreenScreen);
+		tableLayoutPanel3.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58f));
+		tableLayoutPanel3.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42f));
+		AddOption(tableLayoutPanel3, 0, "animation.field.name", _animationSelector);
+		AddOption(tableLayoutPanel3, 1, "animation.field.fps", _fps);
+		AddOption(tableLayoutPanel3, 2, "animation.field.start", _startSeconds);
+		AddOption(tableLayoutPanel3, 3, "animation.field.frames", _maxFrames);
+		AddOption(tableLayoutPanel3, 4, "animation.field.quality", _frameEdge);
+		AddOption(tableLayoutPanel3, 5, "animation.field.atlas", _atlasEdge);
+		AddOption(tableLayoutPanel3, 6, "animation.field.scale", _scale);
+		AddOption(tableLayoutPanel3, 7, "animation.field.chroma", _removeGreenScreen);
 		Bind(_removeGreenScreen, "animation.option.chroma");
-		Label note = Bind(new Label
+		Label label = Bind(new Label
 		{
 			Dock = DockStyle.Top,
 			Height = 104,
 			ForeColor = UiTheme.Muted,
 			Padding = new Padding(0, 10, 0, 0)
 		}, "animation.note");
-		DarkScrollPanel optionScroll = new DarkScrollPanel
+		DarkScrollPanel darkScrollPanel = new DarkScrollPanel
 		{
 			Dock = DockStyle.Fill,
 			BackColor = UiTheme.Surface,
 			Padding = Padding.Empty,
 			Margin = Padding.Empty,
-			ContentHeight = options.Height + note.Height
+			ContentHeight = tableLayoutPanel3.Height + label.Height
 		};
-		TableLayoutPanel optionContent = new()
+		TableLayoutPanel tableLayoutPanel4 = new TableLayoutPanel
 		{
 			Dock = DockStyle.Top,
-			Height = options.Height + note.Height,
+			Height = tableLayoutPanel3.Height + label.Height,
 			ColumnCount = 1,
 			RowCount = 2,
 			Margin = Padding.Empty,
 			Padding = Padding.Empty,
 			BackColor = UiTheme.Surface
 		};
-		optionContent.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-		optionContent.RowStyles.Add(new RowStyle(SizeType.Absolute, options.Height));
-		optionContent.RowStyles.Add(new RowStyle(SizeType.Absolute, note.Height));
-		note.Dock = DockStyle.Fill;
-		optionContent.Controls.Add(options, 0, 0);
-		optionContent.Controls.Add(note, 0, 1);
-		optionScroll.ContentPanel.Controls.Add(optionContent);
-		BorderPanel side = new BorderPanel
+		tableLayoutPanel4.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+		tableLayoutPanel4.RowStyles.Add(new RowStyle(SizeType.Absolute, tableLayoutPanel3.Height));
+		tableLayoutPanel4.RowStyles.Add(new RowStyle(SizeType.Absolute, label.Height));
+		label.Dock = DockStyle.Fill;
+		tableLayoutPanel4.Controls.Add(tableLayoutPanel3, 0, 0);
+		tableLayoutPanel4.Controls.Add(label, 0, 1);
+		darkScrollPanel.ContentPanel.Controls.Add(tableLayoutPanel4);
+		BorderPanel borderPanel = new BorderPanel
 		{
 			Dock = DockStyle.Fill,
 			BackColor = UiTheme.Surface,
 			Padding = new Padding(18)
 		};
-		TableLayoutPanel sideLayout = new TableLayoutPanel
+		TableLayoutPanel tableLayoutPanel5 = new TableLayoutPanel
 		{
 			Dock = DockStyle.Fill,
 			ColumnCount = 1,
@@ -435,15 +469,15 @@ public sealed class MonsterAnimationForm : Form
 			Padding = Padding.Empty,
 			BackColor = UiTheme.Surface
 		};
-		sideLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-		sideLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-		sideLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 64f));
-		sideLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 132f));
-		sideLayout.Controls.Add(optionScroll, 0, 0);
-		sideLayout.Controls.Add(_sourceStatus, 0, 1);
-		sideLayout.Controls.Add(buttons, 0, 2);
-		side.Controls.Add(sideLayout);
-		TableLayoutPanel timelineRow = new TableLayoutPanel
+		tableLayoutPanel5.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+		tableLayoutPanel5.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+		tableLayoutPanel5.RowStyles.Add(new RowStyle(SizeType.Absolute, 64f));
+		tableLayoutPanel5.RowStyles.Add(new RowStyle(SizeType.Absolute, 132f));
+		tableLayoutPanel5.Controls.Add(darkScrollPanel, 0, 0);
+		tableLayoutPanel5.Controls.Add(_sourceStatus, 0, 1);
+		tableLayoutPanel5.Controls.Add(tableLayoutPanel2, 0, 2);
+		borderPanel.Controls.Add(tableLayoutPanel5);
+		TableLayoutPanel tableLayoutPanel6 = new TableLayoutPanel
 		{
 			Dock = DockStyle.Bottom,
 			Height = 48,
@@ -451,18 +485,18 @@ public sealed class MonsterAnimationForm : Form
 			Padding = new Padding(8, 5, 8, 5),
 			BackColor = UiTheme.SurfaceAlt
 		};
-		timelineRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-		timelineRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-		timelineRow.Controls.Add(_timeline, 0, 0);
-		timelineRow.Controls.Add(_frameLabel, 1, 0);
-		BorderPanel previewPanel = new BorderPanel
+		tableLayoutPanel6.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+		tableLayoutPanel6.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+		tableLayoutPanel6.Controls.Add(_timeline, 0, 0);
+		tableLayoutPanel6.Controls.Add(_frameLabel, 1, 0);
+		BorderPanel borderPanel2 = new BorderPanel
 		{
 			Dock = DockStyle.Fill,
 			BackColor = UiTheme.Surface,
 			Padding = new Padding(1)
 		};
-		previewPanel.Controls.Add(_preview);
-		previewPanel.Controls.Add(timelineRow);
+		borderPanel2.Controls.Add(_preview);
+		borderPanel2.Controls.Add(tableLayoutPanel6);
 		SplitContainer body = new SplitContainer
 		{
 			Dock = DockStyle.Fill,
@@ -473,15 +507,15 @@ public sealed class MonsterAnimationForm : Form
 		};
 		body.Panel1.Padding = new Padding(14, 14, 7, 14);
 		body.Panel2.Padding = new Padding(7, 14, 14, 14);
-		body.Panel1.Controls.Add(previewPanel);
-		body.Panel2.Controls.Add(side);
-		GradientBanner banner = new GradientBanner
+		body.Panel1.Controls.Add(borderPanel2);
+		body.Panel2.Controls.Add(borderPanel);
+		GradientBanner gradientBanner = new GradientBanner
 		{
 			Dock = DockStyle.Fill,
 			Margin = Padding.Empty,
 			Padding = new Padding(22, 6, 22, 6)
 		};
-		Label bannerTitle = new Label
+		Label control3 = new Label
 		{
 			Name = "MonsterAnimationBannerTitle",
 			Text = "MONSTER ANIMATION LAB",
@@ -493,7 +527,7 @@ public sealed class MonsterAnimationForm : Form
 			TextAlign = ContentAlignment.MiddleLeft,
 			AutoEllipsis = true
 		};
-		Label bannerSubtitle = new Label
+		Label control4 = new Label
 		{
 			Name = "MonsterAnimationBannerSubtitle",
 			Text = "GIF / VIDEO  →  SPINE SEQUENCE  →  MASTER DUEL",
@@ -504,7 +538,7 @@ public sealed class MonsterAnimationForm : Form
 			TextAlign = ContentAlignment.MiddleLeft,
 			AutoEllipsis = true
 		};
-		TableLayoutPanel bannerText = new TableLayoutPanel
+		TableLayoutPanel tableLayoutPanel7 = new TableLayoutPanel
 		{
 			Dock = DockStyle.Fill,
 			Margin = Padding.Empty,
@@ -513,12 +547,12 @@ public sealed class MonsterAnimationForm : Form
 			RowCount = 2,
 			BackColor = Color.Transparent
 		};
-		bannerText.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-		bannerText.RowStyles.Add(new RowStyle(SizeType.Absolute, 34f));
-		bannerText.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
-		bannerText.Controls.Add(bannerTitle, 0, 0);
-		bannerText.Controls.Add(bannerSubtitle, 0, 1);
-		banner.Controls.Add(bannerText);
+		tableLayoutPanel7.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+		tableLayoutPanel7.RowStyles.Add(new RowStyle(SizeType.Absolute, 34f));
+		tableLayoutPanel7.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
+		tableLayoutPanel7.Controls.Add(control3, 0, 0);
+		tableLayoutPanel7.Controls.Add(control4, 0, 1);
+		gradientBanner.Controls.Add(tableLayoutPanel7);
 		TableLayoutPanel root = new TableLayoutPanel
 		{
 			Dock = DockStyle.Fill,
@@ -529,11 +563,9 @@ public sealed class MonsterAnimationForm : Form
 		root.RowStyles.Add(new RowStyle(SizeType.Absolute, 68f));
 		root.RowStyles.Add(new RowStyle(SizeType.Absolute, 58f));
 		root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-		root.Controls.Add(banner, 0, 0);
-		root.Controls.Add(cardRow, 0, 1);
+		root.Controls.Add(gradientBanner, 0, 0);
+		root.Controls.Add(tableLayoutPanel, 0, 1);
 		root.Controls.Add(body, 0, 2);
-		// Do not expose the design-time bounds. The embedded form is resized to its
-		// host immediately before Load, and only that final layout is ever painted.
 		root.Visible = false;
 		base.Controls.Add(root);
 		base.FormClosed += delegate
@@ -552,22 +584,19 @@ public sealed class MonsterAnimationForm : Form
 		ApplyLanguage();
 		base.Load += async delegate
 		{
-			// Visible controls participate in SplitContainer and TableLayoutPanel
-			// measurement. Load still runs before the form's first paint, so exposing
-			// the root here gives us real bounds without showing a design-size frame.
 			root.Visible = true;
 			root.PerformLayout();
 			body.PerformLayout();
-			int maximum = body.Width - 390 - body.SplitterWidth;
-			if (maximum >= 500)
+			int num2 = body.Width - 390 - body.SplitterWidth;
+			if (num2 >= 500)
 			{
-				body.SplitterDistance = Math.Clamp(body.Width - 420, 500, maximum);
+				body.SplitterDistance = Math.Clamp(body.Width - 420, 500, num2);
 				body.Panel1MinSize = 500;
 				body.Panel2MinSize = 390;
 			}
 			body.PerformLayout();
 			root.PerformLayout();
-			root.Invalidate(true);
+			root.Invalidate(invalidateChildren: true);
 			UiTheme.QueueStableRepaint(this);
 			if (_cardId.Text.Length > 0 && _set == null && !_busy)
 			{
@@ -576,46 +605,34 @@ public sealed class MonsterAnimationForm : Form
 		};
 	}
 
-	public string CardQuery => _cardId.Text.Trim();
-
-	public string? LocatedCardId => _set?.CardId;
-
-	/// <summary>
-	/// Card id that owns the six assets currently shown in the read-only preview.
-	/// This can differ from <see cref="LocatedCardId"/> for alternate-art/public ids
-	/// such as 3899, whose equivalent official cut-in is stored under P13668.
-	/// </summary>
-	public string? PreviewSourceCardId => _previewSet?.CardId;
-
 	public async Task PreviewCardAsync(string cardId)
 	{
 		if (string.IsNullOrWhiteSpace(cardId) || !cardId.All(char.IsAsciiDigit))
 		{
-			throw new ArgumentException("卡号必须是纯数字。", nameof(cardId));
+			throw new ArgumentException("卡号必须是纯数字。", "cardId");
 		}
 		_cardLookupDebounce.Stop();
-		if (_busy && string.Equals(CardQuery, cardId, StringComparison.Ordinal))
+		if (!_busy || !string.Equals(CardQuery, cardId, StringComparison.Ordinal))
 		{
-			return;
+			_suppressCardLookup = true;
+			try
+			{
+				_cardId.Text = cardId;
+				_cardId.SelectionStart = _cardId.TextLength;
+			}
+			finally
+			{
+				_suppressCardLookup = false;
+			}
+			await LocateAsync();
 		}
-		_suppressCardLookup = true;
-		try
-		{
-			_cardId.Text = cardId;
-			_cardId.SelectionStart = _cardId.TextLength;
-		}
-		finally
-		{
-			_suppressCardLookup = false;
-		}
-		await LocateAsync();
 	}
 
 	private void ScheduleAutomaticCardLookup()
 	{
 		_cardLookupDebounce.Stop();
-		string query = _cardId.Text.Trim();
-		if (query.Length > 0 && query.All(char.IsAsciiDigit))
+		string text = _cardId.Text.Trim();
+		if (text.Length > 0 && text.All(char.IsAsciiDigit))
 		{
 			_cardLookupDebounce.Start();
 		}
@@ -631,16 +648,28 @@ public sealed class MonsterAnimationForm : Form
 	private void ApplyLanguage()
 	{
 		Text = Localizer.T("animation.title");
-		foreach ((Control control, string id) in _localizedControls) control.Text = Localizer.T(id);
+		foreach (KeyValuePair<Control, string> localizedControl in _localizedControls)
+		{
+			localizedControl.Deconstruct(out var key, out var value);
+			Control control = key;
+			string id = value;
+			control.Text = Localizer.T(id);
+		}
 		_cardId.PlaceholderText = Localizer.T("animation.search.placeholder");
-		bool automatic = _frameEdge.SelectedIndex == 0;
+		bool num = _frameEdge.SelectedIndex == 0;
 		_frameEdge.Items[0] = Localizer.T("animation.quality.auto");
-		if (automatic) _frameEdge.SelectedIndex = 0;
+		if (num)
+		{
+			_frameEdge.SelectedIndex = 0;
+		}
 		_play.Text = Localizer.T(_playing ? "animation.action.pause" : "animation.action.play");
 		RefreshLocalizedStatuses();
 	}
 
-	private void OnLanguageChanged(object? sender, EventArgs e) => ApplyLanguage();
+	private void OnLanguageChanged(object? sender, EventArgs e)
+	{
+		ApplyLanguage();
+	}
 
 	private void SetResourceStatus(string resourceId, params object?[] values)
 	{
@@ -681,9 +710,18 @@ public sealed class MonsterAnimationForm : Form
 
 	private void RefreshLocalizedStatuses()
 	{
-		if (_resourceStatusFactory != null) _resourceStatus.Text = _resourceStatusFactory();
-		if (_sourceStatusFactory != null) _sourceStatus.Text = _sourceStatusFactory();
-		if (_previewStatusFactory != null) _preview.StatusText = _previewStatusFactory();
+		if (_resourceStatusFactory != null)
+		{
+			_resourceStatus.Text = _resourceStatusFactory();
+		}
+		if (_sourceStatusFactory != null)
+		{
+			_sourceStatus.Text = _sourceStatusFactory();
+		}
+		if (_previewStatusFactory != null)
+		{
+			_preview.StatusText = _previewStatusFactory();
+		}
 		_preview.Invalidate();
 	}
 
@@ -716,17 +754,17 @@ public sealed class MonsterAnimationForm : Form
 	{
 		_cardLookupDebounce.Stop();
 		_catalog = CardCatalogService.LoadBestAvailable();
-		string query = _cardId.Text.Trim();
-		CardCatalogEntry? card = null;
-		if (query.Length > 0 && query.All(char.IsAsciiDigit) && int.TryParse(query, out int numeric))
+		string text = _cardId.Text.Trim();
+		CardCatalogEntry card = null;
+		if (text.Length > 0 && text.All(char.IsAsciiDigit) && int.TryParse(text, out var result))
 		{
-			card = _catalog.FindCardOrMrk(numeric);
+			card = _catalog.FindCardOrMrk(result);
 		}
-		else if (query.Length > 0)
+		else if (text.Length > 0)
 		{
-			card = _catalog.Search(query, 1).FirstOrDefault();
+			card = _catalog.Search(text, 1).FirstOrDefault();
 		}
-		string cardId = card?.CardId.ToString() ?? query;
+		string cardId = card?.CardId.ToString() ?? text;
 		if (!cardId.All(char.IsAsciiDigit) || cardId.Length == 0)
 		{
 			MessageBox.Show(this, Localizer.T("animation.prompt.card"), Text);
@@ -751,55 +789,48 @@ public sealed class MonsterAnimationForm : Form
 				DisposeMedia();
 			}
 			_locatedResourceStatusFactory = null;
-			SetBusy(busy: true, "animation.status.locating");
+			SetBusy(true, "animation.status.locating");
 			_set = await Task.Run(() => MonsterAnimationIndexService.Find(_gameRoot, cardId));
 			_previewSet = _set;
 			_legacyCreation = await Task.Run(() => _service.HasCreationTransaction(_gameRoot, cardId));
-			if (!_set.IsComplete && card?.IsMonster == true)
+			if (!_set.IsComplete && (card?.IsMonster ?? false))
 			{
-				// Alternate/public card ids do not always match the P-number used by
-				// MonsterCutIn.  Keep the selected id as the edit target, but resolve an
-				// equivalent multilingual card name for read-only official preview.
-				_previewSet = await Task.Run(() =>
-					MonsterAnimationIndexService.FindEquivalentPreview(_gameRoot, card, _catalog)) ?? _set;
+				_previewSet = (await Task.Run(() => MonsterAnimationIndexService.FindEquivalentPreview(_gameRoot, card, _catalog))) ?? _set;
 			}
-			bool canReplaceSelected = _set.IsComplete;
-			bool equivalentPreview = _previewSet.IsComplete
-				&& !string.Equals(_previewSet.CardId, _set.CardId, StringComparison.Ordinal);
-			Func<string> cardSuffix = () => card == null ? "" : $" · {card.Name(Localizer.Language)} · 卡号 {card.CardId}";
+			bool isComplete = _set.IsComplete;
+			bool equivalentPreview = _previewSet.IsComplete && !string.Equals(_previewSet.CardId, _set.CardId, StringComparison.Ordinal);
+			Func<string> cardSuffix = () => (!(card == null)) ? $" · {card.Name(Localizer.Language)} · 卡号 {card.CardId}" : "";
 			if (!_previewSet.IsComplete)
 			{
-				_locatedResourceStatusFactory = _legacyCreation
-					? () => Localizer.F("animation.status.located.legacy", cardSuffix())
-					: () => Localizer.F(card?.IsMonster == true
-						? "animation.status.located.unsupported"
-						: "animation.status.located.none", cardSuffix());
+				_locatedResourceStatusFactory = (_legacyCreation ? ((Func<string>)(() => Localizer.F("animation.status.located.legacy", cardSuffix()))) : ((Func<string>)delegate
+				{
+					CardCatalogEntry cardCatalogEntry = card;
+					return Localizer.F(((object)cardCatalogEntry != null && cardCatalogEntry.IsMonster) ? "animation.status.located.unsupported" : "animation.status.located.none", cardSuffix());
+				}));
 				SetResourceStatus(_locatedResourceStatusFactory);
 			}
-			_resourceStatus.ForeColor = _previewSet.IsComplete ? UiTheme.Primary : Color.OrangeRed;
-			_chooseMedia.Enabled = canReplaceSelected;
-			_chooseDonor.Enabled = canReplaceSelected;
-			_apply.Enabled = canReplaceSelected && _media != null;
+			_resourceStatus.ForeColor = (_previewSet.IsComplete ? UiTheme.Primary : Color.OrangeRed);
+			_chooseMedia.Enabled = isComplete;
+			_chooseDonor.Enabled = isComplete;
+			_apply.Enabled = isComplete && _media != null;
 			_restore.Enabled = _set.IsComplete || _legacyCreation;
 			if (_previewSet.IsComplete)
 			{
-				MonsterAnimationTemplate template = await Task.Run(() => _service.ReadTemplate(_gameRoot, _previewSet));
+				MonsterAnimationTemplate monsterAnimationTemplate = await Task.Run(() => _service.ReadTemplate(_gameRoot, _previewSet));
 				_updatingAnimationSelector = true;
 				try
 				{
-					string? selectedAnimation = _animationSelector.SelectedItem as string;
+					string text2 = _animationSelector.SelectedItem as string;
 					_animationSelector.Items.Clear();
-					_animationSelector.Items.AddRange(template.EffectiveAnimationNames.Cast<object>().ToArray());
-					_animationSelector.SelectedItem = template.EffectiveAnimationNames.Contains(selectedAnimation ?? "", StringComparer.Ordinal)
-						? selectedAnimation : template.EffectiveAnimationNames[0];
+					_animationSelector.Items.AddRange(monsterAnimationTemplate.EffectiveAnimationNames.Cast<object>().ToArray());
+					_animationSelector.SelectedItem = (monsterAnimationTemplate.EffectiveAnimationNames.Contains<string>(text2 ?? "", StringComparer.Ordinal) ? text2 : monsterAnimationTemplate.EffectiveAnimationNames[0]);
 				}
-				finally { _updatingAnimationSelector = false; }
-				string animationNames = string.Join(" / ", template.EffectiveAnimationNames);
-				_locatedResourceStatusFactory = equivalentPreview
-					? () => Localizer.F("animation.status.located.fallback", _previewSet.CardId, cardSuffix(), animationNames)
-					: _legacyCreation
-						? () => Localizer.F("animation.status.located.legacy", cardSuffix())
-						: () => Localizer.F("animation.status.located.complete", _set.CountSummary, cardSuffix(), animationNames);
+				finally
+				{
+					_updatingAnimationSelector = false;
+				}
+				string animationNames = string.Join(" / ", monsterAnimationTemplate.EffectiveAnimationNames);
+				_locatedResourceStatusFactory = (equivalentPreview ? ((Func<string>)(() => Localizer.F("animation.status.located.fallback", _previewSet.CardId, cardSuffix(), animationNames))) : (_legacyCreation ? ((Func<string>)(() => Localizer.F("animation.status.located.legacy", cardSuffix()))) : ((Func<string>)(() => Localizer.F("animation.status.located.complete", _set.CountSummary, cardSuffix(), animationNames)))));
 				SetResourceStatus(_locatedResourceStatusFactory);
 				if (_media == null)
 				{
@@ -809,8 +840,8 @@ public sealed class MonsterAnimationForm : Form
 			else if (_media == null)
 			{
 				DisposeMedia();
-				SetSourceStatus(card?.IsMonster == true ? "animation.source.unsupported" : "animation.source.notapplicable");
-				SetPreviewStatus(card?.IsMonster == true ? "animation.preview.unsupported" : "animation.preview.notapplicable");
+				SetSourceStatus((card?.IsMonster ?? false) ? "animation.source.unsupported" : "animation.source.notapplicable");
+				SetPreviewStatus((card?.IsMonster ?? false) ? "animation.preview.unsupported" : "animation.preview.notapplicable");
 			}
 		}
 		catch (Exception ex)
@@ -819,7 +850,7 @@ public sealed class MonsterAnimationForm : Form
 		}
 		finally
 		{
-			SetBusy(busy: false);
+			SetBusy(false, null);
 		}
 	}
 
@@ -831,7 +862,7 @@ public sealed class MonsterAnimationForm : Form
 		}
 		try
 		{
-			SetBusy(busy: true, "animation.status.scanning");
+			SetBusy(true, "animation.status.scanning");
 			await Task.Run(() => MonsterAnimationIndexService.Rebuild(_gameRoot, delegate(int done, int total, int found)
 			{
 				if (!base.IsDisposed && base.IsHandleCreated)
@@ -850,16 +881,16 @@ public sealed class MonsterAnimationForm : Form
 		}
 		finally
 		{
-			SetBusy(busy: false);
+			SetBusy(false, null);
 		}
 	}
 
 	private async Task ChooseMediaAsync()
 	{
-		if (_set?.IsComplete != true)
+		MonsterAnimationSet? set = _set;
+		if (set == null || !set.IsComplete)
 		{
-			MessageBox.Show(this, Localizer.T("animation.prompt.officialonly"), Text,
-				MessageBoxButtons.OK, MessageBoxIcon.Information);
+			MessageBox.Show(this, Localizer.T("animation.prompt.officialonly"), Text, MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
 			return;
 		}
 		OpenFileDialog dialog = new OpenFileDialog
@@ -872,17 +903,20 @@ public sealed class MonsterAnimationForm : Form
 		{
 			if (dialog.ShowDialog(this) == DialogResult.OK)
 			{
-				string[] selected = dialog.FileNames;
-				await LoadMediaAsync(selected.All(IsImageFile) ? selected : [selected[0]]);
+				string[] fileNames = dialog.FileNames;
+				await LoadMediaAsync(fileNames.All(IsImageFile) ? fileNames : new string[1] { fileNames[0] });
 			}
 		}
 		finally
 		{
-			((IDisposable)(object)dialog)?.Dispose();
+			((IDisposable)dialog)?.Dispose();
 		}
 	}
 
-	private Task LoadMediaAsync(string path) => LoadMediaAsync([path]);
+	private Task LoadMediaAsync(string path)
+	{
+		return LoadMediaAsync(new _003C_003Ez__ReadOnlySingleElementList<string>(path));
+	}
 
 	private async Task LoadMediaAsync(IReadOnlyList<string> paths)
 	{
@@ -898,22 +932,22 @@ public sealed class MonsterAnimationForm : Form
 		{
 			if (automaticQuality)
 			{
-				SetBusy(busy: true, "animation.status.probing");
-				using ExtractedAnimation probe = await ExtractSourceAsync(paths, 128, removeGreenScreen: false);
-				using Bitmap probeFrame = probe.LoadFrame(0);
-				resolvedFrameEdge = MonsterAnimationBuilder.ChooseAutomaticFrameEdge(probe.FramePaths.Count, probeFrame.Width, probeFrame.Height, int.Parse(_atlasEdge.Text));
-				SetBusy(busy: true, "animation.status.extractauto", probe.FramePaths.Count, resolvedFrameEdge);
+				SetBusy(true, "animation.status.probing");
+				using ExtractedAnimation extractedAnimation = await ExtractSourceAsync(paths, 128, removeGreenScreen: false);
+				using Bitmap bitmap = extractedAnimation.LoadFrame(0);
+				resolvedFrameEdge = MonsterAnimationBuilder.ChooseAutomaticFrameEdge(extractedAnimation.FramePaths.Count, bitmap.Width, bitmap.Height, int.Parse(_atlasEdge.Text));
+				SetBusy(true, "animation.status.extractauto", extractedAnimation.FramePaths.Count, resolvedFrameEdge);
 			}
 			else
 			{
 				resolvedFrameEdge = int.Parse(_frameEdge.Text);
-				SetBusy(busy: true, "animation.status.extractfixed", resolvedFrameEdge);
+				SetBusy(true, "animation.status.extractfixed", resolvedFrameEdge);
 			}
 			loadedMedia = await ExtractSourceAsync(paths, resolvedFrameEdge, removeGreenScreen);
-			using (Bitmap firstFrame = loadedMedia.LoadFrame(0))
+			using (Bitmap bitmap2 = loadedMedia.LoadFrame(0))
 			{
-				mediaWidth = firstFrame.Width;
-				mediaHeight = firstFrame.Height;
+				mediaWidth = bitmap2.Width;
+				mediaHeight = bitmap2.Height;
 			}
 			int previewEdge = Math.Min(512, resolvedFrameEdge);
 			ExtractedAnimation mediaForPreview = loadedMedia;
@@ -938,7 +972,7 @@ public sealed class MonsterAnimationForm : Form
 			_timeline.Enabled = _previewFrames.Count > 1;
 			ShowFrame(0);
 			UpdateSourceStatus();
-			_apply.Enabled = _set?.IsComplete == true;
+			_apply.Enabled = _set?.IsComplete ?? false;
 			if (!_playing)
 			{
 				TogglePlay();
@@ -958,20 +992,83 @@ public sealed class MonsterAnimationForm : Form
 		}
 		finally
 		{
-			SetBusy(busy: false);
+			SetBusy(false, null);
 		}
 	}
 
 	private Task<ExtractedAnimation> ExtractSourceAsync(IReadOnlyList<string> paths, int maxFrameEdge, bool removeGreenScreen)
 	{
-		return paths.All(IsImageFile)
-			? MonsterAnimationMedia.ExtractSequenceAsync(paths, (int)_fps.Value, (int)_maxFrames.Value, maxFrameEdge, removeGreenScreen)
-			: MonsterAnimationMedia.ExtractAsync(paths[0], (int)_fps.Value, (int)_maxFrames.Value, maxFrameEdge, (double)_startSeconds.Value, removeGreenScreen);
+		if (!paths.All(IsImageFile))
+		{
+			return MonsterAnimationMedia.ExtractAsync(paths[0], (int)_fps.Value, (int)_maxFrames.Value, maxFrameEdge, (double)_startSeconds.Value, removeGreenScreen);
+		}
+		return MonsterAnimationMedia.ExtractSequenceAsync(paths, (int)_fps.Value, (int)_maxFrames.Value, maxFrameEdge, removeGreenScreen);
 	}
 
 	private static bool IsImageFile(string path)
 	{
-		return Path.GetExtension(path).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg" or ".webp" or ".bmp" or ".tif" or ".tiff";
+		string text = Path.GetExtension(path).ToLowerInvariant();
+		if (text != null)
+		{
+			int length = text.Length;
+			if (length != 4)
+			{
+				if (length == 5)
+				{
+					char c = text[1];
+					if (c != 'j')
+					{
+						if (c != 't')
+						{
+							if (c == 'w' && text == ".webp")
+							{
+								goto IL_00d1;
+							}
+						}
+						else if (text == ".tiff")
+						{
+							goto IL_00d1;
+						}
+					}
+					else if (text == ".jpeg")
+					{
+						goto IL_00d1;
+					}
+				}
+			}
+			else
+			{
+				char c = text[1];
+				if ((uint)c <= 106u)
+				{
+					if (c != 'b')
+					{
+						if (c == 'j' && text == ".jpg")
+						{
+							goto IL_00d1;
+						}
+					}
+					else if (text == ".bmp")
+					{
+						goto IL_00d1;
+					}
+				}
+				else if (c != 'p')
+				{
+					if (c == 't' && text == ".tif")
+					{
+						goto IL_00d1;
+					}
+				}
+				else if (text == ".png")
+				{
+					goto IL_00d1;
+				}
+			}
+		}
+		return false;
+		IL_00d1:
+		return true;
 	}
 
 	private void UpdateSourceStatus()
@@ -982,12 +1079,11 @@ public sealed class MonsterAnimationForm : Form
 			return;
 		}
 		ExtractedAnimation media = _media;
-		SetSourceStatus(() =>
+		SetSourceStatus(delegate
 		{
-			string quality = Localizer.F(_automaticQuality ? "animation.quality.resolved.auto" : "animation.quality.resolved.fixed", _resolvedFrameEdge);
-			string transparency = media.GreenScreenRemoved ? Localizer.T("animation.source.transparent") : "";
-			return Localizer.F("animation.source.media", Path.GetFileName(media.SourcePath), media.FramePaths.Count,
-				(int)_fps.Value, (double)media.FramePaths.Count / (double)_fps.Value, _mediaWidth, _mediaHeight, quality, transparency);
+			string text = Localizer.F(_automaticQuality ? "animation.quality.resolved.auto" : "animation.quality.resolved.fixed", _resolvedFrameEdge);
+			string text2 = (media.GreenScreenRemoved ? Localizer.T("animation.source.transparent") : "");
+			return Localizer.F("animation.source.media", Path.GetFileName(media.SourcePath), media.FramePaths.Count, (int)_fps.Value, (double)media.FramePaths.Count / (double)_fps.Value, _mediaWidth, _mediaHeight, text, text2);
 		});
 	}
 
@@ -996,63 +1092,19 @@ public sealed class MonsterAnimationForm : Form
 		int previewVersion = ++_animationPreviewVersion;
 		_animationPreviewCancellation?.Cancel();
 		_animationPreviewCancellation?.Dispose();
-		CancellationTokenSource cancellation = new();
-		_animationPreviewCancellation = cancellation;
+		CancellationTokenSource cancellation = (_animationPreviewCancellation = new CancellationTokenSource());
 		CancellationToken cancellationToken = cancellation.Token;
-		string? animationName = _animationSelector.SelectedItem as string;
-		Func<string> resourceBase = _locatedResourceStatusFactory ?? _resourceStatusFactory ?? (() => "");
+		string animationName = _animationSelector.SelectedItem as string;
+		Func<string> resourceBase = _locatedResourceStatusFactory ?? _resourceStatusFactory ?? ((Func<string>)(() => ""));
 		SetResourceStatus(() => resourceBase() + Localizer.T("animation.status.preview.loading"));
 		int streamedFrames = 0;
-		void ShowRenderedFrame(Bitmap frame, int frameIndex, int frameCount)
-		{
-			if (cancellationToken.IsCancellationRequested) return;
-			Bitmap? display = new Bitmap(frame);
-			try
-			{
-				if (base.IsDisposed || !base.IsHandleCreated) return;
-				Invoke((Action)delegate
-				{
-					if (display == null || base.IsDisposed || previewVersion != _animationPreviewVersion
-						|| cancellationToken.IsCancellationRequested) return;
-					if (frameIndex == 0)
-					{
-						DisposeMedia();
-						SetPreviewRate(24);
-					}
-					_previewFrames.Add(display);
-					display = null;
-					streamedFrames = _previewFrames.Count;
-					_timeline.Maximum = Math.Max(0, _previewFrames.Count - 1);
-					_timeline.Enabled = _previewFrames.Count > 1;
-					if (frameIndex == 0)
-					{
-						_timeline.Value = 0;
-						ShowFrame(0);
-					}
-					SetSourceStatus("animation.preview.rendering", streamedFrames, frameCount);
-					if (_previewFrames.Count >= 2 && !_playing)
-					{
-						TogglePlay();
-					}
-				});
-			}
-			catch (InvalidOperationException)
-			{
-			}
-			finally
-			{
-				display?.Dispose();
-			}
-		}
-		CurrentMonsterAnimationPreview? current;
+		CurrentMonsterAnimationPreview currentMonsterAnimationPreview;
 		try
 		{
-			current = await Task.Run(() =>
+			currentMonsterAnimationPreview = await Task.Run(delegate
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				return MonsterAnimationCurrentPreview.TryLoad(set)
-					?? Spine42PreviewRenderer.TryLoad(set, animationName, previewMaxEdge: 512, cancellationToken: cancellationToken,
-						frameRendered: ShowRenderedFrame);
+				return MonsterAnimationCurrentPreview.TryLoad(set) ?? Spine42PreviewRenderer.TryLoad(set, animationName, 24, 120, 512, cancellationToken, ShowRenderedFrame);
 			}, cancellationToken);
 		}
 		catch (OperationCanceledException)
@@ -1061,7 +1113,7 @@ public sealed class MonsterAnimationForm : Form
 		}
 		finally
 		{
-			if (ReferenceEquals(_animationPreviewCancellation, cancellation))
+			if (_animationPreviewCancellation == cancellation)
 			{
 				_animationPreviewCancellation = null;
 			}
@@ -1069,10 +1121,10 @@ public sealed class MonsterAnimationForm : Form
 		}
 		if (previewVersion != _animationPreviewVersion || base.IsDisposed)
 		{
-			current?.Dispose();
+			currentMonsterAnimationPreview?.Dispose();
 			return;
 		}
-		if (current == null)
+		if (currentMonsterAnimationPreview == null)
 		{
 			DisposeMedia();
 			SetSourceStatus("animation.source.complex");
@@ -1080,34 +1132,80 @@ public sealed class MonsterAnimationForm : Form
 			SetResourceStatus(() => resourceBase() + Localizer.T("animation.status.preview.complex"));
 			return;
 		}
-		int fps = current.FramesPerSecond;
-		string loadedAnimationName = current.AnimationName;
-		int scalePercent = current.ScalePercent;
+		int framesPerSecond = currentMonsterAnimationPreview.FramesPerSecond;
+		string animationName2 = currentMonsterAnimationPreview.AnimationName;
+		int scalePercent = currentMonsterAnimationPreview.ScalePercent;
 		if (streamedFrames == 0)
 		{
-			List<Bitmap> frames = current.Frames.ToList();
-			current.Frames.Clear();
-			current.Dispose();
+			List<Bitmap> collection = currentMonsterAnimationPreview.Frames.ToList();
+			currentMonsterAnimationPreview.Frames.Clear();
+			currentMonsterAnimationPreview.Dispose();
 			DisposeMedia();
-			_previewFrames.AddRange(frames);
+			_previewFrames.AddRange(collection);
 		}
 		else
 		{
-			current.Dispose();
+			currentMonsterAnimationPreview.Dispose();
 		}
 		_scale.Value = scalePercent;
-		SetPreviewRate(fps);
+		SetPreviewRate(framesPerSecond);
 		_timeline.Maximum = Math.Max(0, _previewFrames.Count - 1);
 		_timeline.Value = 0;
 		_timeline.Enabled = _previewFrames.Count > 1;
 		SetPreviewStatus(() => "");
 		ShowFrame(0);
-		SetSourceStatus("animation.source.current", loadedAnimationName, _previewFrames.Count, fps,
-			(double)_previewFrames.Count / (double)fps, scalePercent);
+		SetSourceStatus("animation.source.current", animationName2, _previewFrames.Count, framesPerSecond, (double)_previewFrames.Count / (double)framesPerSecond, scalePercent);
 		SetResourceStatus(() => resourceBase() + Localizer.T("animation.status.preview.playing"));
 		if (!_playing)
 		{
 			TogglePlay();
+		}
+		void ShowRenderedFrame(Bitmap frame, int frameIndex, int frameCount)
+		{
+			if (cancellationToken.IsCancellationRequested)
+			{
+				return;
+			}
+			Bitmap display = new Bitmap(frame);
+			try
+			{
+				if (!base.IsDisposed && base.IsHandleCreated)
+				{
+					Invoke(delegate
+					{
+						if (display != null && !base.IsDisposed && previewVersion == _animationPreviewVersion && !cancellationToken.IsCancellationRequested)
+						{
+							if (frameIndex == 0)
+							{
+								DisposeMedia();
+								SetPreviewRate(24);
+							}
+							_previewFrames.Add(display);
+							display = null;
+							streamedFrames = _previewFrames.Count;
+							_timeline.Maximum = Math.Max(0, _previewFrames.Count - 1);
+							_timeline.Enabled = _previewFrames.Count > 1;
+							if (frameIndex == 0)
+							{
+								_timeline.Value = 0;
+								ShowFrame(0);
+							}
+							SetSourceStatus("animation.preview.rendering", streamedFrames, frameCount);
+							if (_previewFrames.Count >= 2 && !_playing)
+							{
+								TogglePlay();
+							}
+						}
+					});
+				}
+			}
+			catch (InvalidOperationException)
+			{
+			}
+			finally
+			{
+				display?.Dispose();
+			}
 		}
 	}
 
@@ -1145,15 +1243,14 @@ public sealed class MonsterAnimationForm : Form
 	{
 		if (_previewFrames.Count != 0)
 		{
-			int frame = (_playStartFrame + (int)Math.Floor(_playClock.Elapsed.TotalSeconds * _previewFramesPerSecond)) % _previewFrames.Count;
-			if (frame == _timeline.Value)
+			int num = (_playStartFrame + (int)Math.Floor(_playClock.Elapsed.TotalSeconds * (double)_previewFramesPerSecond)) % _previewFrames.Count;
+			if (num != _timeline.Value)
 			{
-				return;
+				_updatingTimeline = true;
+				_timeline.Value = num;
+				_updatingTimeline = false;
+				ShowFrame(_timeline.Value);
 			}
-			_updatingTimeline = true;
-			_timeline.Value = frame;
-			_updatingTimeline = false;
-			ShowFrame(_timeline.Value);
 		}
 	}
 
@@ -1169,52 +1266,54 @@ public sealed class MonsterAnimationForm : Form
 
 	private async Task ApplyAsync()
 	{
-		MonsterAnimationSet? set = _set;
-		if (set?.IsComplete != true || _media == null)
+		MonsterAnimationSet set = _set;
+		MonsterAnimationSet monsterAnimationSet = set;
+		if (monsterAnimationSet == null || !monsterAnimationSet.IsComplete || _media == null)
 		{
 			MessageBox.Show(this, Localizer.T("animation.prompt.officialonly"), Text);
+			return;
 		}
-		else
+		string text = Localizer.T("animation.operation.modify");
+		if (!EnsureGameClosed() || MessageBox.Show(this, Localizer.F("animation.confirm.apply.message", set.CardId, text), Localizer.T("animation.confirm.apply.title"), MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation) != DialogResult.OK)
 		{
-			string operation = Localizer.T("animation.operation.modify");
-			if (!EnsureGameClosed() || MessageBox.Show(this, Localizer.F("animation.confirm.apply.message", set.CardId, operation),
-				Localizer.T("animation.confirm.apply.title"), MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation) != DialogResult.OK)
+			return;
+		}
+		try
+		{
+			SetBusy(true, "animation.status.building");
+			await Task.Run(delegate
 			{
-				return;
-			}
+				AnimationWriteLease.Preflight(set);
+			});
+			MonsterAnimationTemplate template = await Task.Run(() => _service.ReadTemplate(_gameRoot, set));
+			MonsterAnimationBuildResult built = await Task.Run(() => MonsterAnimationBuilder.Build(_media.FramePaths, set.CardId, (int)_fps.Value, (int)_scale.Value, template, int.Parse(_atlasEdge.Text)));
 			try
 			{
-				SetBusy(busy: true, "animation.status.building");
-				await Task.Run(() => AnimationWriteLease.Preflight(set));
-				MonsterAnimationTemplate template = await Task.Run(() => _service.ReadTemplate(_gameRoot, set));
-				MonsterAnimationBuildResult built = await Task.Run(() => MonsterAnimationBuilder.Build(_media.FramePaths, set.CardId, (int)_fps.Value, (int)_scale.Value, template, int.Parse(_atlasEdge.Text)));
-				try
+				SetResourceStatus("animation.status.compressing", built.AtlasWidth, built.AtlasHeight);
+				await Task.Run(delegate
 				{
-					SetResourceStatus("animation.status.compressing", built.AtlasWidth, built.AtlasHeight);
-					await Task.Run(() => _service.Apply(_gameRoot, set, built));
-					_resourceStatus.ForeColor = UiTheme.Primary;
-					SetResourceStatus("animation.status.completed", built.FrameCount, built.FramesPerSecond,
-						(int)_scale.Value, built.AtlasWidth, built.AtlasHeight);
-					string launchNote = Localizer.T("animation.message.launch.restart");
-					MessageBox.Show(this, Localizer.F("animation.message.completed", launchNote),
-						Localizer.T("animation.message.completed.title"), MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
-				}
-				finally
-				{
-					if (built != null)
-					{
-						((IDisposable)built).Dispose();
-					}
-				}
-			}
-			catch (Exception ex)
-			{
-				MessageBox.Show(this, ex.Message, Localizer.T("animation.error.replace"), MessageBoxButtons.OK, MessageBoxIcon.Hand);
+					_service.Apply(_gameRoot, set, built);
+				});
+				_resourceStatus.ForeColor = UiTheme.Primary;
+				SetResourceStatus("animation.status.completed", built.FrameCount, built.FramesPerSecond, (int)_scale.Value, built.AtlasWidth, built.AtlasHeight);
+				string text2 = Localizer.T("animation.message.launch.restart");
+				MessageBox.Show(this, Localizer.F("animation.message.completed", text2), Localizer.T("animation.message.completed.title"), MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
 			}
 			finally
 			{
-				SetBusy(busy: false);
+				if (built != null)
+				{
+					((IDisposable)built).Dispose();
+				}
 			}
+		}
+		catch (Exception ex)
+		{
+			MessageBox.Show(this, ex.Message, Localizer.T("animation.error.replace"), MessageBoxButtons.OK, MessageBoxIcon.Hand);
+		}
+		finally
+		{
+			SetBusy(false, null);
 		}
 	}
 
@@ -1226,19 +1325,17 @@ public sealed class MonsterAnimationForm : Form
 		}
 		else
 		{
-			if (!EnsureGameClosed() || MessageBox.Show(this, Localizer.F("animation.confirm.restore.message", _set.CardId),
-				Localizer.T("animation.confirm.restore.title"), MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation) != DialogResult.OK)
+			if (!EnsureGameClosed() || MessageBox.Show(this, Localizer.F("animation.confirm.restore.message", _set.CardId), Localizer.T("animation.confirm.restore.title"), MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation) != DialogResult.OK)
 			{
 				return;
 			}
 			try
 			{
-				SetBusy(busy: true, "animation.status.restoring");
-				int count = await Task.Run(() => _service.Restore(_gameRoot, _set));
-				SetResourceStatus(count == 0 ? "animation.status.restore.none" : "animation.status.restore.count", count);
-				MessageBox.Show(this, count == 0 ? Localizer.T("animation.message.restore.none") : Localizer.F("animation.message.restore.count", count),
-					Localizer.T("animation.confirm.restore.title"), MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
-				if (count > 0)
+				SetBusy(true, "animation.status.restoring");
+				int num = await Task.Run(() => _service.Restore(_gameRoot, _set));
+				SetResourceStatus((num == 0) ? "animation.status.restore.none" : "animation.status.restore.count", num);
+				MessageBox.Show(this, (num == 0) ? Localizer.T("animation.message.restore.none") : Localizer.F("animation.message.restore.count", num), Localizer.T("animation.confirm.restore.title"), MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
+				if (num > 0)
 				{
 					_legacyCreation = false;
 					await LocateAsync();
@@ -1250,32 +1347,50 @@ public sealed class MonsterAnimationForm : Form
 			}
 			finally
 			{
-				SetBusy(busy: false);
+				SetBusy(false, null);
 			}
 		}
 	}
 
 	private async Task ChooseDonorAsync()
 	{
-		MonsterAnimationSet? target = _set;
-		if (_busy || target?.IsComplete != true) return;
+		MonsterAnimationSet target = _set;
+		if (_busy)
+		{
+			return;
+		}
+		MonsterAnimationSet monsterAnimationSet = target;
+		if (monsterAnimationSet == null || !monsterAnimationSet.IsComplete)
+		{
+			return;
+		}
 		try
 		{
-			SetBusy(true);
-			var ids = await Task.Run(() => MonsterAnimationIndexService.FindInstalledCardIds(_gameRoot));
-			using AnimationDonorPicker picker = new(_gameRoot, ids.Where(x => x != target.CardId));
-			if (picker.ShowDialog(this) != DialogResult.OK || picker.SelectedCardId == null) return;
+			SetBusy(true, null);
+			IReadOnlyList<string> source = await Task.Run(() => MonsterAnimationIndexService.FindInstalledCardIds(_gameRoot));
+			using AnimationDonorPicker picker = new AnimationDonorPicker(_gameRoot, source.Where((string x) => x != target.CardId));
+			if (picker.ShowDialog(this) != DialogResult.OK || picker.SelectedCardId == null)
+			{
+				return;
+			}
 			string donorId = picker.SelectedCardId;
-			if (!EnsureGameClosed() || MessageBox.Show(this,
-				$"使用卡号 {donorId} 的完整动画替换卡号 {target.CardId}？\n\n会一起替换 HD/SD 图集、骨骼和时间线，保留目标卡的触发动画名称。原文件会首次备份，可用“还原”恢复。\n仅修改本地资源；不为无原生动画卡增加触发。",
-				"确认替换动画", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
-			var donor = await Task.Run(() => MonsterAnimationIndexService.Find(_gameRoot, donorId));
-			int count = await Task.Run(() => MonsterAnimationTransferService.Replace(_gameRoot, target, donor));
+			if (!EnsureGameClosed() || MessageBox.Show(this, $"使用卡号 {donorId} 的完整动画替换卡号 {target.CardId}？\n\n会一起替换 HD/SD 图集、骨骼和时间线，保留目标卡的触发动画名称。原文件会首次备份，可用“还原”恢复。\n仅修改本地资源；不为无原生动画卡增加触发。", "确认替换动画", MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation) != DialogResult.OK)
+			{
+				return;
+			}
+			MonsterAnimationSet donor = await Task.Run(() => MonsterAnimationIndexService.Find(_gameRoot, donorId));
+			int value = await Task.Run(() => MonsterAnimationTransferService.Replace(_gameRoot, target, donor));
 			DisposeMedia();
-			MessageBox.Show(this, $"已替换 {count} 个动画 Bundle。请重新启动游戏查看。", "动画替换完成");
+			MessageBox.Show(this, $"已替换 {value} 个动画 Bundle。请重新启动游戏查看。", "动画替换完成");
 		}
-		catch (Exception ex) { MessageBox.Show(this, ex.Message, "动画替换失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
-		finally { SetBusy(false); }
+		catch (Exception ex)
+		{
+			MessageBox.Show(this, ex.Message, "动画替换失败", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+		}
+		finally
+		{
+			SetBusy(false, null);
+		}
 		await LocateAsync();
 	}
 
@@ -1288,11 +1403,22 @@ public sealed class MonsterAnimationForm : Form
 			SetResourceStatus(statusResourceId, statusValues);
 		}
 		_cardId.Enabled = !busy;
-		bool officialAnimation = !busy && _set?.IsComplete == true;
-		_chooseMedia.Enabled = officialAnimation;
-		_chooseDonor.Enabled = officialAnimation;
-		_apply.Enabled = officialAnimation && _media != null;
-		_restore.Enabled = !busy && (_set?.IsComplete == true || _legacyCreation);
+		bool flag = !busy && (_set?.IsComplete ?? false);
+		_chooseMedia.Enabled = flag;
+		_chooseDonor.Enabled = flag;
+		_apply.Enabled = flag && _media != null;
+		Button restore = _restore;
+		int enabled;
+		if (!busy)
+		{
+			MonsterAnimationSet? set = _set;
+			enabled = (((set != null && set.IsComplete) || _legacyCreation) ? 1 : 0);
+		}
+		else
+		{
+			enabled = 0;
+		}
+		restore.Enabled = (byte)enabled != 0;
 	}
 
 	private bool EnsureGameClosed()

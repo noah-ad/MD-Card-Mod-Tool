@@ -1,39 +1,37 @@
 using System;
 using System.Drawing;
 using System.Drawing.Imaging;
+using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 
 namespace MdCardModTool;
 
 public static class RgbaBitmap
 {
-	public static Bitmap FromPng(ReadOnlySpan<byte> png)
+	public unsafe static Bitmap FromPng(ReadOnlySpan<byte> png)
 	{
-		using SixLabors.ImageSharp.Image<Rgba32> source = SixLabors.ImageSharp.Image.Load<Rgba32>(png);
-		Bitmap bitmap = new(source.Width, source.Height, PixelFormat.Format32bppArgb);
-		BitmapData locked = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+		using Image<Rgba32> image = SixLabors.ImageSharp.Image.Load<Rgba32>(png);
+		Bitmap bitmap = new Bitmap(image.Width, image.Height, PixelFormat.Format32bppArgb);
+		BitmapData locked = bitmap.LockBits(new System.Drawing.Rectangle(0, 0, bitmap.Width, bitmap.Height), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
 		try
 		{
-			unsafe
+			byte* destination = (byte*)locked.Scan0;
+			image.ProcessPixelRows(delegate(PixelAccessor<Rgba32> accessor)
 			{
-				byte* destination = (byte*)locked.Scan0;
-				source.ProcessPixelRows(accessor =>
+				for (int i = 0; i < accessor.Height; i++)
 				{
-					for (int y = 0; y < accessor.Height; y++)
+					Span<Rgba32> rowSpan = accessor.GetRowSpan(i);
+					byte* ptr = destination + i * locked.Stride;
+					for (int j = 0; j < rowSpan.Length; j++)
 					{
-						Span<Rgba32> row = accessor.GetRowSpan(y);
-						byte* output = destination + y * locked.Stride;
-						for (int x = 0; x < row.Length; x++)
-						{
-							Rgba32 pixel = row[x];
-							output[x * 4] = pixel.B;
-							output[x * 4 + 1] = pixel.G;
-							output[x * 4 + 2] = pixel.R;
-							output[x * 4 + 3] = pixel.A;
-						}
+						Rgba32 rgba = rowSpan[j];
+						ptr[j * 4] = rgba.B;
+						ptr[j * 4 + 1] = rgba.G;
+						ptr[j * 4 + 2] = rgba.R;
+						ptr[j * 4 + 3] = rgba.A;
 					}
-				});
-			}
+				}
+			});
 		}
 		catch
 		{

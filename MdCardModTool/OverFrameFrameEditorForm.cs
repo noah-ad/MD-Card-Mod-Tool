@@ -5,15 +5,11 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 
 namespace MdCardModTool;
 
-/// <summary>
-/// Unified over-frame editor used by both ordinary cards and cards that already
-/// have an OF draft. The canvas is the source of truth: artwork is dragged and
-/// scaled directly over the final background -> frame -> subject layer stack.
-/// </summary>
 public sealed class OverFrameFrameEditorForm : Form
 {
 	private enum FrameCompositionMode
@@ -26,7 +22,10 @@ public sealed class OverFrameFrameEditorForm : Form
 
 	private sealed record FrameModeChoice(FrameCompositionMode Mode, string Label)
 	{
-		public override string ToString() => Label;
+		public override string ToString()
+		{
+			return Label;
+		}
 	}
 
 	private sealed class FrameChoice
@@ -43,7 +42,10 @@ public sealed class OverFrameFrameEditorForm : Form
 
 		public bool IsCustom => FilePath != null;
 
-		public override string ToString() => DisplayName;
+		public override string ToString()
+		{
+			return DisplayName;
+		}
 	}
 
 	private readonly string _gameRoot;
@@ -60,19 +62,19 @@ public sealed class OverFrameFrameEditorForm : Form
 
 	private readonly string? _initialFrameKey;
 
-	private readonly ModEngine _engine = new();
+	private readonly ModEngine _engine = new ModEngine();
 
-	private readonly OverFrameService _overFrames = new();
+	private readonly OverFrameService _overFrames = new OverFrameService();
 
 	private readonly TexRef[] _availableFrames;
 
-	private readonly ModernComboBox _mode = new()
+	private readonly ModernComboBox _mode = new ModernComboBox
 	{
 		DropDownStyle = ComboBoxStyle.DropDownList,
 		Dock = DockStyle.Fill
 	};
 
-	private readonly ModernComboBox _frames = new()
+	private readonly ModernComboBox _frames = new ModernComboBox
 	{
 		DropDownStyle = ComboBoxStyle.DropDownList,
 		Dock = DockStyle.Fill
@@ -80,7 +82,7 @@ public sealed class OverFrameFrameEditorForm : Form
 
 	private readonly CropCanvas _canvas;
 
-	private readonly TrackBar _zoom = new()
+	private readonly TrackBar _zoom = new TrackBar
 	{
 		Minimum = 1,
 		Maximum = 2000,
@@ -94,7 +96,7 @@ public sealed class OverFrameFrameEditorForm : Form
 		BackColor = UiTheme.SurfaceAlt
 	};
 
-	private readonly Label _zoomValue = new()
+	private readonly Label _zoomValue = new Label
 	{
 		AutoSize = false,
 		Width = 58,
@@ -104,7 +106,7 @@ public sealed class OverFrameFrameEditorForm : Form
 		Text = "100%"
 	};
 
-	private readonly Label _transformStatus = new()
+	private readonly Label _transformStatus = new Label
 	{
 		AutoSize = false,
 		Width = 210,
@@ -114,16 +116,16 @@ public sealed class OverFrameFrameEditorForm : Form
 		AutoEllipsis = true
 	};
 
-	private readonly Label _status = new()
+	private readonly Label _status = new Label
 	{
 		Dock = DockStyle.Bottom,
 		Height = 46,
 		Padding = new Padding(12, 7, 12, 7),
-		ForeColor = Color.Gainsboro,
+		ForeColor = System.Drawing.Color.Gainsboro,
 		AutoEllipsis = true
 	};
 
-	private readonly Label _layerStatus = new()
+	private readonly Label _layerStatus = new Label
 	{
 		Dock = DockStyle.Fill,
 		ForeColor = UiTheme.Gold,
@@ -137,14 +139,14 @@ public sealed class OverFrameFrameEditorForm : Form
 
 	private readonly RoundedButton _editCanvasButton;
 
-	private readonly System.Windows.Forms.Timer _renderTimer = new()
+	private readonly Timer _renderTimer = new Timer
 	{
 		Interval = 160
 	};
 
-	private readonly Dictionary<string, byte[]> _frameCache = new(StringComparer.OrdinalIgnoreCase);
+	private readonly Dictionary<string, byte[]> _frameCache = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
 
-	private readonly Dictionary<string, AstellarOverFrameTemplate> _overFrameTemplateCache = new(StringComparer.OrdinalIgnoreCase);
+	private readonly Dictionary<string, AstellarOverFrameTemplate> _overFrameTemplateCache = new Dictionary<string, AstellarOverFrameTemplate>(StringComparer.OrdinalIgnoreCase);
 
 	private byte[]? _sourceBytes;
 
@@ -173,6 +175,7 @@ public sealed class OverFrameFrameEditorForm : Form
 	private bool _loading;
 
 	private bool _rendering;
+
 	private bool _renderPending;
 
 	private bool _syncingZoom;
@@ -187,67 +190,82 @@ public sealed class OverFrameFrameEditorForm : Form
 
 	private string? _customFramePath;
 
-	private OverFrameFrameSettings _savedSettings = new();
+	private OverFrameFrameSettings _savedSettings = new OverFrameFrameSettings();
 
 	public string AppliedFrameName { get; private set; } = "";
 
-	public OverFrameFrameEditorForm(string gameRoot, TexRef art, IEnumerable<TexRef> frames,
-		byte[]? initialArt = null, string? initialFrameKey = null,
-		byte[]? initialBackground = null, bool replaceStoredBackground = false)
+	private FrameCompositionMode CurrentMode => (_mode.SelectedItem as FrameModeChoice)?.Mode ?? FrameCompositionMode.AstellarTransparent;
+
+	public OverFrameFrameEditorForm(string gameRoot, TexRef art, IEnumerable<TexRef> frames, byte[]? initialArt = null, string? initialFrameKey = null, byte[]? initialBackground = null, bool replaceStoredBackground = false)
 	{
 		UiTheme.ApplyDarkTitleBar(this);
 		if (!ushort.TryParse(art.CardKey, out _cardId))
 		{
-			throw new ArgumentException("所选资源没有有效卡号。", nameof(art));
+			throw new ArgumentException("所选资源没有有效卡号。", "art");
 		}
-
 		_gameRoot = gameRoot;
 		_art = art;
-		_availableFrames = frames.Where(frame => frame.Width == FrameComposer.Width
-			&& frame.Height == FrameComposer.Height).ToArray();
+		_availableFrames = frames.Where((TexRef frame) => frame.Width == 704 && frame.Height == 1024).ToArray();
 		_initialSource = initialArt?.ToArray();
 		_initialFrameKey = initialFrameKey;
 		_initialBackground = initialBackground?.ToArray();
 		_replaceStoredBackground = replaceStoredBackground;
-
 		Text = $"制作超框 · {_cardId}";
-		StartPosition = FormStartPosition.CenterParent;
-		Size = new Size(1120, 900);
-		MinimumSize = new Size(860, 700);
+		base.StartPosition = FormStartPosition.CenterParent;
+		base.Size = new System.Drawing.Size(1120, 900);
+		MinimumSize = new System.Drawing.Size(860, 700);
 		BackColor = UiTheme.Window;
 		ForeColor = UiTheme.Text;
 		Font = new Font("Microsoft YaHei UI", 9f);
-		AutoScaleMode = AutoScaleMode.Dpi;
-		KeyPreview = true;
-		DpiChanged += delegate { UiTheme.QueueStableRepaint(this); };
-		ResizeEnd += delegate { UiTheme.QueueStableRepaint(this); };
-
+		base.AutoScaleMode = AutoScaleMode.Dpi;
+		base.KeyPreview = true;
+		base.DpiChanged += delegate
+		{
+			UiTheme.QueueStableRepaint(this);
+		};
+		base.ResizeEnd += delegate
+		{
+			UiTheme.QueueStableRepaint(this);
+		};
 		UiTheme.StyleComboBox(_mode);
 		UiTheme.StyleComboBox(_frames);
 		_mode.Items.Add(new FrameModeChoice(FrameCompositionMode.AstellarTransparent, "透明卡框"));
 		_mode.Items.Add(new FrameModeChoice(FrameCompositionMode.TransparentGradient, "透明炫彩卡框"));
 		_mode.Items.Add(new FrameModeChoice(FrameCompositionMode.FloowanGradient, "炫彩卡框"));
 		_mode.Items.Add(new FrameModeChoice(FrameCompositionMode.StandardComplete, "普通卡框"));
-		_mode.SelectedItem = _mode.Items.Cast<object>().OfType<FrameModeChoice>()
-			.First(choice => choice.Mode == ModeForFrameKey(_initialFrameKey,
-				FrameCompositionMode.AstellarTransparent));
+		_mode.SelectedItem = _mode.Items.Cast<object>().OfType<FrameModeChoice>().First((FrameModeChoice choice) => choice.Mode == ModeForFrameKey(_initialFrameKey, FrameCompositionMode.AstellarTransparent));
 		RefreshFrameChoices(_initialFrameKey);
-
-		using Bitmap placeholder = new(2, 2);
-		_canvas = new CropCanvas(new Bitmap(placeholder), FrameComposer.Width, FrameComposer.Height,
-			fullCardOverlay: false, overFrameEditing: true)
+		using Bitmap original = new Bitmap(2, 2);
+		_canvas = new CropCanvas(new Bitmap(original), 704, 1024, fullCardOverlay: false, overFrameEditing: true)
 		{
 			Dock = DockStyle.Fill,
 			TabStop = true,
 			AccessibleName = "超框卡图直接编辑画布"
 		};
-
-		Button exportFrame = Button("导出卡框 PNG", async delegate { await ExportFrameAsync(); });
-		Button importFrame = Button("导入自定义卡框", async delegate { await ImportFrameAsync(); });
-		Button changeArt = UiTheme.Button("更换卡图", async delegate { await ChangeArtAsync(); }, ButtonTone.Primary);
-		Button addBackground = UiTheme.Button("添加叠底背景", async delegate { await AddBackgroundAsync(); }, ButtonTone.Gold);
-		_clearBackgroundButton = Button("清除背景", async delegate { await ClearBackgroundAsync(); });
-		Button exportPreview = Button("导出最终 PNG", delegate { ExportPreview(); });
+		Button exportFrame = Button("导出卡框 PNG", async delegate
+		{
+			await ExportFrameAsync();
+		});
+		Button importFrame = Button("导入自定义卡框", async delegate
+		{
+			await ImportFrameAsync();
+		});
+		Button changeArt = UiTheme.Button("更换卡图", async delegate
+		{
+			await ChangeArtAsync();
+		}, ButtonTone.Primary);
+		Button addBackground = UiTheme.Button("添加叠底背景", async delegate
+		{
+			await AddBackgroundAsync();
+		}, ButtonTone.Gold);
+		_clearBackgroundButton = Button("清除背景", async delegate
+		{
+			await ClearBackgroundAsync();
+		});
+		Button exportPreview = Button("导出最终 PNG", delegate
+		{
+			ExportPreview();
+		});
 		_finalPreviewButton = (RoundedButton)UiTheme.Button("真实 Alpha 预览", delegate
 		{
 			SetCanvasView(showRenderedPreview: true);
@@ -266,14 +284,14 @@ public sealed class OverFrameFrameEditorForm : Form
 			SetCanvasView(showRenderedPreview: false);
 			_canvas.ShowWholeImage();
 		});
-		Button apply = Button("应用到游戏", async delegate { await ApplyAsync(); }, accent: true);
-
-		TableLayoutPanel top = BuildToolbar(apply, changeArt, addBackground, importFrame,
-			exportFrame, exportPreview, _finalPreviewButton, _editCanvasButton, reset, whole);
-		Controls.Add(_canvas);
-		Controls.Add(_status);
-		Controls.Add(top);
-
+		Button apply = Button("应用到游戏", async delegate
+		{
+			await ApplyAsync();
+		}, accent: true);
+		TableLayoutPanel value = BuildToolbar(apply, changeArt, addBackground, importFrame, exportFrame, exportPreview, _finalPreviewButton, _editCanvasButton, reset, whole);
+		base.Controls.Add(_canvas);
+		base.Controls.Add(_status);
+		base.Controls.Add(value);
 		_canvas.ZoomChanged += CanvasZoomChanged;
 		_canvas.ViewChanged += CanvasViewChanged;
 		_zoom.ValueChanged += ZoomValueChanged;
@@ -284,108 +302,120 @@ public sealed class OverFrameFrameEditorForm : Form
 		};
 		_frames.SelectedIndexChanged += async delegate
 		{
-			if (!_loading) await RenderAsync();
+			if (!_loading)
+			{
+				await RenderAsync();
+			}
 		};
 		_mode.SelectedIndexChanged += async delegate
 		{
-			if (_loading) return;
-			string? baseKey = (_frames.SelectedItem as FrameChoice)?.BaseKey;
-			RefreshFrameChoices(baseKey);
-			await RenderAsync();
+			if (!_loading)
+			{
+				string wantedKey = (_frames.SelectedItem as FrameChoice)?.BaseKey;
+				RefreshFrameChoices(wantedKey);
+				await RenderAsync();
+			}
 		};
-		Shown += async delegate { await LoadAsync(); };
-		FormClosing += delegate
+		base.Shown += async delegate
+		{
+			await LoadAsync();
+		};
+		base.FormClosing += delegate
 		{
 			_renderTimer.Stop();
 			_generation++;
 			SaveLatestDraftOnClose();
 		};
-		FormClosed += delegate { _renderTimer.Stop(); };
-
+		base.FormClosed += delegate
+		{
+			_renderTimer.Stop();
+		};
 		UpdateLayerStatus();
 		UpdateTransformStatus();
 		SetCanvasView(showRenderedPreview: true);
 	}
 
-	private TableLayoutPanel BuildToolbar(Button apply, Button changeArt, Button addBackground,
-		Button importFrame, Button exportFrame, Button exportPreview, Button finalPreview,
-		Button editCanvas, Button reset, Button whole)
+	private TableLayoutPanel BuildToolbar(Button apply, Button changeArt, Button addBackground, Button importFrame, Button exportFrame, Button exportPreview, Button finalPreview, Button editCanvas, Button reset, Button whole)
 	{
-		TableLayoutPanel top = new()
+		TableLayoutPanel tableLayoutPanel = new TableLayoutPanel();
+		tableLayoutPanel.Dock = DockStyle.Top;
+		tableLayoutPanel.Height = 314;
+		tableLayoutPanel.Padding = new Padding(14, 10, 14, 8);
+		tableLayoutPanel.ColumnCount = 3;
+		tableLayoutPanel.RowCount = 8;
+		tableLayoutPanel.BackColor = UiTheme.SurfaceAlt;
+		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
+		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
+		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
+		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
+		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
+		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
+		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 30f));
+		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+		tableLayoutPanel.Controls.Add(ToolbarLabel("卡框分类", UiTheme.Gold), 0, 0);
+		tableLayoutPanel.Controls.Add(_mode, 1, 0);
+		tableLayoutPanel.SetColumnSpan(_mode, 2);
+		tableLayoutPanel.Controls.Add(ToolbarLabel("卡框", System.Drawing.Color.FromArgb(160, 195, 255)), 0, 1);
+		tableLayoutPanel.Controls.Add(_frames, 1, 1);
+		tableLayoutPanel.Controls.Add(apply, 2, 1);
+		FlowLayoutPanel flowLayoutPanel = ActionRow();
+		flowLayoutPanel.Controls.Add(changeArt);
+		flowLayoutPanel.Controls.Add(addBackground);
+		flowLayoutPanel.Controls.Add(_clearBackgroundButton);
+		Button button = UiTheme.Button("移动卡图", delegate
 		{
-			Dock = DockStyle.Top,
-			Height = 314,
-			Padding = new Padding(14, 10, 14, 8),
-			ColumnCount = 3,
-			RowCount = 8,
-			BackColor = UiTheme.SurfaceAlt
+		});
+		Button button2 = UiTheme.Button("移动背景", delegate
+		{
+		});
+		button.Click += delegate
+		{
+			SetCanvasView(showRenderedPreview: false);
+			_canvas.EditBackground(enabled: false);
 		};
-		top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-		top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-		top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
-		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
-		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
-		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
-		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
-		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
-		top.RowStyles.Add(new RowStyle(SizeType.Absolute, 30f));
-		top.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-
-		top.Controls.Add(ToolbarLabel("卡框分类", UiTheme.Gold), 0, 0);
-		top.Controls.Add(_mode, 1, 0);
-		top.SetColumnSpan(_mode, 2);
-		top.Controls.Add(ToolbarLabel("卡框", Color.FromArgb(160, 195, 255)), 0, 1);
-		top.Controls.Add(_frames, 1, 1);
-		top.Controls.Add(apply, 2, 1);
-
-		FlowLayoutPanel layerActions = ActionRow();
-		layerActions.Controls.Add(changeArt);
-		layerActions.Controls.Add(addBackground);
-		layerActions.Controls.Add(_clearBackgroundButton);
-		Button editArt = UiTheme.Button("移动卡图", (_, _) => { });
-		Button editBackground = UiTheme.Button("移动背景", (_, _) => { });
-		editArt.Click += (_, _) => { SetCanvasView(false); _canvas.EditBackground(false); };
-		editBackground.Click += (_, _) => { SetCanvasView(false); _canvas.EditBackground(true); };
-		layerActions.Controls.Add(editArt);
-		layerActions.Controls.Add(editBackground);
-		top.Controls.Add(layerActions, 0, 2);
-		top.SetColumnSpan(layerActions, 3);
-
-		FlowLayoutPanel fileActions = ActionRow();
-		fileActions.Controls.Add(importFrame);
-		fileActions.Controls.Add(exportFrame);
-		fileActions.Controls.Add(exportPreview);
-		top.Controls.Add(fileActions, 0, 3);
-		top.SetColumnSpan(fileActions, 3);
-
-		FlowLayoutPanel previewActions = ActionRow();
-		previewActions.Controls.Add(ToolbarLabel("画布模式", UiTheme.Text));
-		previewActions.Controls.Add(finalPreview);
-		previewActions.Controls.Add(editCanvas);
-		previewActions.Controls.Add(new Label
+		button2.Click += delegate
+		{
+			SetCanvasView(showRenderedPreview: false);
+			_canvas.EditBackground(enabled: true);
+		};
+		flowLayoutPanel.Controls.Add(button);
+		flowLayoutPanel.Controls.Add(button2);
+		tableLayoutPanel.Controls.Add(flowLayoutPanel, 0, 2);
+		tableLayoutPanel.SetColumnSpan(flowLayoutPanel, 3);
+		FlowLayoutPanel flowLayoutPanel2 = ActionRow();
+		flowLayoutPanel2.Controls.Add(importFrame);
+		flowLayoutPanel2.Controls.Add(exportFrame);
+		flowLayoutPanel2.Controls.Add(exportPreview);
+		tableLayoutPanel.Controls.Add(flowLayoutPanel2, 0, 3);
+		tableLayoutPanel.SetColumnSpan(flowLayoutPanel2, 3);
+		FlowLayoutPanel flowLayoutPanel3 = ActionRow();
+		flowLayoutPanel3.Controls.Add(ToolbarLabel("画布模式", UiTheme.Text));
+		flowLayoutPanel3.Controls.Add(finalPreview);
+		flowLayoutPanel3.Controls.Add(editCanvas);
+		flowLayoutPanel3.Controls.Add(new Label
 		{
 			Text = "棋盘格表示真实透明区域；Alpha=0 下的 RGB 数据仍原样保留",
 			AutoSize = true,
 			ForeColor = UiTheme.Muted,
 			Margin = new Padding(12, 9, 0, 0)
 		});
-		top.Controls.Add(previewActions, 0, 4);
-		top.SetColumnSpan(previewActions, 3);
-
-		FlowLayoutPanel canvasActions = ActionRow();
-		canvasActions.Controls.Add(ToolbarLabel("当前图层缩放", UiTheme.Text));
-		canvasActions.Controls.Add(_zoom);
-		canvasActions.Controls.Add(_zoomValue);
-		canvasActions.Controls.Add(reset);
-		canvasActions.Controls.Add(whole);
-		canvasActions.Controls.Add(_transformStatus);
-		top.Controls.Add(canvasActions, 0, 5);
-		top.SetColumnSpan(canvasActions, 3);
-
-		top.Controls.Add(_layerStatus, 0, 6);
-		top.SetColumnSpan(_layerStatus, 3);
-		Label help = new()
+		tableLayoutPanel.Controls.Add(flowLayoutPanel3, 0, 4);
+		tableLayoutPanel.SetColumnSpan(flowLayoutPanel3, 3);
+		FlowLayoutPanel flowLayoutPanel4 = ActionRow();
+		flowLayoutPanel4.Controls.Add(ToolbarLabel("当前图层缩放", UiTheme.Text));
+		flowLayoutPanel4.Controls.Add(_zoom);
+		flowLayoutPanel4.Controls.Add(_zoomValue);
+		flowLayoutPanel4.Controls.Add(reset);
+		flowLayoutPanel4.Controls.Add(whole);
+		flowLayoutPanel4.Controls.Add(_transformStatus);
+		tableLayoutPanel.Controls.Add(flowLayoutPanel4, 0, 5);
+		tableLayoutPanel.SetColumnSpan(flowLayoutPanel4, 3);
+		tableLayoutPanel.Controls.Add(_layerStatus, 0, 6);
+		tableLayoutPanel.SetColumnSpan(_layerStatus, 3);
+		Label control = new Label
 		{
 			Text = "直接在下方卡面拖动主体；滚轮或滑杆缩放，方向键微调，Shift + 方向键快速移动，双击恢复铺满。真正超框的图层顺序为：叠底背景 → 卡框 → 透明主体。",
 			Dock = DockStyle.Fill,
@@ -393,12 +423,12 @@ public sealed class OverFrameFrameEditorForm : Form
 			AutoEllipsis = true,
 			TextAlign = ContentAlignment.MiddleLeft
 		};
-		top.Controls.Add(help, 0, 7);
-		top.SetColumnSpan(help, 3);
-		return top;
+		tableLayoutPanel.Controls.Add(control, 0, 7);
+		tableLayoutPanel.SetColumnSpan(control, 3);
+		return tableLayoutPanel;
 	}
 
-	private static Label ToolbarLabel(string text, Color color)
+	private static Label ToolbarLabel(string text, System.Drawing.Color color)
 	{
 		return new Label
 		{
@@ -429,64 +459,55 @@ public sealed class OverFrameFrameEditorForm : Form
 		return UiTheme.Button(text, click, accent ? ButtonTone.Primary : ButtonTone.Neutral);
 	}
 
-	private FrameCompositionMode CurrentMode =>
-		(_mode.SelectedItem as FrameModeChoice)?.Mode ?? FrameCompositionMode.AstellarTransparent;
-
 	private static FrameCompositionMode ModeForFrameKey(string? frameKey, FrameCompositionMode fallback)
 	{
-		if (frameKey?.StartsWith("transparent_gradient_", StringComparison.OrdinalIgnoreCase) == true)
+		if (frameKey != null && frameKey.StartsWith("transparent_gradient_", StringComparison.OrdinalIgnoreCase))
 		{
 			return FrameCompositionMode.TransparentGradient;
 		}
-		if (frameKey?.StartsWith("transparent_", StringComparison.OrdinalIgnoreCase) == true)
+		if (frameKey != null && frameKey.StartsWith("transparent_", StringComparison.OrdinalIgnoreCase))
 		{
 			return FrameCompositionMode.AstellarTransparent;
 		}
-		if (frameKey?.StartsWith("gradient_", StringComparison.OrdinalIgnoreCase) == true)
+		if (frameKey != null && frameKey.StartsWith("gradient_", StringComparison.OrdinalIgnoreCase))
 		{
 			return FrameCompositionMode.FloowanGradient;
 		}
-		if (frameKey?.Equals("__custom__", StringComparison.OrdinalIgnoreCase) == true)
+		if (frameKey != null && frameKey.Equals("__custom__", StringComparison.OrdinalIgnoreCase))
 		{
 			return FrameCompositionMode.StandardComplete;
 		}
-		// A bare card_frameXX key is a card-type recommendation, not a request for
-		// the ordinary/flat composition mode. New cards therefore keep the caller's
-		// transparent-overframe fallback while still selecting the correct base frame.
 		return fallback;
 	}
 
 	private void SelectMode(FrameCompositionMode mode)
 	{
-		_mode.SelectedItem = _mode.Items.Cast<object>().OfType<FrameModeChoice>()
-			.First(choice => choice.Mode == mode);
+		_mode.SelectedItem = _mode.Items.Cast<object>().OfType<FrameModeChoice>().First((FrameModeChoice choice) => choice.Mode == mode);
 	}
 
 	private void RefreshFrameChoices(string? wantedKey)
 	{
-		bool previousLoading = _loading;
+		bool loading = _loading;
 		_loading = true;
 		try
 		{
 			_frames.BeginUpdate();
 			_frames.Items.Clear();
-			IEnumerable<TexRef> source = CurrentMode switch
+			foreach (TexRef item in (CurrentMode switch
 			{
 				FrameCompositionMode.AstellarTransparent => _availableFrames.Where(BuiltInCardFrameCatalog.IsTransparentFrame),
 				FrameCompositionMode.TransparentGradient => _availableFrames.Where(BuiltInCardFrameCatalog.IsTransparentGradientFrame),
 				FrameCompositionMode.FloowanGradient => _availableFrames.Where(BuiltInCardFrameCatalog.IsGradientFrame),
-				_ => _availableFrames.Where(BuiltInCardFrameCatalog.IsNormalFrame)
-			};
-			foreach (TexRef texture in source.OrderBy(frame => CardFrameCatalog.BaseKey(frame.Name),
-				StringComparer.OrdinalIgnoreCase))
+				_ => _availableFrames.Where(BuiltInCardFrameCatalog.IsNormalFrame),
+			}).OrderBy<TexRef, string>((TexRef frame) => CardFrameCatalog.BaseKey(frame.Name), StringComparer.OrdinalIgnoreCase))
 			{
-				string baseKey = CardFrameCatalog.BaseKey(texture.Name);
+				string text = CardFrameCatalog.BaseKey(item.Name);
 				_frames.Items.Add(new FrameChoice
 				{
-					Texture = texture,
-					Key = texture.Name,
-					BaseKey = baseKey,
-					DisplayName = $"{baseKey} · {CardFrameCatalog.FriendlyName(baseKey)}"
+					Texture = item,
+					Key = item.Name,
+					BaseKey = text,
+					DisplayName = text + " · " + CardFrameCatalog.FriendlyName(text)
 				});
 			}
 			if (CurrentMode == FrameCompositionMode.StandardComplete && File.Exists(_customFramePath))
@@ -499,34 +520,26 @@ public sealed class OverFrameFrameEditorForm : Form
 					DisplayName = "自定义卡框 · " + Path.GetFileName(_customFramePath)
 				});
 			}
-			string wantedBase = CardFrameCatalog.BaseKey(string.IsNullOrWhiteSpace(wantedKey)
-				? "card_frame01"
-				: wantedKey);
-			FrameChoice? selected = _frames.Items.Cast<object>().OfType<FrameChoice>()
-				.FirstOrDefault(choice => choice.Key.Equals(wantedKey, StringComparison.OrdinalIgnoreCase))
-				?? _frames.Items.Cast<object>().OfType<FrameChoice>()
-					.FirstOrDefault(choice => choice.BaseKey.Equals(wantedBase, StringComparison.OrdinalIgnoreCase))
-				?? _frames.Items.Cast<object>().OfType<FrameChoice>().FirstOrDefault();
-			_frames.SelectedItem = selected;
+			string wantedBase = CardFrameCatalog.BaseKey(string.IsNullOrWhiteSpace(wantedKey) ? "card_frame01" : wantedKey);
+			FrameChoice selectedItem = _frames.Items.Cast<object>().OfType<FrameChoice>().FirstOrDefault((FrameChoice choice) => choice.Key.Equals(wantedKey, StringComparison.OrdinalIgnoreCase)) ?? _frames.Items.Cast<object>().OfType<FrameChoice>().FirstOrDefault((FrameChoice choice) => choice.BaseKey.Equals(wantedBase, StringComparison.OrdinalIgnoreCase)) ?? _frames.Items.Cast<object>().OfType<FrameChoice>().FirstOrDefault();
+			_frames.SelectedItem = selectedItem;
 		}
 		finally
 		{
 			_frames.EndUpdate();
-			_loading = previousLoading;
+			_loading = loading;
 		}
 	}
 
 	private async Task LoadAsync()
 	{
-		UseWaitCursor = true;
+		base.UseWaitCursor = true;
 		_loading = true;
 		_status.Text = "正在读取当前卡图、构图与卡框…";
 		try
 		{
 			_savedSettings = OverFrameArtStore.ReadSettings(_gameRoot, _cardId);
-			string mappingFrameKey = !string.IsNullOrWhiteSpace(_initialFrameKey)
-				? _initialFrameKey
-				: _savedSettings.FrameKey;
+			string mappingFrameKey = ((!string.IsNullOrWhiteSpace(_initialFrameKey)) ? _initialFrameKey : _savedSettings.FrameKey);
 			if (_replaceStoredBackground)
 			{
 				await Task.Run(delegate
@@ -541,20 +554,24 @@ public sealed class OverFrameFrameEditorForm : Form
 					}
 				});
 			}
-
 			string sourcePath = OverFrameArtStore.SourcePath(_gameRoot, _cardId);
-			GameTextureDisplayMapping liveSourceMapping = GameTextureDisplayMapping.Resolve(_art,
-				mappingFrameKey);
+			GameTextureDisplayMapping liveSourceMapping = GameTextureDisplayMapping.Resolve(_art, mappingFrameKey);
 			if (_initialSource != null)
 			{
-				await Task.Run(() => OverFrameArtStore.SaveSource(_gameRoot, _cardId, _initialSource));
+				await Task.Run(delegate
+				{
+					OverFrameArtStore.SaveSource(_gameRoot, _cardId, _initialSource);
+				});
 			}
 			else if (!File.Exists(sourcePath))
 			{
 				string legacyArt = OverFrameArtStore.ArtPath(_gameRoot, _cardId);
 				if (File.Exists(legacyArt))
 				{
-					await Task.Run(() => OverFrameArtStore.SaveSource(_gameRoot, _cardId, legacyArt));
+					await Task.Run(delegate
+					{
+						OverFrameArtStore.SaveSource(_gameRoot, _cardId, legacyArt);
+					});
 				}
 				else
 				{
@@ -563,24 +580,24 @@ public sealed class OverFrameFrameEditorForm : Form
 					{
 						current = await Task.Run(() => liveSourceMapping.DecodeForDisplay(current));
 					}
-					await Task.Run(() => OverFrameArtStore.SaveSource(_gameRoot, _cardId, current));
+					await Task.Run(delegate
+					{
+						OverFrameArtStore.SaveSource(_gameRoot, _cardId, current);
+					});
 				}
 			}
-
 			_sourceBytes = await File.ReadAllBytesAsync(sourcePath);
 			if (_initialSource == null)
 			{
-				SixLabors.ImageSharp.ImageInfo sourceInfo = SixLabors.ImageSharp.Image.Identify(_sourceBytes)
-					?? throw new InvalidDataException("超框源图无法识别。");
-				GameTextureDisplayMapping draftMapping = GameTextureDisplayMapping.ResolveCanvas(_art,
-					sourceInfo.Width, sourceInfo.Height, mappingFrameKey);
+				ImageInfo imageInfo = SixLabors.ImageSharp.Image.Identify(_sourceBytes) ?? throw new InvalidDataException("超框源图无法识别。");
+				GameTextureDisplayMapping draftMapping = GameTextureDisplayMapping.ResolveCanvas(_art, imageInfo.Width, imageInfo.Height, mappingFrameKey);
 				if (draftMapping.RequiresMapping)
 				{
-					// Upgrade drafts created before display/storage mapping was separated.
-					// Resolve against the draft's own dimensions so this also works after
-					// the live target has already become a 704×1024 over-frame Texture2D.
 					_sourceBytes = await Task.Run(() => draftMapping.DecodeForDisplay(_sourceBytes));
-					await Task.Run(() => OverFrameArtStore.SaveSource(_gameRoot, _cardId, _sourceBytes));
+					await Task.Run(delegate
+					{
+						OverFrameArtStore.SaveSource(_gameRoot, _cardId, _sourceBytes);
+					});
 				}
 			}
 			_sourceHasTransparency = await Task.Run(() => HasMeaningfulTransparency(_sourceBytes));
@@ -593,40 +610,31 @@ public sealed class OverFrameFrameEditorForm : Form
 			{
 				_suppressCanvasChanges = false;
 			}
-
-			string backgroundPath = OverFrameArtStore.BackgroundPath(_gameRoot, _cardId);
-			_backgroundBytes = File.Exists(backgroundPath)
-				? await File.ReadAllBytesAsync(backgroundPath)
-				: null;
+			string path = OverFrameArtStore.BackgroundPath(_gameRoot, _cardId);
+			byte[] backgroundBytes = ((!File.Exists(path)) ? null : (await File.ReadAllBytesAsync(path)));
+			_backgroundBytes = backgroundBytes;
 			SetCanvasBackground();
-			if (!_replaceStoredBackground && _savedSettings.BackgroundImageScale > 0)
-				_canvas.SetBackgroundRenderSpec(new(FrameComposer.Width, FrameComposer.Height,
-					_savedSettings.BackgroundImageScale, _savedSettings.BackgroundOffsetX, _savedSettings.BackgroundOffsetY));
-
-			FrameCompositionMode savedMode = _savedSettings.CompositionMode.Equals("StandardComplete",
-				StringComparison.OrdinalIgnoreCase)
-				? FrameCompositionMode.StandardComplete
-				: _savedSettings.CompositionMode.Equals("TransparentGradient", StringComparison.OrdinalIgnoreCase)
-					? FrameCompositionMode.TransparentGradient
-					: _savedSettings.CompositionMode.Equals("FloowanGradient", StringComparison.OrdinalIgnoreCase)
-						? FrameCompositionMode.FloowanGradient
-						: FrameCompositionMode.AstellarTransparent;
+			if (!_replaceStoredBackground && _savedSettings.BackgroundImageScale > 0f)
+			{
+				_canvas.SetBackgroundRenderSpec(new ImageRenderSpec(704f, 1024f, _savedSettings.BackgroundImageScale, _savedSettings.BackgroundOffsetX, _savedSettings.BackgroundOffsetY));
+			}
+			FrameCompositionMode frameCompositionMode = (_savedSettings.CompositionMode.Equals("StandardComplete", StringComparison.OrdinalIgnoreCase) ? FrameCompositionMode.StandardComplete : (_savedSettings.CompositionMode.Equals("TransparentGradient", StringComparison.OrdinalIgnoreCase) ? FrameCompositionMode.TransparentGradient : (_savedSettings.CompositionMode.Equals("FloowanGradient", StringComparison.OrdinalIgnoreCase) ? FrameCompositionMode.FloowanGradient : FrameCompositionMode.AstellarTransparent)));
 			if (!string.IsNullOrWhiteSpace(_initialFrameKey))
 			{
-				savedMode = ModeForFrameKey(_initialFrameKey, savedMode);
+				frameCompositionMode = ModeForFrameKey(_initialFrameKey, frameCompositionMode);
 			}
-			SelectMode(savedMode);
-
-			string custom = OverFrameArtStore.CustomFramePath(_gameRoot, _cardId);
-			if (File.Exists(custom)) _customFramePath = custom;
-			string wanted = !string.IsNullOrWhiteSpace(_initialFrameKey)
-				? _initialFrameKey
-				: (_savedSettings.UsesCustomFrame ? "__custom__" : _savedSettings.FrameKey);
+			SelectMode(frameCompositionMode);
+			string text = OverFrameArtStore.CustomFramePath(_gameRoot, _cardId);
+			if (File.Exists(text))
+			{
+				_customFramePath = text;
+			}
+			string wantedKey = ((!string.IsNullOrWhiteSpace(_initialFrameKey)) ? _initialFrameKey : (_savedSettings.UsesCustomFrame ? "__custom__" : _savedSettings.FrameKey));
 			if (_savedSettings.UsesCustomFrame && string.IsNullOrWhiteSpace(_initialFrameKey))
 			{
 				SelectMode(FrameCompositionMode.StandardComplete);
 			}
-			RefreshFrameChoices(wanted);
+			RefreshFrameChoices(wantedKey);
 			if (_frames.Items.Count == 0)
 			{
 				throw new InvalidOperationException("没有可用的 704×1024 卡框，请回主界面重建索引。\n自定义卡框也可通过“导入自定义卡框”加入。");
@@ -636,16 +644,14 @@ public sealed class OverFrameFrameEditorForm : Form
 		}
 		catch (Exception ex)
 		{
-			MessageBox.Show(this, ex.Message, "超框编辑器载入失败", MessageBoxButtons.OK,
-				MessageBoxIcon.Hand);
+			MessageBox.Show(this, ex.Message, "超框编辑器载入失败", MessageBoxButtons.OK, MessageBoxIcon.Hand);
 			_status.Text = "载入失败：" + ex.Message;
 		}
 		finally
 		{
 			_loading = false;
-			UseWaitCursor = false;
+			base.UseWaitCursor = false;
 		}
-
 		if (_sourceBytes != null && _frames.SelectedItem is FrameChoice)
 		{
 			await RenderAsync();
@@ -654,7 +660,12 @@ public sealed class OverFrameFrameEditorForm : Form
 
 	private async Task RenderAsync()
 	{
-		if (IsDisposed || _sourceBytes == null || _frames.SelectedItem is not FrameChoice choice)
+		if (base.IsDisposed || _sourceBytes == null)
+		{
+			return;
+		}
+		object selectedItem = _frames.SelectedItem;
+		if (!(selectedItem is FrameChoice choice))
 		{
 			return;
 		}
@@ -676,36 +687,31 @@ public sealed class OverFrameFrameEditorForm : Form
 		_canvas.SetRenderedPreview(null);
 		_previewFrameKey = null;
 		_transparentEdgePixels = 0;
-		UseWaitCursor = true;
+		base.UseWaitCursor = true;
 		_status.Text = "正在更新超框合成…";
 		try
 		{
 			FrameCompositionMode mode = CurrentMode;
 			byte[] frameBytes = await GetFrameBytesAsync(choice);
-			if (generation != _generation || IsDisposed) return;
-			string canvasFrameKey = mode + ":" + choice.Key;
-			if (!canvasFrameKey.Equals(_canvasFrameKey, StringComparison.OrdinalIgnoreCase))
+			if (generation != _generation || base.IsDisposed)
 			{
-				// Transparent frames deliberately carry RGB below zero alpha for the game
-				// shader. Keep those pixels transparent on the interactive canvas; forcing
-				// them opaque hides the optional background and makes the editor disagree
-				// with its documented layer stack. Compose() still preserves this RGB in
-				// the PNG written to the game.
-				byte[] visibleFrame = frameBytes;
+				return;
+			}
+			string text = mode.ToString() + ":" + choice.Key;
+			if (!text.Equals(_canvasFrameKey, StringComparison.OrdinalIgnoreCase))
+			{
+				byte[] data = frameBytes;
 				_suppressCanvasChanges = true;
 				try
 				{
-					bool preserve = _canvas.HasFrame;
-					_canvas.SetFrame(FrameComposer.PreviewBitmap(visibleFrame), preserve,
-						ResolveArtWindow(choice.BaseKey));
-					_canvasFrameKey = canvasFrameKey;
+					bool hasFrame = _canvas.HasFrame;
+					_canvas.SetFrame(FrameComposer.PreviewBitmap(data), hasFrame, ResolveArtWindow(choice.BaseKey));
+					_canvasFrameKey = text;
 					if (!_restoredTransform)
 					{
 						if (_savedSettings.ArtImageScale > 0f)
 						{
-							_canvas.SetRenderSpec(new ImageRenderSpec(FrameComposer.Width, FrameComposer.Height,
-								_savedSettings.ArtImageScale, _savedSettings.ArtOffsetX,
-								_savedSettings.ArtOffsetY));
+							_canvas.SetRenderSpec(new ImageRenderSpec(704f, 1024f, _savedSettings.ArtImageScale, _savedSettings.ArtOffsetX, _savedSettings.ArtOffsetY));
 						}
 						_restoredTransform = true;
 					}
@@ -716,78 +722,83 @@ public sealed class OverFrameFrameEditorForm : Form
 				}
 				UpdateTransformStatus();
 			}
-
-			(byte[] artBytes, byte[]? backgroundBytes) = await _canvas.RenderLayersAsync();
-			if (generation != _generation || IsDisposed) return;
-			byte[] output;
-			byte[] preview;
+			var (artBytes, backgroundBytes) = await _canvas.RenderLayersAsync();
+			if (generation != _generation || base.IsDisposed)
+			{
+				return;
+			}
 			int transparentPixels = 0;
-			if (mode == FrameCompositionMode.AstellarTransparent)
+			byte[] array;
+			byte[] array2;
+			switch (mode)
+			{
+			case FrameCompositionMode.AstellarTransparent:
 			{
 				if (choice.IsCustom)
 				{
 					throw new InvalidOperationException("自定义扁平 PNG 没有 Astellar 六层数据，只能用于“普通卡框”模式。");
 				}
-				AstellarOverFrameTemplate template = await GetOverFrameTemplateAsync(choice.BaseKey);
-				AstellarOverFrameComposition composed = await Task.Run(() =>
-					AstellarOverFrameComposer.Compose(artBytes, template, backgroundBytes));
-				output = composed.GamePng;
-				preview = composed.PreviewPng;
-				transparentPixels = composed.TransparentEdgePixels;
+				AstellarOverFrameTemplate template2 = await GetOverFrameTemplateAsync(choice.BaseKey);
+				AstellarOverFrameComposition astellarOverFrameComposition2 = await Task.Run(() => AstellarOverFrameComposer.Compose(artBytes, template2, backgroundBytes));
+				array = astellarOverFrameComposition2.GamePng;
+				array2 = astellarOverFrameComposition2.PreviewPng;
+				transparentPixels = astellarOverFrameComposition2.TransparentEdgePixels;
+				break;
 			}
-			else if (mode == FrameCompositionMode.TransparentGradient)
+			case FrameCompositionMode.TransparentGradient:
 			{
 				AstellarOverFrameTemplate template = await GetOverFrameTemplateAsync(choice.BaseKey);
-				AstellarOverFrameComposition composed = await Task.Run(() =>
-					AstellarOverFrameComposer.ComposeTransparentFlatFrame(artBytes, frameBytes,
-						template, backgroundBytes));
-				output = composed.GamePng;
-				preview = composed.PreviewPng;
-				transparentPixels = composed.TransparentEdgePixels;
+				AstellarOverFrameComposition astellarOverFrameComposition = await Task.Run(() => AstellarOverFrameComposer.ComposeTransparentFlatFrame(artBytes, frameBytes, template, backgroundBytes));
+				array = astellarOverFrameComposition.GamePng;
+				array2 = astellarOverFrameComposition.PreviewPng;
+				transparentPixels = astellarOverFrameComposition.TransparentEdgePixels;
+				break;
 			}
-			else
-			{
-				output = await Task.Run(() =>
-					AstellarOverFrameComposer.ComposeFlatFrame(artBytes, frameBytes, backgroundBytes));
-				preview = output;
+			default:
+				array = await Task.Run(() => AstellarOverFrameComposer.ComposeFlatFrame(artBytes, frameBytes, backgroundBytes));
+				array2 = array;
+				break;
 			}
-
-			if (generation != _generation || IsDisposed) return;
-			_currentFrameBytes = frameBytes;
-			_currentFrameKey = choice.Key;
-			_artBytes = artBytes;
-			_previewBytes = preview;
-			_outputBytes = output;
-			_canvas.SetRenderedPreview(FrameComposer.PreviewBitmap(preview));
-			_canvas.SetRenderedPreviewVisible(_showRenderedPreview);
-			_previewFrameKey = choice.Key;
-			_previewMode = mode;
-			_transparentEdgePixels = transparentPixels;
-			await PersistDraftAsync(choice, artBytes);
-			if (generation != _generation || IsDisposed) return;
-
-			string background = backgroundBytes == null ? "无叠底背景" : "含叠底背景";
-			string transparency = _sourceHasTransparency ? "透明主体置于卡框上层" : "源图无透明区域";
-			_status.Text = mode switch
+			if (generation == _generation && !base.IsDisposed)
 			{
-				FrameCompositionMode.AstellarTransparent =>
-					$"透明卡框 · {choice.DisplayName} · {background} · {transparency} · 保留 {transparentPixels:N0} 个透明 RGB 像素",
-				FrameCompositionMode.TransparentGradient =>
-					$"透明炫彩卡框 · {choice.DisplayName} · {background} · {transparency} · 保留 {transparentPixels:N0} 个透明 RGB 像素",
-				FrameCompositionMode.FloowanGradient =>
-					$"炫彩卡框 · {choice.DisplayName} · {background} · {transparency} · 704×1024",
-				_ => $"普通卡框 · {choice.DisplayName} · {background} · {transparency} · 704×1024"
-			};
+				_currentFrameBytes = frameBytes;
+				_currentFrameKey = choice.Key;
+				_artBytes = artBytes;
+				_previewBytes = array2;
+				_outputBytes = array;
+				_canvas.SetRenderedPreview(FrameComposer.PreviewBitmap(array2));
+				_canvas.SetRenderedPreviewVisible(_showRenderedPreview);
+				_previewFrameKey = choice.Key;
+				_previewMode = mode;
+				_transparentEdgePixels = transparentPixels;
+				await PersistDraftAsync(choice, artBytes);
+				if (generation == _generation && !base.IsDisposed)
+				{
+					string value = ((backgroundBytes == null) ? "无叠底背景" : "含叠底背景");
+					string value2 = (_sourceHasTransparency ? "透明主体置于卡框上层" : "源图无透明区域");
+					Label status = _status;
+					status.Text = mode switch
+					{
+						FrameCompositionMode.AstellarTransparent => $"透明卡框 · {choice.DisplayName} · {value} · {value2} · 保留 {transparentPixels:N0} 个透明 RGB 像素",
+						FrameCompositionMode.TransparentGradient => $"透明炫彩卡框 · {choice.DisplayName} · {value} · {value2} · 保留 {transparentPixels:N0} 个透明 RGB 像素",
+						FrameCompositionMode.FloowanGradient => $"炫彩卡框 · {choice.DisplayName} · {value} · {value2} · 704×1024",
+						_ => $"普通卡框 · {choice.DisplayName} · {value} · {value2} · 704×1024",
+					};
+				}
+			}
 		}
 		catch (Exception ex)
 		{
-			if (generation == _generation) _status.Text = "预览失败：" + ex.Message;
+			if (generation == _generation)
+			{
+				_status.Text = "预览失败：" + ex.Message;
+			}
 		}
 		finally
 		{
 			_rendering = false;
-			UseWaitCursor = false;
-			if (_renderPending && !IsDisposed)
+			base.UseWaitCursor = false;
+			if (_renderPending && !base.IsDisposed)
 			{
 				_renderPending = false;
 				_renderTimer.Start();
@@ -813,19 +824,23 @@ public sealed class OverFrameFrameEditorForm : Form
 	private void CanvasViewChanged(ImageRenderSpec spec)
 	{
 		UpdateTransformStatus(spec);
-		if (_loading || _suppressCanvasChanges) return;
-		_generation++;
-		_outputBytes = null;
-		_status.Text = "构图已调整；正在生成最终超框预览…";
-		_renderTimer.Stop();
-		_renderTimer.Start();
+		if (!_loading && !_suppressCanvasChanges)
+		{
+			_generation++;
+			_outputBytes = null;
+			_status.Text = "构图已调整；正在生成最终超框预览…";
+			_renderTimer.Stop();
+			_renderTimer.Start();
+		}
 	}
 
 	private void ZoomValueChanged(object? sender, EventArgs e)
 	{
-		if (_syncingZoom || _loading) return;
-		SetCanvasView(showRenderedPreview: false);
-		_canvas.SetZoom(_zoom.Value / 100f, null);
+		if (!_syncingZoom && !_loading)
+		{
+			SetCanvasView(showRenderedPreview: false);
+			_canvas.SetZoom((float)_zoom.Value / 100f, null);
+		}
 	}
 
 	private void SetCanvasView(bool showRenderedPreview)
@@ -848,61 +863,75 @@ public sealed class OverFrameFrameEditorForm : Form
 
 	private static void SetSegmentState(RoundedButton button, bool active)
 	{
-		button.NormalColor = active ? UiTheme.PrimaryDark : UiTheme.Elevated;
-		button.HoverColor = active ? Color.FromArgb(38, 148, 203) : Color.FromArgb(34, 53, 81);
-		button.BorderColor = active ? UiTheme.Primary : UiTheme.Border;
+		button.NormalColor = (active ? UiTheme.PrimaryDark : UiTheme.Elevated);
+		button.HoverColor = (active ? System.Drawing.Color.FromArgb(38, 148, 203) : System.Drawing.Color.FromArgb(34, 53, 81));
+		button.BorderColor = (active ? UiTheme.Primary : UiTheme.Border);
 		button.Invalidate();
 	}
 
 	private void UpdateTransformStatus(ImageRenderSpec? provided = null)
 	{
-		if (_canvas.IsDisposed) return;
-		ImageRenderSpec spec = provided ?? _canvas.ActiveRenderSpec;
-		_transformStatus.Text = $"{(_canvas.EditingBackground ? "背景" : "卡图")} X {spec.OffsetX:0}  Y {spec.OffsetY:0}";
+		if (!_canvas.IsDisposed)
+		{
+			ImageRenderSpec imageRenderSpec = provided ?? _canvas.ActiveRenderSpec;
+			_transformStatus.Text = $"{(_canvas.EditingBackground ? "背景" : "卡图")} X {imageRenderSpec.OffsetX:0}  Y {imageRenderSpec.OffsetY:0}";
+		}
 	}
 
-	private static RectangleF ResolveArtWindow(string baseKey)
+	private static System.Drawing.RectangleF ResolveArtWindow(string baseKey)
 	{
-		string normalized = CardFrameCatalog.BaseKey(baseKey);
-		bool pendulum = normalized is "card_frame13" or "card_frame14" or "card_frame15"
-			or "card_frame16" or "card_frame17" or "card_frame19";
-		return pendulum
-			? new RectangleF(50, 186, 604, 451)
-			: new RectangleF(89, 191, 527, 528);
+		bool flag;
+		switch (CardFrameCatalog.BaseKey(baseKey))
+		{
+		case "card_frame13":
+		case "card_frame14":
+		case "card_frame15":
+		case "card_frame16":
+		case "card_frame17":
+		case "card_frame19":
+			flag = true;
+			break;
+		default:
+			flag = false;
+			break;
+		}
+		if (!flag)
+		{
+			return new System.Drawing.RectangleF(89f, 191f, 527f, 528f);
+		}
+		return new System.Drawing.RectangleF(50f, 186f, 604f, 451f);
 	}
 
 	private Task<AstellarOverFrameTemplate> GetOverFrameTemplateAsync(string key)
 	{
-		if (_overFrameTemplateCache.TryGetValue(key, out AstellarOverFrameTemplate? cached))
+		if (_overFrameTemplateCache.TryGetValue(key, out AstellarOverFrameTemplate value))
 		{
-			return Task.FromResult(cached);
+			return Task.FromResult(value);
 		}
-		return Task.Run(() =>
+		return Task.Run(delegate
 		{
-			AstellarOverFrameTemplate loaded = AstellarOverFrameTemplateCatalog.Load(key);
-			_overFrameTemplateCache[key] = loaded;
-			return loaded;
+			AstellarOverFrameTemplate astellarOverFrameTemplate = AstellarOverFrameTemplateCatalog.Load(key);
+			_overFrameTemplateCache[key] = astellarOverFrameTemplate;
+			return astellarOverFrameTemplate;
 		});
 	}
 
 	private async Task<byte[]> GetFrameBytesAsync(FrameChoice choice)
 	{
-		if (_frameCache.TryGetValue(choice.Key, out byte[]? cached)) return cached;
-		byte[] bytes = choice.IsCustom
-			? await File.ReadAllBytesAsync(choice.FilePath!)
-			: await Task.Run(() => _engine.DecodePng(choice.Texture));
-		_frameCache[choice.Key] = bytes;
-		return bytes;
+		if (_frameCache.TryGetValue(choice.Key, out byte[] value))
+		{
+			return value;
+		}
+		byte[] array = ((!choice.IsCustom) ? (await Task.Run(() => _engine.DecodePng(choice.Texture))) : (await File.ReadAllBytesAsync(choice.FilePath)));
+		byte[] array2 = array;
+		_frameCache[choice.Key] = array2;
+		return array2;
 	}
 
 	private async Task PersistDraftAsync(FrameChoice choice, byte[] artBytes)
 	{
-		ImageRenderSpec spec = _canvas.RenderSpec;
-		OverFrameFrameSettings settings = new(choice.Key, choice.IsCustom, UserSelected: true,
-			CompositionMode: CurrentMode.ToString(), ArtImageScale: spec.ImageScale,
-			ArtOffsetX: spec.OffsetX, ArtOffsetY: spec.OffsetY,
-			BackgroundImageScale: _canvas.BackgroundRenderSpec.ImageScale,
-			BackgroundOffsetX: _canvas.BackgroundRenderSpec.OffsetX, BackgroundOffsetY: _canvas.BackgroundRenderSpec.OffsetY);
+		ImageRenderSpec renderSpec = _canvas.RenderSpec;
+		OverFrameFrameSettings settings = new OverFrameFrameSettings(choice.Key, choice.IsCustom, UserSelected: true, CurrentMode.ToString(), renderSpec.ImageScale, renderSpec.OffsetX, renderSpec.OffsetY, _canvas.BackgroundRenderSpec.ImageScale, _canvas.BackgroundRenderSpec.OffsetX, _canvas.BackgroundRenderSpec.OffsetY);
 		await Task.Run(delegate
 		{
 			OverFrameArtStore.SaveArt(_gameRoot, _cardId, artBytes);
@@ -913,131 +942,172 @@ public sealed class OverFrameFrameEditorForm : Form
 
 	private void SaveLatestDraftOnClose()
 	{
-		if (_sourceBytes == null || _frames.SelectedItem is not FrameChoice choice) return;
+		if (_sourceBytes == null || !(_frames.SelectedItem is FrameChoice frameChoice))
+		{
+			return;
+		}
 		try
 		{
-			byte[] artBytes = _canvas.RenderSourceToTarget();
-			ImageRenderSpec spec = _canvas.RenderSpec;
-			OverFrameArtStore.SaveArt(_gameRoot, _cardId, artBytes);
-			OverFrameArtStore.SaveSettings(_gameRoot, _cardId,
-				new OverFrameFrameSettings(choice.Key, choice.IsCustom, UserSelected: true,
-					CompositionMode: CurrentMode.ToString(), ArtImageScale: spec.ImageScale,
-					ArtOffsetX: spec.OffsetX, ArtOffsetY: spec.OffsetY,
-					BackgroundImageScale: _canvas.BackgroundRenderSpec.ImageScale,
-					BackgroundOffsetX: _canvas.BackgroundRenderSpec.OffsetX, BackgroundOffsetY: _canvas.BackgroundRenderSpec.OffsetY));
+			byte[] png = _canvas.RenderSourceToTarget();
+			ImageRenderSpec renderSpec = _canvas.RenderSpec;
+			OverFrameArtStore.SaveArt(_gameRoot, _cardId, png);
+			OverFrameArtStore.SaveSettings(_gameRoot, _cardId, new OverFrameFrameSettings(frameChoice.Key, frameChoice.IsCustom, UserSelected: true, CurrentMode.ToString(), renderSpec.ImageScale, renderSpec.OffsetX, renderSpec.OffsetY, _canvas.BackgroundRenderSpec.ImageScale, _canvas.BackgroundRenderSpec.OffsetX, _canvas.BackgroundRenderSpec.OffsetY));
 		}
 		catch
 		{
-			// Closing the editor must not be blocked by a draft-only persistence failure.
 		}
 	}
 
 	private async Task ImportFrameAsync()
 	{
-		using OpenFileDialog dialog = new()
+		OpenFileDialog dialog = new OpenFileDialog
 		{
 			Filter = "PNG 图片|*.png|图片|*.png;*.jpg;*.jpeg;*.webp;*.bmp",
 			Title = "导入 704×1024 自定义卡框"
 		};
-		if (dialog.ShowDialog(this) != DialogResult.OK) return;
 		try
 		{
-			string path = await Task.Run(() =>
-				OverFrameArtStore.SaveCustomFrame(_gameRoot, _cardId, dialog.FileName));
-			_frameCache.Remove("__custom__");
-			_customFramePath = path;
-			SelectMode(FrameCompositionMode.StandardComplete);
-			RefreshFrameChoices("__custom__");
-			await RenderAsync();
+			if (dialog.ShowDialog(this) != DialogResult.OK)
+			{
+				return;
+			}
+			try
+			{
+				string customFramePath = await Task.Run(() => OverFrameArtStore.SaveCustomFrame(_gameRoot, _cardId, dialog.FileName));
+				_frameCache.Remove("__custom__");
+				_customFramePath = customFramePath;
+				SelectMode(FrameCompositionMode.StandardComplete);
+				RefreshFrameChoices("__custom__");
+				await RenderAsync();
+			}
+			catch (Exception ex)
+			{
+				MessageBox.Show(this, ex.Message, "自定义卡框无效", MessageBoxButtons.OK, MessageBoxIcon.Exclamation);
+			}
 		}
-		catch (Exception ex)
+		finally
 		{
-			MessageBox.Show(this, ex.Message, "自定义卡框无效", MessageBoxButtons.OK,
-				MessageBoxIcon.Exclamation);
+			if (dialog != null)
+			{
+				((IDisposable)dialog).Dispose();
+			}
 		}
 	}
 
 	private async Task ChangeArtAsync()
 	{
-		using OpenFileDialog dialog = new()
+		OpenFileDialog dialog = new OpenFileDialog
 		{
 			Filter = "图片|*.png;*.jpg;*.jpeg;*.webp;*.bmp",
 			Title = "更换卡图（带透明背景的 PNG 才能形成主体越框效果）"
 		};
-		if (dialog.ShowDialog(this) != DialogResult.OK) return;
 		try
 		{
-			UseWaitCursor = true;
-			_status.Text = "正在载入新卡图…";
-			await Task.Run(() => OverFrameArtStore.SaveSource(_gameRoot, _cardId, dialog.FileName));
-			_sourceBytes = await File.ReadAllBytesAsync(OverFrameArtStore.SourcePath(_gameRoot, _cardId));
-			_sourceHasTransparency = await Task.Run(() => HasMeaningfulTransparency(_sourceBytes));
-			_suppressCanvasChanges = true;
+			if (dialog.ShowDialog(this) != DialogResult.OK)
+			{
+				return;
+			}
 			try
 			{
-				_canvas.SetSource(FrameComposer.PreviewBitmap(_sourceBytes));
-				_restoredTransform = true;
+				base.UseWaitCursor = true;
+				_status.Text = "正在载入新卡图…";
+				await Task.Run(delegate
+				{
+					OverFrameArtStore.SaveSource(_gameRoot, _cardId, dialog.FileName);
+				});
+				_sourceBytes = await File.ReadAllBytesAsync(OverFrameArtStore.SourcePath(_gameRoot, _cardId));
+				_sourceHasTransparency = await Task.Run(() => HasMeaningfulTransparency(_sourceBytes));
+				_suppressCanvasChanges = true;
+				try
+				{
+					_canvas.SetSource(FrameComposer.PreviewBitmap(_sourceBytes));
+					_restoredTransform = true;
+				}
+				finally
+				{
+					_suppressCanvasChanges = false;
+				}
+				UpdateLayerStatus();
+				await RenderAsync();
+			}
+			catch (Exception ex)
+			{
+				MessageBox.Show(this, ex.Message, "卡图无效", MessageBoxButtons.OK, MessageBoxIcon.Exclamation);
+				_status.Text = "更换卡图失败：" + ex.Message;
 			}
 			finally
 			{
-				_suppressCanvasChanges = false;
+				base.UseWaitCursor = false;
 			}
-			UpdateLayerStatus();
-			await RenderAsync();
-		}
-		catch (Exception ex)
-		{
-			MessageBox.Show(this, ex.Message, "卡图无效", MessageBoxButtons.OK,
-				MessageBoxIcon.Exclamation);
-			_status.Text = "更换卡图失败：" + ex.Message;
 		}
 		finally
 		{
-			UseWaitCursor = false;
+			if (dialog != null)
+			{
+				((IDisposable)dialog).Dispose();
+			}
 		}
 	}
 
 	private async Task AddBackgroundAsync()
 	{
-		using OpenFileDialog dialog = new()
+		OpenFileDialog dialog = new OpenFileDialog
 		{
 			Filter = "图片|*.png;*.jpg;*.jpeg;*.webp;*.bmp",
 			Title = "添加叠底背景图（保留原图，可拖动和缩放）"
 		};
-		if (dialog.ShowDialog(this) != DialogResult.OK) return;
 		try
 		{
-			UseWaitCursor = true;
-			_status.Text = "正在处理叠底背景…";
-			_backgroundBytes = await Task.Run(() =>
+			if (dialog.ShowDialog(this) != DialogResult.OK)
 			{
-				OverFrameArtStore.SaveBackground(_gameRoot, _cardId, dialog.FileName);
-				return File.ReadAllBytes(OverFrameArtStore.BackgroundPath(_gameRoot, _cardId));
-			});
-			SetCanvasBackground();
-			UpdateLayerStatus();
-			SetCanvasView(false);
-			_canvas.EditBackground(true);
-			await RenderAsync();
-		}
-		catch (Exception ex)
-		{
-			MessageBox.Show(this, ex.Message, "叠底背景无效", MessageBoxButtons.OK,
-				MessageBoxIcon.Exclamation);
-			_status.Text = "叠底背景添加失败：" + ex.Message;
+				return;
+			}
+			try
+			{
+				base.UseWaitCursor = true;
+				_status.Text = "正在处理叠底背景…";
+				_backgroundBytes = await Task.Run(delegate
+				{
+					OverFrameArtStore.SaveBackground(_gameRoot, _cardId, dialog.FileName);
+					return File.ReadAllBytes(OverFrameArtStore.BackgroundPath(_gameRoot, _cardId));
+				});
+				SetCanvasBackground();
+				UpdateLayerStatus();
+				SetCanvasView(showRenderedPreview: false);
+				_canvas.EditBackground(enabled: true);
+				await RenderAsync();
+			}
+			catch (Exception ex)
+			{
+				MessageBox.Show(this, ex.Message, "叠底背景无效", MessageBoxButtons.OK, MessageBoxIcon.Exclamation);
+				_status.Text = "叠底背景添加失败：" + ex.Message;
+			}
+			finally
+			{
+				base.UseWaitCursor = false;
+			}
 		}
 		finally
 		{
-			UseWaitCursor = false;
+			if (dialog != null)
+			{
+				((IDisposable)dialog).Dispose();
+			}
 		}
 	}
 
 	private async Task ClearBackgroundAsync()
 	{
-		if (_backgroundBytes == null) return;
+		if (_backgroundBytes == null)
+		{
+			return;
+		}
 		try
 		{
-			await Task.Run(() => OverFrameArtStore.DeleteBackground(_gameRoot, _cardId));
+			await Task.Run(delegate
+			{
+				OverFrameArtStore.DeleteBackground(_gameRoot, _cardId);
+			});
 			_backgroundBytes = null;
 			SetCanvasBackground();
 			UpdateLayerStatus();
@@ -1045,39 +1115,35 @@ public sealed class OverFrameFrameEditorForm : Form
 		}
 		catch (Exception ex)
 		{
-			MessageBox.Show(this, ex.Message, "清除叠底背景失败", MessageBoxButtons.OK,
-				MessageBoxIcon.Hand);
+			MessageBox.Show(this, ex.Message, "清除叠底背景失败", MessageBoxButtons.OK, MessageBoxIcon.Hand);
 		}
 	}
 
 	private void SetCanvasBackground()
 	{
-		_canvas.SetBackground(_backgroundBytes == null
-			? null
-			: FrameComposer.PreviewBitmap(_backgroundBytes));
+		_canvas.SetBackground((_backgroundBytes == null) ? null : FrameComposer.PreviewBitmap(_backgroundBytes));
 	}
 
 	private void UpdateLayerStatus()
 	{
-		bool hasBackground = _backgroundBytes != null;
-		string layers = hasBackground
-			? "图层：叠底背景 → 卡框 → 透明主体 · 已添加背景"
-			: "图层：卡框 → 透明主体 · 叠底背景：未添加";
-		_layerStatus.Text = _sourceHasTransparency
-			? layers + " · 主体可越过卡框"
-			: layers + " · 当前卡图没有透明区域；越框会呈矩形，请更换透明 PNG";
-		_clearBackgroundButton.Enabled = hasBackground;
+		bool flag = _backgroundBytes != null;
+		string text = (flag ? "图层：叠底背景 → 卡框 → 透明主体 · 已添加背景" : "图层：卡框 → 透明主体 · 叠底背景：未添加");
+		_layerStatus.Text = (_sourceHasTransparency ? (text + " · 主体可越过卡框") : (text + " · 当前卡图没有透明区域；越框会呈矩形，请更换透明 PNG"));
+		_clearBackgroundButton.Enabled = flag;
 	}
 
 	private async Task ExportFrameAsync()
 	{
-		if (_frames.SelectedItem is not FrameChoice choice) return;
+		object selectedItem = _frames.SelectedItem;
+		if (!(selectedItem is FrameChoice choice))
+		{
+			return;
+		}
 		try
 		{
-			byte[] bytes = _currentFrameKey == choice.Key && _currentFrameBytes != null
-				? _currentFrameBytes
-				: await GetFrameBytesAsync(choice);
-			using SaveFileDialog dialog = new()
+			byte[] array = ((!(_currentFrameKey == choice.Key) || _currentFrameBytes == null) ? (await GetFrameBytesAsync(choice)) : _currentFrameBytes);
+			byte[] bytes = array;
+			using SaveFileDialog dialog = new SaveFileDialog
 			{
 				Filter = "PNG 图片|*.png",
 				FileName = choice.Key + "_可编辑.png"
@@ -1089,8 +1155,7 @@ public sealed class OverFrameFrameEditorForm : Form
 		}
 		catch (Exception ex)
 		{
-			MessageBox.Show(this, ex.Message, "导出卡框失败", MessageBoxButtons.OK,
-				MessageBoxIcon.Hand);
+			MessageBox.Show(this, ex.Message, "导出卡框失败", MessageBoxButtons.OK, MessageBoxIcon.Hand);
 		}
 	}
 
@@ -1101,14 +1166,14 @@ public sealed class OverFrameFrameEditorForm : Form
 			MessageBox.Show(this, "最终预览仍在生成，请稍候。", Text);
 			return;
 		}
-		using SaveFileDialog dialog = new()
+		using SaveFileDialog saveFileDialog = new SaveFileDialog
 		{
 			Filter = "PNG 图片|*.png",
 			FileName = $"{_cardId}_透明最终预览.png"
 		};
-		if (dialog.ShowDialog(this) == DialogResult.OK)
+		if (saveFileDialog.ShowDialog(this) == DialogResult.OK)
 		{
-			File.WriteAllBytes(dialog.FileName, _previewBytes);
+			File.WriteAllBytes(saveFileDialog.FileName, _previewBytes);
 		}
 	}
 
@@ -1119,90 +1184,90 @@ public sealed class OverFrameFrameEditorForm : Form
 		{
 			await RenderAsync();
 		}
-		if (_outputBytes == null || _frames.SelectedItem is not FrameChoice choice
-			|| _previewFrameKey != choice.Key || _previewMode != CurrentMode)
+		if (_outputBytes != null)
 		{
-			MessageBox.Show(this, "当前超框预览尚未生成完成，请稍候再应用。", Text);
-			return;
-		}
-
-		string modeLabel = CurrentMode switch
-		{
-			FrameCompositionMode.AstellarTransparent =>
-				$"透明卡框（保留 {_transparentEdgePixels:N0} 个透明 RGB 像素）",
-			FrameCompositionMode.TransparentGradient =>
-				$"透明炫彩卡框（保留 {_transparentEdgePixels:N0} 个透明 RGB 像素）",
-			FrameCompositionMode.FloowanGradient => "炫彩卡框",
-			_ => "普通卡框"
-		};
-		string background = _backgroundBytes == null ? "未使用叠底背景" : "已包含叠底背景";
-		string warning = _sourceHasTransparency
-			? "主体位于卡框上方，可形成真正的越框效果。"
-			: "当前源图没有透明区域，越框部分会保持矩形边缘。";
-		if (MessageBox.Show(this,
-			$"把“{choice.DisplayName}”以“{modeLabel}”模式写入卡号 {_cardId}？\n\n{background}。{warning}\n只修改这张卡的 Bundle，不会改全局 card_frame；编辑源图、背景与构图参数都会保留。",
-			"确认应用超框", MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation) != DialogResult.OK)
-		{
-			return;
-		}
-
-		try
-		{
-			UseWaitCursor = true;
-			_status.Text = "正在定位 LocalData 超框表…";
-			await Task.Run(() => _overFrames.FindGate(_gameRoot, delegate(int done, int total)
+			object selectedItem = _frames.SelectedItem;
+			if (selectedItem is FrameChoice choice && !(_previewFrameKey != choice.Key) && _previewMode == CurrentMode)
 			{
-				if (!IsDisposed && IsHandleCreated)
+				string modeLabel = CurrentMode switch
 				{
-					BeginInvoke(delegate { _status.Text = $"首次定位超框表：{done:N0}/{total:N0} Bundle…"; });
+					FrameCompositionMode.AstellarTransparent => $"透明卡框（保留 {_transparentEdgePixels:N0} 个透明 RGB 像素）",
+					FrameCompositionMode.TransparentGradient => $"透明炫彩卡框（保留 {_transparentEdgePixels:N0} 个透明 RGB 像素）",
+					FrameCompositionMode.FloowanGradient => "炫彩卡框",
+					_ => "普通卡框",
+				};
+				string value = ((_backgroundBytes == null) ? "未使用叠底背景" : "已包含叠底背景");
+				string value2 = (_sourceHasTransparency ? "主体位于卡框上方，可形成真正的越框效果。" : "当前源图没有透明区域，越框部分会保持矩形边缘。");
+				if (MessageBox.Show(this, $"把“{choice.DisplayName}”以“{modeLabel}”模式写入卡号 {_cardId}？\n\n{value}。{value2}\n只修改这张卡的 Bundle，不会改全局 card_frame；编辑源图、背景与构图参数都会保留。", "确认应用超框", MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation) != DialogResult.OK)
+				{
+					return;
 				}
-			}));
-			_status.Text = "正在写入单卡超框合成图…";
-			byte[] output = _outputBytes.ToArray();
-			await Task.Run(() => _engine.Replace(_art, output,
-				Path.Combine(_gameRoot, "_MD卡图备份", _art.SourceKind)));
-			try
-			{
-				await Task.Run(() => _overFrames.EnableOrUpdate(_gameRoot, _cardId, _cardId));
+				try
+				{
+					base.UseWaitCursor = true;
+					_status.Text = "正在定位 LocalData 超框表…";
+					await Task.Run(() => _overFrames.FindGate(_gameRoot, delegate(int done, int total)
+					{
+						if (!base.IsDisposed && base.IsHandleCreated)
+						{
+							BeginInvoke(delegate
+							{
+								_status.Text = $"首次定位超框表：{done:N0}/{total:N0} Bundle…";
+							});
+						}
+					}));
+					_status.Text = "正在写入单卡超框合成图…";
+					byte[] output = _outputBytes.ToArray();
+					await Task.Run(delegate
+					{
+						_engine.Replace(_art, output, Path.Combine(_gameRoot, "_MD卡图备份", _art.SourceKind));
+					});
+					try
+					{
+						await Task.Run(delegate
+						{
+							_overFrames.EnableOrUpdate(_gameRoot, _cardId, _cardId);
+						});
+					}
+					catch (Exception ex)
+					{
+						throw new InvalidOperationException("超框合成图已经写入，但超框登记失败。请在主界面的“超框表”中为该卡重试启用。\n\n" + ex.Message, ex);
+					}
+					ImageRenderSpec renderSpec = _canvas.RenderSpec;
+					OverFrameArtStore.SaveSettings(_gameRoot, _cardId, new OverFrameFrameSettings(choice.Key, choice.IsCustom, UserSelected: true, CurrentMode.ToString(), renderSpec.ImageScale, renderSpec.OffsetX, renderSpec.OffsetY, _canvas.BackgroundRenderSpec.ImageScale, _canvas.BackgroundRenderSpec.OffsetX, _canvas.BackgroundRenderSpec.OffsetY));
+					_art.Category = "超框卡图";
+					AppliedFrameName = modeLabel + " · " + choice.DisplayName;
+					base.DialogResult = DialogResult.OK;
+					Close();
+					return;
+				}
+				catch (Exception ex2)
+				{
+					MessageBox.Show(this, ex2.Message, "应用超框失败", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+					_status.Text = "应用失败：" + ex2.Message;
+					return;
+				}
+				finally
+				{
+					base.UseWaitCursor = false;
+				}
 			}
-			catch (Exception ex)
-			{
-				throw new InvalidOperationException(
-					"超框合成图已经写入，但超框登记失败。请在主界面的“超框表”中为该卡重试启用。\n\n" + ex.Message,
-					ex);
-			}
-
-			ImageRenderSpec spec = _canvas.RenderSpec;
-			OverFrameArtStore.SaveSettings(_gameRoot, _cardId,
-				new OverFrameFrameSettings(choice.Key, choice.IsCustom, UserSelected: true,
-					CompositionMode: CurrentMode.ToString(), ArtImageScale: spec.ImageScale,
-					ArtOffsetX: spec.OffsetX, ArtOffsetY: spec.OffsetY,
-					BackgroundImageScale: _canvas.BackgroundRenderSpec.ImageScale,
-					BackgroundOffsetX: _canvas.BackgroundRenderSpec.OffsetX, BackgroundOffsetY: _canvas.BackgroundRenderSpec.OffsetY));
-			_art.Category = "超框卡图";
-			AppliedFrameName = modeLabel + " · " + choice.DisplayName;
-			DialogResult = DialogResult.OK;
-			Close();
 		}
-		catch (Exception ex)
-		{
-			MessageBox.Show(this, ex.Message, "应用超框失败", MessageBoxButtons.OK,
-				MessageBoxIcon.Hand);
-			_status.Text = "应用失败：" + ex.Message;
-		}
-		finally
-		{
-			UseWaitCursor = false;
-		}
+		MessageBox.Show(this, "当前超框预览尚未生成完成，请稍候再应用。", Text);
 	}
 
 	private static bool HasMeaningfulTransparency(byte[] png)
 	{
-		using SixLabors.ImageSharp.Image<Rgba32> image = SixLabors.ImageSharp.Image.Load<Rgba32>(png);
-		for (int y = 0; y < image.Height; y++)
-		for (int x = 0; x < image.Width; x++)
+		using Image<Rgba32> image = SixLabors.ImageSharp.Image.Load<Rgba32>(png);
+		for (int i = 0; i < image.Height; i++)
 		{
-			if (image[x, y].A < 245) return true;
+			for (int j = 0; j < image.Width; j++)
+			{
+				if (image[j, i].A < 245)
+				{
+					return true;
+				}
+			}
 		}
 		return false;
 	}
