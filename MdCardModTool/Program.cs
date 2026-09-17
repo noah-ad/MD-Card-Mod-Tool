@@ -35,6 +35,11 @@ internal static class Program
 	private static void Main(string[] args)
 	{
 		ApplicationConfiguration.Initialize();
+		if (args.Length == 1 && args[0] == "--test-foil-inner-frame")
+		{
+			FoilInnerFrameTests.Run();
+			return;
+		}
 		if (args.Length == 2 && args[0] == "--open-0000")
 		{
 			using (MainForm mainForm = new MainForm(null, args[1]))
@@ -530,6 +535,17 @@ internal static class Program
 					FieldInfo outputField = typeof(OverFrameFrameEditorForm).GetField("_outputBytes", BindingFlags.Instance | BindingFlags.NonPublic) ?? throw new MissingFieldException("OverFrameFrameEditorForm", "_outputBytes");
 					FieldInfo fieldInfo = typeof(OverFrameFrameEditorForm).GetField("_previewBytes", BindingFlags.Instance | BindingFlags.NonPublic) ?? throw new MissingFieldException("OverFrameFrameEditorForm", "_previewBytes");
 					bool flag15 = WaitFor(() => outputField.GetValue(editor) is byte[]);
+					var foilToggle = (CheckBox)typeof(OverFrameFrameEditorForm).GetField("_removeFoilInnerFrame", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(editor)!;
+					var renderingField = typeof(OverFrameFrameEditorForm).GetField("_rendering", BindingFlags.Instance | BindingFlags.NonPublic)!;
+					if (!WaitFor(() => !(bool)renderingField.GetValue(editor)!)) throw new Exception("Initial render timeout");
+					byte[] defaultFoil = (byte[])outputField.GetValue(editor)!;
+					foilToggle.Checked = true;
+					if (!WaitFor(() => outputField.GetValue(editor) is byte[] && !(bool)renderingField.GetValue(editor)!)) throw new Exception("Foil render timeout");
+					if (defaultFoil.AsSpan().SequenceEqual((byte[])outputField.GetValue(editor)!) || !OverFrameArtStore.ReadSettings(text10, 3899).RemoveFoilInnerFrame) throw new Exception("Foil option not applied or saved");
+					if (!((byte[])outputField.GetValue(editor)!).AsSpan().SequenceEqual((byte[])fieldInfo.GetValue(editor)!)) throw new Exception("Foil preview/export mismatch");
+					foilToggle.Checked = false;
+					if (!WaitFor(() => outputField.GetValue(editor) is byte[] && !(bool)renderingField.GetValue(editor)!) || !defaultFoil.AsSpan().SequenceEqual((byte[])outputField.GetValue(editor)!)) throw new Exception("Disabling foil option did not restore default");
+					Console.WriteLine("foilToggle=True; draftSaved=True; previewMatches=True; disabledRestoresDefault=True");
 					ImageRenderSpec renderSpec = canvas.RenderSpec;
 					movedSpec = new ImageRenderSpec(704f, 1024f, renderSpec.ImageScale * 1.28f, renderSpec.OffsetX + 37f, renderSpec.OffsetY - 24f);
 					canvas.SetRenderSpec(movedSpec);

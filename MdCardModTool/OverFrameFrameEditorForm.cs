@@ -191,6 +191,12 @@ public sealed class OverFrameFrameEditorForm : Form
 	private string? _customFramePath;
 
 	private OverFrameFrameSettings _savedSettings = new OverFrameFrameSettings();
+	private readonly CheckBox _removeFoilInnerFrame = new CheckBox
+	{
+		Text = "去除闪卡／镜碎内框（实验，仅当前卡；可能影响局部闪度）",
+		AutoSize = true, ForeColor = UiTheme.Text, BackColor = UiTheme.SurfaceAlt,
+		Margin = new Padding(4, 5, 4, 5)
+	};
 
 	public string AppliedFrameName { get; private set; } = "";
 
@@ -339,10 +345,10 @@ public sealed class OverFrameFrameEditorForm : Form
 	{
 		TableLayoutPanel tableLayoutPanel = new TableLayoutPanel();
 		tableLayoutPanel.Dock = DockStyle.Top;
-		tableLayoutPanel.Height = 314;
+		tableLayoutPanel.Height = 350;
 		tableLayoutPanel.Padding = new Padding(14, 10, 14, 8);
 		tableLayoutPanel.ColumnCount = 3;
-		tableLayoutPanel.RowCount = 8;
+		tableLayoutPanel.RowCount = 9;
 		tableLayoutPanel.BackColor = UiTheme.SurfaceAlt;
 		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
@@ -354,6 +360,7 @@ public sealed class OverFrameFrameEditorForm : Form
 		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
 		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
 		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 30f));
+		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 36f));
 		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 		tableLayoutPanel.Controls.Add(ToolbarLabel("卡框分类", UiTheme.Gold), 0, 0);
 		tableLayoutPanel.Controls.Add(_mode, 1, 0);
@@ -423,7 +430,13 @@ public sealed class OverFrameFrameEditorForm : Form
 			AutoEllipsis = true,
 			TextAlign = ContentAlignment.MiddleLeft
 		};
-		tableLayoutPanel.Controls.Add(control, 0, 7);
+		tableLayoutPanel.Controls.Add(_removeFoilInnerFrame, 0, 7);
+		tableLayoutPanel.SetColumnSpan(_removeFoilInnerFrame, 3);
+		_removeFoilInnerFrame.CheckedChanged += async delegate
+		{
+			if (!_loading) await RenderAsync();
+		};
+		tableLayoutPanel.Controls.Add(control, 0, 8);
 		tableLayoutPanel.SetColumnSpan(control, 3);
 		return tableLayoutPanel;
 	}
@@ -539,6 +552,7 @@ public sealed class OverFrameFrameEditorForm : Form
 		try
 		{
 			_savedSettings = OverFrameArtStore.ReadSettings(_gameRoot, _cardId);
+			_removeFoilInnerFrame.Checked = _savedSettings.RemoveFoilInnerFrame;
 			string mappingFrameKey = ((!string.IsNullOrWhiteSpace(_initialFrameKey)) ? _initialFrameKey : _savedSettings.FrameKey);
 			if (_replaceStoredBackground)
 			{
@@ -680,6 +694,7 @@ public sealed class OverFrameFrameEditorForm : Form
 			return;
 		}
 		int generation = ++_generation;
+		bool removeFoilInnerFrame = _removeFoilInnerFrame.Checked;
 		_renderTimer.Stop();
 		_rendering = true;
 		_outputBytes = null;
@@ -758,6 +773,12 @@ public sealed class OverFrameFrameEditorForm : Form
 				array = await Task.Run(() => AstellarOverFrameComposer.ComposeFlatFrame(artBytes, frameBytes, backgroundBytes));
 				array2 = array;
 				break;
+			}
+			if (removeFoilInnerFrame)
+			{
+				var foilTemplate = await GetOverFrameTemplateAsync(choice.BaseKey);
+				array = await Task.Run(() => AstellarOverFrameComposer.RemoveFoilInnerFrame(array, foilTemplate));
+				array2 = array; // Preview/export share the exact encoded texture, not a foil simulation.
 			}
 			if (generation == _generation && !base.IsDisposed)
 			{
@@ -931,7 +952,7 @@ public sealed class OverFrameFrameEditorForm : Form
 	private async Task PersistDraftAsync(FrameChoice choice, byte[] artBytes)
 	{
 		ImageRenderSpec renderSpec = _canvas.RenderSpec;
-		OverFrameFrameSettings settings = new OverFrameFrameSettings(choice.Key, choice.IsCustom, UserSelected: true, CurrentMode.ToString(), renderSpec.ImageScale, renderSpec.OffsetX, renderSpec.OffsetY, _canvas.BackgroundRenderSpec.ImageScale, _canvas.BackgroundRenderSpec.OffsetX, _canvas.BackgroundRenderSpec.OffsetY);
+		OverFrameFrameSettings settings = new OverFrameFrameSettings(choice.Key, choice.IsCustom, UserSelected: true, CurrentMode.ToString(), renderSpec.ImageScale, renderSpec.OffsetX, renderSpec.OffsetY, _canvas.BackgroundRenderSpec.ImageScale, _canvas.BackgroundRenderSpec.OffsetX, _canvas.BackgroundRenderSpec.OffsetY, _removeFoilInnerFrame.Checked);
 		await Task.Run(delegate
 		{
 			OverFrameArtStore.SaveArt(_gameRoot, _cardId, artBytes);
@@ -951,7 +972,7 @@ public sealed class OverFrameFrameEditorForm : Form
 			byte[] png = _canvas.RenderSourceToTarget();
 			ImageRenderSpec renderSpec = _canvas.RenderSpec;
 			OverFrameArtStore.SaveArt(_gameRoot, _cardId, png);
-			OverFrameArtStore.SaveSettings(_gameRoot, _cardId, new OverFrameFrameSettings(frameChoice.Key, frameChoice.IsCustom, UserSelected: true, CurrentMode.ToString(), renderSpec.ImageScale, renderSpec.OffsetX, renderSpec.OffsetY, _canvas.BackgroundRenderSpec.ImageScale, _canvas.BackgroundRenderSpec.OffsetX, _canvas.BackgroundRenderSpec.OffsetY));
+			OverFrameArtStore.SaveSettings(_gameRoot, _cardId, new OverFrameFrameSettings(frameChoice.Key, frameChoice.IsCustom, UserSelected: true, CurrentMode.ToString(), renderSpec.ImageScale, renderSpec.OffsetX, renderSpec.OffsetY, _canvas.BackgroundRenderSpec.ImageScale, _canvas.BackgroundRenderSpec.OffsetX, _canvas.BackgroundRenderSpec.OffsetY, _removeFoilInnerFrame.Checked));
 		}
 		catch
 		{
@@ -1198,6 +1219,7 @@ public sealed class OverFrameFrameEditorForm : Form
 				};
 				string value = ((_backgroundBytes == null) ? "未使用叠底背景" : "已包含叠底背景");
 				string value2 = (_sourceHasTransparency ? "主体位于卡框上方，可形成真正的越框效果。" : "当前源图没有透明区域，越框部分会保持矩形边缘。");
+				if (_removeFoilInnerFrame.Checked) value2 += "\n已开启实验性闪卡去内框：仅当前卡，可能影响局部闪度；预览不模拟游戏闪面，请进游戏核验。关闭选项并重新应用可恢复默认遮罩。";
 				if (MessageBox.Show(this, $"把“{choice.DisplayName}”以“{modeLabel}”模式写入卡号 {_cardId}？\n\n{value}。{value2}\n只修改这张卡的 Bundle，不会改全局 card_frame；编辑源图、背景与构图参数都会保留。", "确认应用超框", MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation) != DialogResult.OK)
 				{
 					return;
@@ -1234,7 +1256,7 @@ public sealed class OverFrameFrameEditorForm : Form
 						throw new InvalidOperationException("超框合成图已经写入，但超框登记失败。请在主界面的“超框表”中为该卡重试启用。\n\n" + ex.Message, ex);
 					}
 					ImageRenderSpec renderSpec = _canvas.RenderSpec;
-					OverFrameArtStore.SaveSettings(_gameRoot, _cardId, new OverFrameFrameSettings(choice.Key, choice.IsCustom, UserSelected: true, CurrentMode.ToString(), renderSpec.ImageScale, renderSpec.OffsetX, renderSpec.OffsetY, _canvas.BackgroundRenderSpec.ImageScale, _canvas.BackgroundRenderSpec.OffsetX, _canvas.BackgroundRenderSpec.OffsetY));
+					OverFrameArtStore.SaveSettings(_gameRoot, _cardId, new OverFrameFrameSettings(choice.Key, choice.IsCustom, UserSelected: true, CurrentMode.ToString(), renderSpec.ImageScale, renderSpec.OffsetX, renderSpec.OffsetY, _canvas.BackgroundRenderSpec.ImageScale, _canvas.BackgroundRenderSpec.OffsetX, _canvas.BackgroundRenderSpec.OffsetY, _removeFoilInnerFrame.Checked));
 					_art.Category = "超框卡图";
 					AppliedFrameName = modeLabel + " · " + choice.DisplayName;
 					base.DialogResult = DialogResult.OK;

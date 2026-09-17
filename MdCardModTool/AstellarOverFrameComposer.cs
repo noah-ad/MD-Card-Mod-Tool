@@ -13,6 +13,31 @@ public static class AstellarOverFrameComposer
 
 	private static readonly HashSet<string> TransparentEdgeLayers = new HashSet<string> { "PeriFrame", "ArtFrame", "EffFrame" };
 
+	// Experimental per-art foil coverage, not ordinary image transparency.
+	// Do not touch RGB, the outer frame, or pixels outside the two inner-frame layers.
+	public static byte[] RemoveFoilInnerFrame(byte[] png, AstellarOverFrameTemplate template)
+	{
+		using Image<Rgba32> image = Image.Load<Rgba32>(png);
+		Validate(image, "闪面遮罩");
+		var pixels = new Rgba32[image.Width * image.Height];
+		image.CopyPixelDataTo(pixels);
+		using Image<Rgba32> effectBox = Image.Load<Rgba32>(template.Layers["EffBox"]);
+		Validate(effectBox, "EffBox");
+		var box = new Rgba32[pixels.Length];
+		effectBox.CopyPixelDataTo(box);
+		foreach (string key in new[] { "ArtFrame", "EffFrame" })
+		{
+			if (!template.Layers.TryGetValue(key, out var bytes)) throw new InvalidDataException("缺少内框遮罩：" + key);
+			using Image<Rgba32> layer = Image.Load<Rgba32>(bytes);
+			Validate(layer, key);
+			var mask = new Rgba32[pixels.Length];
+			layer.CopyPixelDataTo(mask);
+			for (int i = 0; i < pixels.Length; i++)
+				if (mask[i].A > 0 && box[i].A == 0) pixels[i].A = 4;
+		}
+		return Encode(pixels);
+	}
+
 	public static AstellarOverFrameComposition Compose(byte[] transparentArtPng, AstellarOverFrameTemplate template, byte[]? backgroundPng = null)
 	{
 		using Image<Rgba32> image = Image.Load<Rgba32>(transparentArtPng);
