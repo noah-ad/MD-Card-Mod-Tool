@@ -797,7 +797,10 @@ public sealed class OverFrameFrameEditorForm : Form
 			}
 			if (removeFoilInnerFrame)
 			{
-				var foilTemplate = await GetOverFrameTemplateAsync(choice.BaseKey);
+				string foilKey = choice.IsCustom
+					? await Task.Run(() => CardFrameCatalog.RecommendedKey(CardCatalogService.LoadBestAvailable().Find(_cardId), _art.Width, _art.Height))
+					: choice.BaseKey;
+				var foilTemplate = await GetOverFrameTemplateAsync(foilKey);
 				array = await Task.Run(() => AstellarOverFrameComposer.RemoveFoilInnerFrame(array, foilTemplate));
 				array2 = array; // Preview/export share the exact encoded texture, not a foil simulation.
 			}

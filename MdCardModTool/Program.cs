@@ -607,6 +607,26 @@ internal static class Program
 					string[] first = (from object obj10 in modernComboBox.Items
 						select obj10.ToString() ?? "").ToArray();
 					flag19 = flag17 && canvas.IsOverFrameEditing && canvas.ShowingRenderedPreview && first.SequenceEqual(expectedModes) && label.Text.Contains("已添加背景", StringComparison.Ordinal) && label.Text.Contains("主体可越过卡框", StringComparison.Ordinal) && source.Contains("更换卡图") && source.Contains("添加叠底背景") && source.Contains("清除背景") && flag14 && source.Contains("真实 Alpha 预览") && source.Contains("构图编辑") && source.Contains("导出最终 PNG") && source.Contains("铺满插图区") && source.Contains("显示整张图");
+					// Reproduce imported custom PNG + foil option; __custom__ is not a template key.
+					var editorType = typeof(OverFrameFrameEditorForm);
+					const BindingFlags privateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
+					string customPath = Path.Combine(text10, "test-custom-frame.png");
+					editorType.GetField("_customFramePath", privateInstance)!.SetValue(editor, customPath);
+					byte[] customBytes = (byte[])editorType.GetField("_currentFrameBytes", privateInstance)!.GetValue(editor)!;
+					File.WriteAllBytes(customPath, customBytes);
+					modernComboBox.SelectedIndex = 3;
+					editorType.GetMethod("RefreshFrameChoices", privateInstance)!.Invoke(editor, new object[] { "__custom__" });
+					foilToggle.Checked = true;
+					var customReady = (Task)editorType.GetMethod("EnsurePreviewReadyAsync", privateInstance)!.Invoke(editor, null)!;
+					if (!WaitFor(() => customReady.IsCompleted)) throw new Exception("Custom foil render timeout");
+					customReady.GetAwaiter().GetResult();
+					if ((string?)editorType.GetField("_previewFrameKey", privateInstance)!.GetValue(editor) != "__custom__" || outputField.GetValue(editor) is not byte[] || !File.ReadAllBytes(customPath).AsSpan().SequenceEqual(customBytes)) throw new Exception("Custom foil frame was lost or modified");
+					Console.WriteLine("customFrameFoil=True; applyReady=True; customPngPreserved=True");
+					foilToggle.Checked = false;
+					modernComboBox.SelectedIndex = 0;
+					var restoreReady = (Task)editorType.GetMethod("EnsurePreviewReadyAsync", privateInstance)!.Invoke(editor, null)!;
+					if (!WaitFor(() => restoreReady.IsCompleted)) throw new Exception("Restore render timeout");
+					restoreReady.GetAwaiter().GetResult();
 					string environmentVariable = Environment.GetEnvironmentVariable("MDCT_OVERFRAME_SCREENSHOT");
 					if (!string.IsNullOrWhiteSpace(environmentVariable))
 					{
