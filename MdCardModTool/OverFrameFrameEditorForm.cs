@@ -672,6 +672,25 @@ public sealed class OverFrameFrameEditorForm : Form
 		}
 	}
 
+	private TaskCompletionSource<bool>? _renderCompletion;
+	private string? _renderError;
+	private bool _applying;
+
+	private async Task EnsurePreviewReadyAsync()
+	{
+		_renderTimer.Stop();
+		while (_rendering && _renderCompletion != null)
+			await _renderCompletion.Task;
+		if (IsDisposed || Disposing) throw new OperationCanceledException("编辑器已关闭。");
+		_renderTimer.Stop();
+		_renderPending = false;
+		if (_outputBytes == null || _frames.SelectedItem is not FrameChoice selected ||
+			_previewFrameKey != selected.Key || _previewMode != CurrentMode)
+			await RenderAsync();
+		if (_outputBytes == null)
+			throw new InvalidOperationException(_renderError ?? "没有可应用的合成图，请确认卡图和卡框均已载入。");
+	}
+
 	private async Task RenderAsync()
 	{
 		if (base.IsDisposed || _sourceBytes == null)
@@ -697,6 +716,8 @@ public sealed class OverFrameFrameEditorForm : Form
 		bool removeFoilInnerFrame = _removeFoilInnerFrame.Checked;
 		_renderTimer.Stop();
 		_rendering = true;
+		var completion = _renderCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+		_renderError = null;
 		_outputBytes = null;
 		_previewBytes = null;
 		_canvas.SetRenderedPreview(null);
@@ -813,6 +834,7 @@ public sealed class OverFrameFrameEditorForm : Form
 			if (generation == _generation)
 			{
 				_status.Text = "预览失败：" + ex.Message;
+				_renderError = ex.Message;
 			}
 		}
 		finally
@@ -824,6 +846,7 @@ public sealed class OverFrameFrameEditorForm : Form
 				_renderPending = false;
 				_renderTimer.Start();
 			}
+			completion.TrySetResult(true);
 		}
 	}
 
@@ -1200,11 +1223,28 @@ public sealed class OverFrameFrameEditorForm : Form
 
 	private async Task ApplyAsync()
 	{
-		_renderTimer.Stop();
-		if (_rendering || _outputBytes == null)
+		if (_applying) return;
+		_applying = true;
+		Enabled = false;
+		try
 		{
-			await RenderAsync();
+			await EnsurePreviewReadyAsync();
+			await ApplyReadyPreviewAsync();
 		}
+		catch (OperationCanceledException) { }
+		catch (Exception ex)
+		{
+			if (!IsDisposed) MessageBox.Show(this, "无法生成应用所需的超框图：\n" + ex.Message, "应用超框失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+		}
+		finally
+		{
+			_applying = false;
+			if (!IsDisposed) Enabled = true;
+		}
+	}
+
+	private async Task ApplyReadyPreviewAsync()
+	{
 		if (_outputBytes != null)
 		{
 			object selectedItem = _frames.SelectedItem;
@@ -1226,6 +1266,7 @@ public sealed class OverFrameFrameEditorForm : Form
 				}
 				try
 				{
+					byte[] output = _outputBytes.ToArray();
 					base.UseWaitCursor = true;
 					_status.Text = "正在定位 LocalData 超框表…";
 					await Task.Run(() => _overFrames.FindGate(_gameRoot, delegate(int done, int total)
@@ -1239,7 +1280,6 @@ public sealed class OverFrameFrameEditorForm : Form
 						}
 					}));
 					_status.Text = "正在写入单卡超框合成图…";
-					byte[] output = _outputBytes.ToArray();
 					await Task.Run(delegate
 					{
 						_engine.Replace(_art, output, Path.Combine(_gameRoot, "_MD卡图备份", _art.SourceKind));

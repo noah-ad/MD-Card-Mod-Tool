@@ -540,6 +540,14 @@ internal static class Program
 					if (!WaitFor(() => !(bool)renderingField.GetValue(editor)!)) throw new Exception("Initial render timeout");
 					byte[] defaultFoil = (byte[])outputField.GetValue(editor)!;
 					foilToggle.Checked = true;
+					if (!(bool)renderingField.GetValue(editor)!) throw new Exception("Race fixture did not start rendering");
+					// Simulate another edit while composing, then immediately prepare Apply.
+					typeof(OverFrameFrameEditorForm).GetMethod("RenderAsync", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(editor, null);
+					var readyTask = (Task)typeof(OverFrameFrameEditorForm).GetMethod("EnsurePreviewReadyAsync", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(editor, null)!;
+					if (!WaitFor(() => readyTask.IsCompleted)) throw new Exception("Apply readiness timed out");
+					readyTask.GetAwaiter().GetResult();
+					if (outputField.GetValue(editor) is not byte[]) throw new Exception("Apply returned before latest output was ready");
+					Console.WriteLine("applyDuringRender=True; pendingEditWaited=True; latestOutputReady=True; gameWrites=False");
 					if (!WaitFor(() => outputField.GetValue(editor) is byte[] && !(bool)renderingField.GetValue(editor)!)) throw new Exception("Foil render timeout");
 					if (defaultFoil.AsSpan().SequenceEqual((byte[])outputField.GetValue(editor)!) || !OverFrameArtStore.ReadSettings(text10, 3899).RemoveFoilInnerFrame) throw new Exception("Foil option not applied or saved");
 					if (!((byte[])outputField.GetValue(editor)!).AsSpan().SequenceEqual((byte[])fieldInfo.GetValue(editor)!)) throw new Exception("Foil preview/export mismatch");
