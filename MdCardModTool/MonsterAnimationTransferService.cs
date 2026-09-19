@@ -31,7 +31,7 @@ public static class MonsterAnimationTransferService
 		string stage = Path.Combine(Path.GetDirectoryName(readOnlyList[0].Texture.BundlePath), ".md-animation-" + Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(stage);
 		Dictionary<string, (MonsterAnimationAssetRef Original, MonsterAnimationAssetRef Staged, string Snapshot, string Hash)> pending = new Dictionary<string, (MonsterAnimationAssetRef, MonsterAnimationAssetRef, string, string)>(StringComparer.OrdinalIgnoreCase);
-		Dictionary<string, AnimationAtlasTextureData> dictionary = new Dictionary<string, AnimationAtlasTextureData>(StringComparer.OrdinalIgnoreCase);
+		var dictionary = new Dictionary<string, (AnimationAtlasTextureData Texture, string Atlas)>(StringComparer.OrdinalIgnoreCase);
 		bool flag = false;
 		try
 		{
@@ -41,18 +41,21 @@ public static class MonsterAnimationTransferService
 					where x.Tier == pair.Tier
 					orderby x.Region == pair.Region descending, x.Scale == pair.Scale descending
 					select x).FirstOrDefault() ?? throw new InvalidDataException("来源卡缺少 " + pair.Tier + " 动画。");
-				if (!dictionary.TryGetValue(monsterAnimationAssetTriplet.Texture.BundlePath, out var texture))
+				string cacheKey = monsterAnimationAssetTriplet.Atlas.BundlePath + "|" + monsterAnimationAssetTriplet.Atlas.PathId;
+				if (!dictionary.TryGetValue(cacheKey, out var merged))
 				{
-					using Image<Rgba32> atlas = Image.Load<Rgba32>(engine.DecodePng(monsterAnimationAssetTriplet.Texture.AsTexture()));
-					texture = engine.EncodeAnimationAtlas(atlas, ResourceSource.IsMobile(gameRoot));
-					dictionary.Add(monsterAnimationAssetTriplet.Texture.BundlePath, texture);
+					string donorAtlas = Encoding.UTF8.GetString(engine.ReadTextAsset(monsterAnimationAssetTriplet.Atlas).Data).TrimEnd('\0');
+					var packed = AnimationAtlasMerge.Merge(donorAtlas, "merged", page =>
+					{
+						var asset = monsterAnimationAssetTriplet.Textures.FirstOrDefault(t => (t.Name + ".png").Equals(page, StringComparison.OrdinalIgnoreCase))
+							?? throw new InvalidDataException("来源动画缺少图集页：" + page);
+						return engine.DecodePng(asset.AsTexture());
+					});
+					using (packed.Image) merged = (engine.EncodeAnimationAtlas(packed.Image, ResourceSource.IsMobile(gameRoot)), packed.Atlas);
+					dictionary.Add(cacheKey, merged);
 				}
-				string text = Encoding.UTF8.GetString(engine.ReadTextAsset(monsterAnimationAssetTriplet.Atlas).Data).TrimEnd('\0').Replace("\r", "");
-				string[] lines = text.Split('\n');
-				if (lines.Count((string line) => line.Trim().EndsWith(".png", StringComparison.OrdinalIgnoreCase)) != 1)
-				{
-					throw new InvalidDataException("来源动画使用多页图集，当前不能整套移植；可预览，或向该卡导入视频替换。");
-				}
+				var texture = merged.Texture;
+				string[] lines = merged.Atlas.Replace("\r", "").Split('\n');
 				int num = Array.FindIndex(lines, (string x) => !string.IsNullOrWhiteSpace(x));
 				if (num < 0)
 				{

@@ -35,6 +35,11 @@ internal static class Program
 	private static void Main(string[] args)
 	{
 		ApplicationConfiguration.Initialize();
+		if (args.Length == 1 && args[0] == "--test-atlas-merge")
+		{
+			AnimationAtlasMergeTests.Run();
+			return;
+		}
 		if (args.Length == 1 && args[0] == "--test-foil-inner-frame")
 		{
 			FoilInnerFrameTests.Run();
@@ -150,6 +155,11 @@ internal static class Program
 		if (args.Length == 2 && args[0] == "--test-studio-optimizations")
 		{
 			StudioOptimizationTests.Run(args[1]);
+			return;
+		}
+		if (args.Length == 5 && args[0] == "--test-animation-transfer")
+		{
+			StudioOptimizationTests.Transfer(args[1], args[2], args[3], args[4]);
 			return;
 		}
 		if (args.Length == 3 && args[0] == "--test-animation-transfer")

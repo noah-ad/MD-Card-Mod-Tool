@@ -169,11 +169,13 @@ internal static class StudioOptimizationTests
 		Console.WriteLine("donorSearchLanguages=4; sourcePreview=True; close=True; gameWrites=False; ready=True");
 	}
 
-	public static void Transfer(string gameRoot, string output, string targetCardId = "10001")
+	public static void Transfer(string gameRoot, string output, string targetCardId = "10001", string donorCardId = "3413")
 	{
 		Directory.CreateDirectory(output);
 		MonsterAnimationSet original = MonsterAnimationIndexService.Find(gameRoot, targetCardId);
-		MonsterAnimationSet monsterAnimationSet = MonsterAnimationIndexService.Find(gameRoot, "3413");
+		MonsterAnimationSet monsterAnimationSet = MonsterAnimationIndexService.Find(gameRoot, donorCardId);
+		foreach (var pair in MonsterAnimationAssetPairing.FindComplete(monsterAnimationSet))
+			Console.WriteLine($"donor={donorCardId}; tier={pair.Tier}; textures={pair.Textures.Count}");
 		Dictionary<string, string> originals = original.Assets.Concat(monsterAnimationSet.Assets).DistinctBy((MonsterAnimationAssetRef x) => x.BundlePath).ToDictionary((MonsterAnimationAssetRef x) => x.BundlePath, (MonsterAnimationAssetRef x) => Hash(x.BundlePath));
 		MonsterAnimationSet monsterAnimationSet2 = new MonsterAnimationSet
 		{
