@@ -164,6 +164,7 @@ public sealed class MonsterAnimationForm : Form
 	private bool _automaticQuality;
 
 	private int _resolvedFrameEdge;
+	private bool _originalQuality;
 
 	private int _mediaWidth;
 
@@ -221,7 +222,7 @@ public sealed class MonsterAnimationForm : Form
 		UiTheme.StyleComboBox(_frameEdge);
 		UiTheme.StyleComboBox(_atlasEdge);
 		UiTheme.StyleComboBox(_animationSelector);
-		_frameEdge.Items.AddRange(new object[8]
+		_frameEdge.Items.AddRange(new object[9]
 		{
 			Localizer.T("animation.quality.auto"),
 			"512",
@@ -230,7 +231,8 @@ public sealed class MonsterAnimationForm : Form
 			"1280",
 			"1600",
 			"1920",
-			"2048"
+			"2048",
+			Localizer.T("animation.quality.original")
 		});
 		_frameEdge.SelectedIndex = 0;
 		_atlasEdge.Items.AddRange(new object[3] { "2048", "4096", "8192" });
@@ -658,6 +660,7 @@ public sealed class MonsterAnimationForm : Form
 		_cardId.PlaceholderText = Localizer.T("animation.search.placeholder");
 		bool num = _frameEdge.SelectedIndex == 0;
 		_frameEdge.Items[0] = Localizer.T("animation.quality.auto");
+		_frameEdge.Items[8] = Localizer.T("animation.quality.original");
 		if (num)
 		{
 			_frameEdge.SelectedIndex = 0;
@@ -924,13 +927,19 @@ public sealed class MonsterAnimationForm : Form
 		List<Bitmap> loadedFrames = null;
 		bool resetToFullGameCanvas = _media == null;
 		bool automaticQuality = _frameEdge.SelectedIndex == 0;
+		bool originalQuality = _frameEdge.SelectedIndex == 8;
 		bool removeGreenScreen = _removeGreenScreen.Checked;
 		int resolvedFrameEdge = 0;
 		int mediaWidth = 0;
 		int mediaHeight = 0;
 		try
 		{
-			if (automaticQuality)
+			if (originalQuality)
+			{
+				resolvedFrameEdge = 0;
+				SetBusy(true, "animation.status.probing");
+			}
+			else if (automaticQuality)
 			{
 				SetBusy(true, "animation.status.probing");
 				using ExtractedAnimation extractedAnimation = await ExtractSourceAsync(paths, 128, removeGreenScreen: false);
@@ -944,12 +953,18 @@ public sealed class MonsterAnimationForm : Form
 				SetBusy(true, "animation.status.extractfixed", resolvedFrameEdge);
 			}
 			loadedMedia = await ExtractSourceAsync(paths, resolvedFrameEdge, removeGreenScreen);
+			if (originalQuality)
+			{
+				var plan = MonsterAnimationBuilder.PlanOriginal(loadedMedia.FramePaths, int.Parse(_atlasEdge.Text));
+				if (_set?.IsComplete == true) MonsterAnimationBuilder.ValidateOriginalCapacity(plan, _set);
+				if (MessageBox.Show(this, Localizer.F("animation.original.confirm", plan.Width, plan.Height, plan.PageCount, plan.GameBytes / 1048576d), Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) { loadedMedia.Dispose(); loadedMedia = null; return; }
+			}
 			using (Bitmap bitmap2 = loadedMedia.LoadFrame(0))
 			{
 				mediaWidth = bitmap2.Width;
 				mediaHeight = bitmap2.Height;
 			}
-			int previewEdge = Math.Min(512, resolvedFrameEdge);
+			int previewEdge = originalQuality ? Math.Min(1024, (int)Math.Sqrt(128d * 1024 * 1024 / 4 / loadedMedia.FramePaths.Count)) : Math.Min(512, resolvedFrameEdge);
 			ExtractedAnimation mediaForPreview = loadedMedia;
 			loadedFrames = await Task.Run(() => (from i in Enumerable.Range(0, mediaForPreview.FramePaths.Count)
 				select mediaForPreview.LoadFrame(i, previewEdge)).ToList());
@@ -957,6 +972,7 @@ public sealed class MonsterAnimationForm : Form
 			_media = loadedMedia;
 			loadedMedia = null;
 			_automaticQuality = automaticQuality;
+			_originalQuality = originalQuality;
 			_resolvedFrameEdge = resolvedFrameEdge;
 			_mediaWidth = mediaWidth;
 			_mediaHeight = mediaHeight;
@@ -1081,7 +1097,7 @@ public sealed class MonsterAnimationForm : Form
 		ExtractedAnimation media = _media;
 		SetSourceStatus(delegate
 		{
-			string text = Localizer.F(_automaticQuality ? "animation.quality.resolved.auto" : "animation.quality.resolved.fixed", _resolvedFrameEdge);
+			string text = _originalQuality ? Localizer.T("animation.original.preview") : Localizer.F(_automaticQuality ? "animation.quality.resolved.auto" : "animation.quality.resolved.fixed", _resolvedFrameEdge);
 			string text2 = (media.GreenScreenRemoved ? Localizer.T("animation.source.transparent") : "");
 			return Localizer.F("animation.source.media", Path.GetFileName(media.SourcePath), media.FramePaths.Count, (int)_fps.Value, (double)media.FramePaths.Count / (double)_fps.Value, _mediaWidth, _mediaHeight, text, text2);
 		});
@@ -1274,6 +1290,11 @@ public sealed class MonsterAnimationForm : Form
 			return;
 		}
 		string text = Localizer.T("animation.operation.modify");
+		if (_originalQuality != (_frameEdge.SelectedIndex == 8))
+		{
+			MessageBox.Show(this, Localizer.T("animation.original.reload"), Text);
+			return;
+		}
 		if (!EnsureGameClosed() || MessageBox.Show(this, Localizer.F("animation.confirm.apply.message", set.CardId, text), Localizer.T("animation.confirm.apply.title"), MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation) != DialogResult.OK)
 		{
 			return;
@@ -1286,7 +1307,14 @@ public sealed class MonsterAnimationForm : Form
 				AnimationWriteLease.Preflight(set);
 			});
 			MonsterAnimationTemplate template = await Task.Run(() => _service.ReadTemplate(_gameRoot, set));
-			MonsterAnimationBuildResult built = await Task.Run(() => MonsterAnimationBuilder.Build(_media.FramePaths, set.CardId, (int)_fps.Value, (int)_scale.Value, template, int.Parse(_atlasEdge.Text)));
+			int fps = (int)_fps.Value, scale = (int)_scale.Value, edge = int.Parse(_atlasEdge.Text);
+			MonsterAnimationBuildResult built = await Task.Run(() =>
+			{
+				if (!_originalQuality) return MonsterAnimationBuilder.Build(_media.FramePaths, set.CardId, fps, scale, template, edge);
+				var plan = MonsterAnimationBuilder.PlanOriginal(_media.FramePaths, edge);
+				MonsterAnimationBuilder.ValidateOriginalCapacity(plan, set);
+				return MonsterAnimationBuilder.BuildOriginal(_media.FramePaths, set.CardId, fps, scale, template, edge);
+			});
 			try
 			{
 				SetResourceStatus("animation.status.compressing", built.AtlasWidth, built.AtlasHeight);

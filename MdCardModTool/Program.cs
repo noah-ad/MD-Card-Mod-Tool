@@ -35,6 +35,11 @@ internal static class Program
 	private static void Main(string[] args)
 	{
 		ApplicationConfiguration.Initialize();
+		if (args.Length == 3 && args[0] == "--test-original-animation")
+		{
+			OriginalAnimationTests.Run(args[1], args[2]);
+			return;
+		}
 		if (args.Length == 1 && args[0] == "--test-atlas-merge")
 		{
 			AnimationAtlasMergeTests.Run();

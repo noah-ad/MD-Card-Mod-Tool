@@ -9,6 +9,7 @@ public sealed class MonsterAnimationBuildResult : IDisposable
 	public required MonsterAnimationTierBuildResult Hd { get; init; }
 
 	public required MonsterAnimationTierBuildResult Sd { get; init; }
+	public bool Uncompressed { get; init; }
 
 	public Image<Rgba32> AtlasImage => Hd.AtlasImage;
 
@@ -40,6 +41,6 @@ public sealed class MonsterAnimationBuildResult : IDisposable
 	public void Dispose()
 	{
 		Hd.Dispose();
-		Sd.Dispose();
+		if (!ReferenceEquals(Hd, Sd)) Sd.Dispose();
 	}
 }

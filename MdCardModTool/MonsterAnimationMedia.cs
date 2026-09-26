@@ -123,7 +123,7 @@ public static class MonsterAnimationMedia
 		{
 			throw new ArgumentOutOfRangeException("maxFrames");
 		}
-		if ((maxFrameEdge < 64 || maxFrameEdge > 2048) ? true : false)
+		if (maxFrameEdge != 0 && (maxFrameEdge < 64 || maxFrameEdge > 2048))
 		{
 			throw new ArgumentOutOfRangeException("maxFrameEdge");
 		}
@@ -135,11 +135,8 @@ public static class MonsterAnimationMedia
 		string directory = Path.Combine(Path.GetTempPath(), "MDCardModTool", "animation_" + Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(directory);
 		string text = Path.Combine(directory, "frame_%05d.png");
-		List<string> list = new List<string>
-		{
-			"fps=" + framesPerSecond.ToString(CultureInfo.InvariantCulture),
-			$"scale=w='min(iw\\,{maxFrameEdge})':h='min(ih\\,{maxFrameEdge})':force_original_aspect_ratio=decrease"
-		};
+		List<string> list = new List<string> { "fps=" + framesPerSecond.ToString(CultureInfo.InvariantCulture) };
+		if (maxFrameEdge != 0) list.Add($"scale=w='min(iw\\,{maxFrameEdge})':h='min(ih\\,{maxFrameEdge})':force_original_aspect_ratio=decrease");
 		if (removeGreenScreen)
 		{
 			list.Add("colorkey=color=0x00FF00:similarity=0.25:blend=0.08");
@@ -251,7 +248,7 @@ public static class MonsterAnimationMedia
 		{
 			throw new ArgumentOutOfRangeException("maxFrames");
 		}
-		if ((maxFrameEdge < 64 || maxFrameEdge > 2048) ? true : false)
+		if (maxFrameEdge != 0 && (maxFrameEdge < 64 || maxFrameEdge > 2048))
 		{
 			throw new ArgumentOutOfRangeException("maxFrameEdge");
 		}
@@ -271,7 +268,7 @@ public static class MonsterAnimationMedia
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				using Image<Rgba32> image = await Image.LoadAsync<Rgba32>(ordered[i], cancellationToken);
-				if (Math.Max(image.Width, image.Height) > maxFrameEdge)
+				if (maxFrameEdge != 0 && Math.Max(image.Width, image.Height) > maxFrameEdge)
 				{
 					image.Mutate(delegate(IImageProcessingContext context)
 					{

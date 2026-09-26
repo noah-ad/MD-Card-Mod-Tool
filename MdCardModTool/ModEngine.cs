@@ -1107,9 +1107,9 @@ public sealed class ModEngine
 		ReplaceAnimationAtlas(asset, EncodeAnimationAtlas(atlas), backupRoot);
 	}
 
-	public AnimationAtlasTextureData EncodeAnimationAtlas(Image<Rgba32> atlas, bool mobile = false)
+	public AnimationAtlasTextureData EncodeAnimationAtlas(Image<Rgba32> atlas, bool mobile = false, bool uncompressed = false)
 	{
-		if (mobile)
+		if (mobile || uncompressed)
 		{
 			using (Image<Rgba32> image = atlas.Clone(delegate(IImageProcessingContext x)
 			{

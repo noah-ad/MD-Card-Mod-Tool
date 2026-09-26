@@ -62,8 +62,27 @@ public static class MonsterAnimationCompatibilityValidator
 			select pair).First();
 	}
 
-	private static AnimationTextureMetadata ValidateTier(ModEngine engine, string cardId, MonsterAnimationAssetTriplet pair)
+	private static AnimationTextureMetadata ValidateTier(ModEngine engine, string cardId, MonsterAnimationAssetTriplet pair, string? pageText = null, HashSet<string>? regionNames = null)
 	{
+		if (pageText == null)
+		{
+			string atlasText = Encoding.UTF8.GetString(engine.ReadTextAsset(pair.Atlas).Data).TrimEnd('\0').Replace("\r", "").Trim();
+			var sections = Regex.Split(atlasText, @"\n+(?=[^\n:]+\.png\s*\n)");
+			if (sections.Length > 1)
+			{
+				var names = new HashSet<string>(StringComparer.Ordinal);
+				AnimationTextureMetadata? first = null;
+				foreach (var section in sections)
+				{
+					string name = section.Split('\n')[0].Trim();
+					var texture = pair.Textures.FirstOrDefault(t => t.Name + ".png" == name) ?? throw new InvalidDataException("缺少图集页：" + name);
+					var meta = ValidateTier(engine, cardId, pair with { Texture = texture }, section, names);
+					first ??= meta;
+				}
+				ValidateSkeleton(engine.ReadTextAsset(pair.Skeleton).Data, cardId, names);
+				return first!;
+			}
+		}
 		AnimationTextureMetadata animationTextureMetadata = engine.ReadAnimationTextureMetadata(pair.Texture);
 		if (animationTextureMetadata.Width <= 0 || animationTextureMetadata.Height <= 0 || animationTextureMetadata.Width > 8192 || animationTextureMetadata.Height > 8192)
 		{
@@ -88,7 +107,7 @@ public static class MonsterAnimationCompatibilityValidator
 		{
 			throw new InvalidDataException(pair.Tier + " 动画图集重新解码后的尺寸不一致。");
 		}
-		AtlasDocument atlasDocument = ParseAtlas(engine.ReadTextAsset(pair.Atlas).Data);
+		AtlasDocument atlasDocument = ParseAtlas(pageText == null ? engine.ReadTextAsset(pair.Atlas).Data : Encoding.UTF8.GetBytes(pageText));
 		if (!atlasDocument.Page.Equals(pair.Texture.Name + ".png", StringComparison.OrdinalIgnoreCase) || atlasDocument.Width != animationTextureMetadata.Width || atlasDocument.Height != animationTextureMetadata.Height || atlasDocument.Regions.Count == 0)
 		{
 			throw new InvalidDataException(pair.Tier + " Atlas 页名、尺寸或区域列表与 Texture2D 不一致。");
@@ -104,7 +123,8 @@ public static class MonsterAnimationCompatibilityValidator
 				throw new InvalidDataException(pair.Tier + " Atlas 区域 " + region.Name + " 越界。");
 			}
 		}
-		ValidateSkeleton(engine.ReadTextAsset(pair.Skeleton).Data, cardId, atlasDocument.Regions.Select((AtlasRegion region) => region.Name).ToHashSet<string>(StringComparer.Ordinal));
+		if (regionNames == null) ValidateSkeleton(engine.ReadTextAsset(pair.Skeleton).Data, cardId, atlasDocument.Regions.Select((AtlasRegion region) => region.Name).ToHashSet<string>(StringComparer.Ordinal));
+		else foreach (var region in atlasDocument.Regions) if (!regionNames.Add(region.Name)) throw new InvalidDataException("重复的动画区域：" + region.Name);
 		return animationTextureMetadata;
 	}
 

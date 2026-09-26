@@ -7,7 +7,15 @@ public static class Localizer
 {
 	private static readonly Dictionary<string, string[]> Strings = new Dictionary<string, string[]>(StringComparer.Ordinal)
 	{
-		["app.title"] = new string[4] { "MD 卡片 Mod 工具 2.0.20", "MD 卡片 Mod 工具 2.0.20", "MD カード Mod ツール 2.0.20", "MD Card Mod Tool 2.0.20" },
+		["animation.quality.original"] = new[] { "原分辨率 · RGBA32（实验）", "原解析度 · RGBA32（實驗）", "元解像度 · RGBA32（実験）", "Original resolution · RGBA32 (experimental)" },
+		["animation.original.reload"] = new[] { "切换原分辨率模式后，请重新导入视频或图片序列。", "切換原解析度模式後，請重新匯入素材。", "画質モード変更後、素材を再読み込みしてください。", "Re-import the source after changing original-resolution mode." },
+		["animation.original.preview"] = new[] { "原尺寸/RGBA32；预览为节省内存可能缩小，不代表输出清晰度", "原尺寸/RGBA32；預覽可能縮小，不代表輸出清晰度", "元解像度/RGBA32・プレビューのみ縮小される場合があります", "Original/RGBA32; preview may be downscaled, output is not" },
+		["animation.original.confirm"] = new[] {
+			"保留原像素，画布 {0}×{1}，每档 {2} 页，HD+SD 纹理预计约 {3:F0} MiB（处理峰值更高）。\n不缩图、不用 BC7；仍按所选帧率抽帧，并执行游戏所需的预乘 Alpha。多页仅使用目标已有登记页，不自动新建。实际游戏兼容性未验证。继续载入？",
+			"保留原像素，畫布 {0}×{1}，每檔 {2} 頁，HD+SD 約 {3:F0} MiB（處理峰值更高）。\n不縮圖、不用 BC7；仍按所選幀率取樣及預乘 Alpha。僅使用目標已登記頁。遊戲相容性未驗證。繼續？",
+			"元ピクセルを保持：{0}×{1}、各 {2} ページ、HD+SD 約 {3:F0} MiB（処理時はさらに必要）。\nBC7/縮小なし。指定FPSとPMA変換は適用。既存の登録ページのみ使用。ゲーム内未検証。続行？",
+			"Original pixels: {0}×{1}, {2} pages per tier, ~{3:F0} MiB HD+SD (processing peak is higher).\nNo resizing or BC7. Selected FPS and required PMA conversion still apply. Uses existing registered pages only. Not validated in-game. Continue?" },
+		["app.title"] = new string[4] { "MD 卡片 Mod 工具 2.0.21", "MD 卡片 Mod 工具 2.0.21", "MD カード Mod ツール 2.0.21", "MD Card Mod Tool 2.0.21" },
 		["animation.donor.action"] = new string[4] { "使用其他卡动画", "使用其他卡動畫", "他カードの演出を使用", "Use another card's animation" },
 		["animation.donor.title"] = new string[4] { "使用其他卡的动画 · 整套替换", "使用其他卡的動畫 · 整套替換", "他カードの演出 · 一括置換", "Use another card's animation · Complete rig" },
 		["animation.donor.search"] = new string[4] { "搜索来源卡号 / 卡名", "搜尋來源卡號 / 卡名", "元カードID・カード名を検索", "Search source card ID / name" },

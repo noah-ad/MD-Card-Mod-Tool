@@ -11,7 +11,7 @@ using SixLabors.ImageSharp.Processing;
 
 namespace MdCardModTool;
 
-public static class MonsterAnimationBuilder
+public static partial class MonsterAnimationBuilder
 {
 	private sealed class AtlasRegion
 	{

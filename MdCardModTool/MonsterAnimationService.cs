@@ -162,6 +162,11 @@ public sealed class MonsterAnimationService
 
 	private void ApplyStaged(string gameRoot, MonsterAnimationSet set, MonsterAnimationBuildResult animation, bool mobile = false)
 	{
+		if (animation.Uncompressed)
+		{
+			ApplyOriginalStaged(gameRoot, set, animation);
+			return;
+		}
 		if (!set.IsComplete)
 		{
 			throw new InvalidOperationException("该卡没有定位到教程要求的两套 Texture2D + Atlas + JS，不能进行不完整替换。");
@@ -222,6 +227,41 @@ public sealed class MonsterAnimationService
 			{
 			}
 		}
+	}
+
+	private void ApplyOriginalStaged(string gameRoot, MonsterAnimationSet set, MonsterAnimationBuildResult animation)
+	{
+		var pairs = MonsterAnimationAssetPairing.FindComplete(set);
+		if (pairs.Any(p => p.Textures.Select(t => t.Name).Distinct().Count() < animation.ForTier(p.Tier).Pages.Count())) throw new InvalidDataException("目标已登记图集页不足，未提交。");
+		var written = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (var pair in pairs)
+		{
+			var tier = animation.ForTier(pair.Tier);
+			var pages = tier.Pages.ToArray();
+			var textures = pair.Textures.OrderByDescending(t => t.PathId == pair.Texture.PathId && t.BundlePath == pair.Texture.BundlePath).ThenBy(t => t.Name, StringComparer.Ordinal).ToArray();
+			string atlas = tier.AtlasText;
+			for (int i = 0; i < pages.Length; i++)
+			{
+				var asset = textures[i];
+				string placeholder = "P" + set.CardId + (i == 0 ? "" : "_page" + i) + ".png";
+				atlas = atlas.Replace(placeholder, asset.Name + ".png", StringComparison.Ordinal);
+				if (written.Add(asset.BundlePath + "|" + asset.PathId))
+				{
+					var encoded = _engine.EncodeAnimationAtlas(pages[i], uncompressed: true);
+					_engine.ReplaceAnimationAtlas(asset, encoded, Path.Combine(gameRoot, "rgba-backups"));
+					if (_engine.ReadAnimationTextureMetadata(asset).TextureFormat != 4) throw new InvalidDataException("RGBA32 写回格式校验失败。");
+					using var decoded = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Rgba32>(_engine.DecodePng(asset.AsTexture()));
+					if (decoded.Width != pages[i].Width || decoded.Height != pages[i].Height) throw new InvalidDataException("RGBA32 写回尺寸校验失败。");
+					bool equal = true;
+					pages[i].ProcessPixelRows(decoded, (a, b) => { for (int y = 0; y < a.Height; y++) if (!a.GetRowSpan(y).SequenceEqual(b.GetRowSpan(y))) { equal = false; break; } });
+					if (!equal) throw new InvalidDataException("RGBA32 写回像素不一致，未提交。");
+				}
+			}
+			_engine.ReplaceTextAsset(_engine.ReadTextAsset(pair.Atlas), Encoding.UTF8.GetBytes(atlas), Path.Combine(gameRoot, "rgba-backups"));
+			if (written.Add(pair.Skeleton.BundlePath + "|" + pair.Skeleton.PathId))
+				_engine.ReplaceTextAsset(_engine.ReadTextAsset(pair.Skeleton), tier.SkeletonJson, Path.Combine(gameRoot, "rgba-backups"));
+		}
+		MonsterAnimationCompatibilityValidator.Validate(set, requireExactlySixBundles: false);
 	}
 
 	public int Restore(string gameRoot, MonsterAnimationSet set)
