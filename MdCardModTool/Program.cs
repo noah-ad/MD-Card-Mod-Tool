@@ -168,6 +168,11 @@ internal static class Program
 			IndexRecoveryTests.Run(args[1], args[2], args[3]);
 			return;
 		}
+		if (args.Length == 3 && args[0] == "--test-mod-management")
+		{
+			ModManagementTests.Run(args[1], args[2]);
+			return;
+		}
 		if (args.Length == 3 && args[0] == "--test-mod-packages")
 		{
 			ModPackageTests.Run(args[1], args[2]);

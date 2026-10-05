@@ -10,7 +10,7 @@ namespace MdCardModTool;
 
 public sealed class ModPackageService
 {
-	private sealed record ChangedBundle(string LivePath, string RelativePath, string TargetKind, string SourceKind, string DisplayName);
+	private sealed record ChangedBundle(string LivePath, string RelativePath, string TargetKind, string SourceKind, string DisplayName, DateTime ModifiedAtUtc, IReadOnlyList<string> CardKeys);
 
 	private sealed record ImportPlan(string Target, string Staged, string Backup, string Rollback);
 
@@ -21,17 +21,48 @@ public sealed class ModPackageService
 	public int RefreshFlags(string gameRoot, IEnumerable<TexRef> textures)
 	{
 		List<TexRef> list = textures.ToList();
+		RefreshState(gameRoot, list);
+		return list.Count(x => x.IsModded);
+	}
+
+	public ModChangeSummary RefreshState(string gameRoot, IEnumerable<TexRef> textures)
+	{
+		List<TexRef> list = textures.ToList();
 		foreach (TexRef item in list)
 		{
 			item.IsModded = false;
+			item.ModModifiedAtUtc = null;
 		}
-		HashSet<string> changed = (from x in EnumerateChangedBundles(gameRoot, list)
-			select x.LivePath).ToHashSet<string>(StringComparer.OrdinalIgnoreCase);
-		foreach (TexRef item2 in list.Where((TexRef x) => changed.Contains(x.BundlePath)))
+		ChangedBundle[] changes = EnumerateChangedBundles(gameRoot, list)
+			.DistinctBy(x => x.LivePath, StringComparer.OrdinalIgnoreCase).ToArray();
+		Dictionary<string, DateTime> byPath = changes.ToDictionary(x => Path.GetFullPath(x.LivePath), x => x.ModifiedAtUtc, StringComparer.OrdinalIgnoreCase);
+		Dictionary<string, DateTime> byCard = new(StringComparer.Ordinal);
+		// Shared gate timestamps must not make every older card look newly edited.
+		foreach (ChangedBundle change in changes.OrderBy(x => x.SourceKind == "超框开关"))
 		{
-			item2.IsModded = true;
+			foreach (string cardKey in change.CardKeys)
+			{
+				if (!byCard.TryGetValue(cardKey, out DateTime previous) ||
+					(change.SourceKind != "超框开关" && change.ModifiedAtUtc > previous))
+				{
+					byCard[cardKey] = change.ModifiedAtUtc;
+				}
+			}
 		}
-		return list.Count((TexRef x) => x.IsModded);
+		foreach (TexRef item2 in list)
+		{
+			if (byPath.TryGetValue(Path.GetFullPath(item2.BundlePath), out DateTime directTime))
+			{
+				item2.ModModifiedAtUtc = directTime;
+			}
+			if (CardTextureRules.IsCardArt(item2) && byCard.TryGetValue(item2.CardKey, out DateTime cardTime) &&
+				(!item2.ModModifiedAtUtc.HasValue || cardTime > item2.ModModifiedAtUtc.Value))
+			{
+				item2.ModModifiedAtUtc = cardTime;
+			}
+			item2.IsModded = item2.ModModifiedAtUtc.HasValue;
+		}
+		return new ModChangeSummary(changes.Length, changes.Count(x => x.SourceKind.StartsWith("召唤动画", StringComparison.Ordinal)));
 	}
 
 	public ModChangeSummary GetChangeSummary(string gameRoot, IEnumerable<TexRef> textures)
@@ -43,9 +74,30 @@ public sealed class ModPackageService
 	public ModPackageInfo Export(string gameRoot, IEnumerable<TexRef> textures, string outputPath, bool directReplacement = false)
 	{
 		List<ChangedBundle> list = EnumerateChangedBundles(gameRoot, textures.ToList()).DistinctBy<ChangedBundle, string>((ChangedBundle x) => x.LivePath, StringComparer.OrdinalIgnoreCase).ToList();
+		return ExportBundles(gameRoot, list, outputPath, directReplacement);
+	}
+
+	public ModPackageInfo ExportSelected(string gameRoot, IEnumerable<TexRef> textures, IEnumerable<TexRef> selectedTextures, string outputPath, bool directReplacement = false)
+	{
+		TexRef[] selected = selectedTextures.ToArray();
+		if (selected.Length == 0)
+		{
+			throw new InvalidOperationException(Localizer.T("mods.export.noSelection"));
+		}
+		HashSet<string> selectedPaths = selected.Select(x => Path.GetFullPath(x.BundlePath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+		HashSet<string> selectedCards = selected.Where(CardTextureRules.IsCardArt).Select(x => x.CardKey)
+			.Where(x => x.Length > 0).ToHashSet(StringComparer.Ordinal);
+		List<ChangedBundle> list = EnumerateChangedBundles(gameRoot, textures.ToList())
+			.Where(x => selectedPaths.Contains(Path.GetFullPath(x.LivePath)) || x.CardKeys.Any(selectedCards.Contains))
+			.DistinctBy(x => x.LivePath, StringComparer.OrdinalIgnoreCase).ToList();
+		return ExportBundles(gameRoot, list, outputPath, directReplacement);
+	}
+
+	private static ModPackageInfo ExportBundles(string gameRoot, List<ChangedBundle> list, string outputPath, bool directReplacement)
+	{
 		if (list.Count == 0)
 		{
-			throw new InvalidOperationException("当前没有可导出的 Mod。替换过但已还原的 Bundle 不会被导出。");
+			throw new InvalidOperationException(Localizer.T("mods.export.noChanges"));
 		}
 		ModPackageManifest modPackageManifest = new ModPackageManifest
 		{
@@ -260,6 +312,10 @@ public sealed class ModPackageService
 			yield break;
 		}
 		string backupRoot = Path.Combine(gameRoot, "_MD卡图备份");
+		Dictionary<string, TexRef[]> texturesByBundle = textures.GroupBy(x => Path.GetFullPath(x.BundlePath), StringComparer.OrdinalIgnoreCase)
+			.ToDictionary(x => x.Key, x => x.ToArray(), StringComparer.OrdinalIgnoreCase);
+		Dictionary<string, string[]>? animationCards = null;
+		ModEngine engine = new();
 		string[] sourceKinds = SourceKinds;
 		string[] array = sourceKinds;
 		foreach (string sourceKind in array)
@@ -277,11 +333,37 @@ public sealed class ModPackageService
 				string live = ResolveInside(targetRoot, relativePath);
 				if (File.Exists(live) && !FilesEqual(item, live))
 				{
-					string[] array2 = (from x in textures
-						where x.BundlePath.Equals(live, StringComparison.OrdinalIgnoreCase)
+					TexRef[] bundleTextures = texturesByBundle.GetValueOrDefault(Path.GetFullPath(live), Array.Empty<TexRef>());
+					string[] array2 = (from x in bundleTextures
 						select (x.CardKey.Length > 0) ? x.CardKey : x.Name).Distinct().Take(4).ToArray();
 					string displayName = ((array2.Length != 0) ? string.Join("、", array2) : Path.GetFileName(relativePath));
-					yield return new ChangedBundle(live, relativePath, targetKind, sourceKind, displayName);
+					string[] cardKeys = bundleTextures.Where(CardTextureRules.IsCardArt)
+						.Select(x => x.CardKey).Where(x => x.Length > 0).Distinct(StringComparer.Ordinal).ToArray();
+					if (sourceKind.StartsWith("召唤动画", StringComparison.Ordinal))
+					{
+						animationCards ??= MonsterAnimationIndexService.LoadBestAvailable(gameRoot, out _)
+							.GroupBy(x => Path.GetFullPath(x.BundlePath), StringComparer.OrdinalIgnoreCase)
+							.ToDictionary(x => x.Key, x => x.Select(a => a.CardId).Distinct(StringComparer.Ordinal).ToArray(), StringComparer.OrdinalIgnoreCase);
+						if (!animationCards.TryGetValue(Path.GetFullPath(live), out cardKeys!))
+						{
+							cardKeys = engine.ScanAnimationAssetsFast(live, targetRoot).Select(x => x.CardId)
+								.Where(x => x.Length > 0).Distinct(StringComparer.Ordinal).ToArray();
+						}
+					}
+					else if (sourceKind == "超框开关")
+					{
+						OverFrameService frames = new();
+						TextAssetRef? current = engine.FindTextAssetFast(live, targetRoot, OverFrameService.GateName);
+						TextAssetRef? original = engine.FindTextAssetFast(item, sourceBackup, OverFrameService.GateName);
+						if (current != null && original != null)
+						{
+							List<OverFrameMapping> before = frames.Read(original);
+							List<OverFrameMapping> after = frames.Read(current);
+							cardKeys = before.Except(after).Concat(after.Except(before)).Select(x => x.CardId.ToString())
+								.Distinct(StringComparer.Ordinal).ToArray();
+						}
+					}
+					yield return new ChangedBundle(live, relativePath, targetKind, sourceKind, displayName, File.GetLastWriteTimeUtc(live), cardKeys);
 				}
 			}
 		}

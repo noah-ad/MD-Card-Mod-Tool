@@ -1,3 +1,4 @@
+using System;
 using System.Text.Json.Serialization;
 
 namespace MdCardModTool;
@@ -25,6 +26,9 @@ public sealed class TexRef
 	public bool IsTokenOrMisc { get; set; }
 
 	public bool IsModded { get; set; }
+
+	[JsonIgnore]
+	public DateTime? ModModifiedAtUtc { get; set; }
 
 	[JsonIgnore]
 	public bool HasMonsterAnimation { get; set; }

@@ -12,7 +12,7 @@ using System.Windows.Forms;
 
 namespace MdCardModTool;
 
-public sealed class MainForm : Form
+public sealed partial class MainForm : Form
 {
 	private sealed record LanguageChoice(AppLanguage Language, string Label)
 	{
@@ -236,7 +236,7 @@ public sealed class MainForm : Form
 	{
 		Dock = DockStyle.Fill,
 		FlowDirection = FlowDirection.LeftToRight,
-		WrapContents = false,
+		WrapContents = true,
 		Padding = new Padding(14, 5, 14, 5),
 		BackColor = UiTheme.SurfaceAlt,
 		Visible = false
@@ -458,6 +458,7 @@ public sealed class MainForm : Form
 		};
 		_list.SelectedIndexChanged += async delegate
 		{
+			UpdateSelectedModAction();
 			await ShowSelectionAsync();
 		};
 		_list.DoubleClick += async delegate
@@ -859,6 +860,7 @@ public sealed class MainForm : Form
 			BackColor = UiTheme.Window
 		};
 		_visualShortcutRow = new RowStyle(SizeType.Absolute, 0f);
+		tableLayoutPanel4.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
 		_resourceContextRow = new RowStyle(SizeType.Absolute, 0f);
 		tableLayoutPanel4.RowStyles.Add(_visualShortcutRow);
 		tableLayoutPanel4.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));
@@ -949,7 +951,7 @@ public sealed class MainForm : Form
 			BackColor = UiTheme.Surface,
 			Font = new Font("Segoe UI", 8f),
 			TextAlign = ContentAlignment.MiddleLeft,
-			Text = $"v2.0.23  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
+			Text = $"v2.0.24  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
 		};
 		TableLayoutPanel tableLayoutPanel8 = new TableLayoutPanel
 		{
@@ -988,6 +990,7 @@ public sealed class MainForm : Form
 			BackColor = UiTheme.Window
 		};
 		tableLayoutPanel10.RowStyles.Add(new RowStyle(SizeType.Absolute, 64f));
+		tableLayoutPanel10.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
 		tableLayoutPanel10.RowStyles.Add(new RowStyle(SizeType.Absolute, 74f));
 		tableLayoutPanel10.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 		tableLayoutPanel10.Controls.Add(tableLayoutPanel2, 0, 0);
@@ -1028,6 +1031,7 @@ public sealed class MainForm : Form
 			Padding = Padding.Empty
 		};
 		tableLayoutPanel12.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+		tableLayoutPanel12.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
 		tableLayoutPanel12.RowStyles.Add(new RowStyle(SizeType.Absolute, 30f));
 		tableLayoutPanel12.Controls.Add(tableLayoutPanel11, 0, 0);
 		tableLayoutPanel12.Controls.Add(statusStrip, 0, 1);
@@ -1344,9 +1348,14 @@ public sealed class MainForm : Form
 		}), "action.backup");
 		_modContextActions.Controls.Add(ContextLabel("context.mods.title"));
 		_modContextActions.Controls.Add(_modsOnlyButton);
+		ConfigureModManagementControls();
+		_modContextActions.Controls.Add(_exportSelectedModsButton);
 		_modContextActions.Controls.Add(exportMods);
 		_modContextActions.Controls.Add(importMods);
 		_modContextActions.Controls.Add(value);
+		_modContextActions.Controls.Add(_modSortField);
+		_modContextActions.Layout += delegate { UpdateModContextHeight(); };
+		_resourceContextBar.SizeChanged += delegate { UpdateModContextHeight(); };
 		Button value2 = Bind(Button("", delegate
 		{
 			OpenOverFrameTable();
@@ -1915,6 +1924,9 @@ public sealed class MainForm : Form
 		_profileSelector.AccessibleName = Localizer.T("top.account");
 		_languageSelector.AccessibleName = Localizer.T("top.language");
 		UpdateModsOnlyButtonText();
+		UpdateModSortLabels();
+		UpdateSelectedModAction();
+		UpdateModSummary();
 		UpdatePageHeader();
 		UpdateVisualShortcutStyles();
 		_changingLanguage = true;
@@ -2247,7 +2259,7 @@ public sealed class MainForm : Form
 			_groups.BeginUpdate();
 			_groups.Nodes.Clear();
 			int num = _textures.Count((TexRef x) => x.IsModded);
-			TreeNode treeNode = _groups.Nodes.Add($"{Localizer.T("nav.mods")}（{num + _changedAnimationBundleCount}）");
+			TreeNode treeNode = _groups.Nodes.Add($"{Localizer.T("nav.mods")}（{num}）");
 			treeNode.Tag = "__mods__";
 			treeNode.ForeColor = UiTheme.Gold;
 			foreach (IGrouping<string, TexRef> item in from x in _textures.Where(PageMatches)
@@ -2314,6 +2326,7 @@ public sealed class MainForm : Form
 		_resultCount.Text = Localizer.T("list.updating");
 		_resultCount.Update();
 		_list.BeginUpdate();
+		HashSet<TexRef> selectedTextures = SelectedModTextures(includeUnmodified: true).ToHashSet();
 		try
 		{
 			_list.VirtualListSize = 0;
@@ -2321,40 +2334,59 @@ public sealed class MainForm : Form
 			bool globalSearch = q.Length > 0;
 			HashSet<int> matchedCardIds = (globalSearch ? (from x in _cardCatalog.Search(q, 250)
 				select x.CardId).ToHashSet() : null);
-			IEnumerable<TexRef> enumerable = _textures.Where((TexRef texRef) => (globalSearch || (PageMatches(texRef) && VisualShortcutMatches(texRef) && (!_modsOnly || texRef.IsModded) && CategoryMatches(texRef, filter))) && MatchesSearch(texRef, q, matchedCardIds));
-			if (globalSearch)
+			IEnumerable<TexRef> enumerable = _textures.Where((TexRef texRef) =>
+				(_modsOnly ? texRef.IsModded && CategoryMatches(texRef, filter) : globalSearch || (PageMatches(texRef) && VisualShortcutMatches(texRef) && CategoryMatches(texRef, filter)))
+				&& MatchesSearch(texRef, q, matchedCardIds));
+			if (_modsOnly)
+			{
+				enumerable = OrderMods(enumerable);
+			}
+			else if (globalSearch)
 			{
 				Dictionary<int, int> cardOrder = _cardCatalog.Search(q, 250).Select((CardCatalogEntry entry, int index) => (CardId: entry.CardId, index: index)).ToDictionary(((int CardId, int index) item) => item.CardId, ((int CardId, int index) item) => item.index);
 				enumerable = enumerable.OrderBy((TexRef texture) => (!int.TryParse(texture.CardKey, out var result) || !cardOrder.TryGetValue(result, out var value)) ? int.MaxValue : value).ThenBy(CardTextureRank).ThenByDescending((TexRef texture) => (long)texture.Width * (long)texture.Height);
 			}
 			_visibleTextures.AddRange(enumerable);
 			_list.VirtualListSize = _visibleTextures.Count;
-			int num = (globalSearch ? _textures.Count : _textures.Count((TexRef x) => PageMatches(x) && VisualShortcutMatches(x) && (!_modsOnly || x.IsModded)));
-			_resultCount.Text = Localizer.F(globalSearch ? "list.global_count" : "list.count", _visibleTextures.Count, num);
+			for (int i = 0; i < _visibleTextures.Count; i++)
+			{
+				if (selectedTextures.Contains(_visibleTextures[i])) _list.SelectedIndices.Add(i);
+			}
+			int num = (_modsOnly ? _textures.Count(x => x.IsModded) : globalSearch ? _textures.Count : _textures.Count(x => PageMatches(x) && VisualShortcutMatches(x)));
+			_resultCount.Text = Localizer.F(globalSearch && !_modsOnly ? "list.global_count" : "list.count", _visibleTextures.Count, num);
 		}
 		finally
 		{
 			_list.EndUpdate();
 		}
 		UpdateResourceContextBar();
+		UpdateSelectedModAction();
 	}
 
 	private ListViewItem CreateListItem(TexRef texture)
 	{
-		return new ListViewItem(new string[4]
+		List<string> cells = new()
 		{
 			DisplayResourceName(texture),
 			$"{ResourceLabel(texture.SourceKind)} / {ResourceLabel(texture.Category)}{(texture.HasMonsterAnimation ? ("  · " + ResourceLabel("动画")) : "")}{(texture.IsModded ? "  · MOD" : "")}",
-			$"{texture.Width}×{texture.Height}",
-			texture.RelativeBundlePath
-		})
+			$"{texture.Width}×{texture.Height}"
+		};
+		if (_modsOnly) cells.Add(texture.ModModifiedAtUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—");
+		cells.Add(texture.RelativeBundlePath);
+		return new ListViewItem(cells.ToArray())
 		{
-			Tag = texture
+			Tag = texture,
+			ToolTipText = texture.ModModifiedAtUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? ""
 		};
 	}
 
 	private void ResizeResourceColumns()
 	{
+		if (_list.Columns.Count == 5)
+		{
+			ResizeModColumns();
+			return;
+		}
 		if (_list.Columns.Count != 4 || _list.ClientSize.Width <= 0)
 		{
 			return;
@@ -2706,6 +2738,7 @@ public sealed class MainForm : Form
 	private void SetModsOnly(bool enabled)
 	{
 		_modsOnly = enabled;
+		UpdateModColumns();
 		UpdateModsOnlyButtonText();
 		UpdateModSummary();
 		UpdateResourceContextBar();
@@ -2724,7 +2757,7 @@ public sealed class MainForm : Form
 		if (_resourceContextRow != null)
 		{
 			bool num = _currentPage == WorkspacePage.Cards;
-			bool flag = num && _modsOnly;
+			bool flag = (_currentPage == WorkspacePage.Cards || _currentPage == WorkspacePage.Visuals) && _modsOnly;
 			bool flag2 = num && !flag && _category.SelectedItem is CategoryFilter { Kind: CategoryFilterKind.Category } categoryFilter && categoryFilter.Key.EndsWith("|超框卡图", StringComparison.Ordinal);
 			bool flag3 = flag || flag2;
 			_modContextActions.Visible = flag;
@@ -2738,14 +2771,23 @@ public sealed class MainForm : Form
 				_overFrameContextActions.BringToFront();
 			}
 			_resourceContextBar.Visible = flag3;
-			_resourceContextRow.Height = (flag3 ? 52f : 0f);
+			if (flag)
+			{
+				if (_resourceContextRow.Height <= 0) _resourceContextRow.Height = UiTheme.Scale(this, 52);
+				UpdateModContextHeight();
+			}
+			else
+			{
+				_resourceContextRow.Height = flag2 ? UiTheme.Scale(this, 52) : 0f;
+			}
 		}
 	}
 
 	private void UpdateModSummary()
 	{
 		TexRef[] array = _textures.Where((TexRef x) => x.IsModded).ToArray();
-		_modSummary.Text = ((_changedModBundleCount == 0) ? "暂无改动；替换后的卡图与动画会自动纳入 Mod 管理" : $"已管理 {array.Length:N0} 个图片资源 · {_changedModBundleCount:N0} 个已修改 Bundle{((_changedAnimationBundleCount > 0) ? $" · 动画 {_changedAnimationBundleCount:N0}" : "")}");
+		_modSummary.Text = _changedModBundleCount == 0 ? Localizer.T("mods.summary.empty") :
+			Localizer.F("mods.summary", array.Length, _changedModBundleCount, _changedAnimationBundleCount);
 		_modPageSummary.Text = _modSummary.Text;
 	}
 
@@ -2759,8 +2801,7 @@ public sealed class MainForm : Form
 		{
 			ModChangeSummary modChangeSummary = await Task.Run(delegate
 			{
-				_mods.RefreshFlags(root, textures);
-				return _mods.GetChangeSummary(root, textures);
+				return _mods.RefreshState(root, textures);
 			});
 			if (IsDisposed || generation != _scanGeneration || root != _gameRoot || local != _assetRoot) return;
 			_changedModBundleCount = modChangeSummary.BundleCount;
@@ -3661,50 +3702,7 @@ public sealed class MainForm : Form
 
 	private async Task ExportAllModsAsync()
 	{
-		if (_gameRoot == null)
-		{
-			MessageBox.Show(this, "先选择 Master Duel 游戏目录。", Text);
-			return;
-		}
-		SaveFileDialog dialog = new SaveFileDialog
-		{
-			Filter = Localizer.T("mods.export.filter"),
-			FileName = $"MD_Mods_{DateTime.Now:yyyyMMdd_HHmm}.zip",
-			DefaultExt = "zip",
-			Title = "导出全部已启用 Mod"
-		};
-		try
-		{
-			if (dialog.ShowDialog(this) != DialogResult.OK)
-			{
-				return;
-			}
-			try
-			{
-				base.UseWaitCursor = true;
-				_status.Text = "正在打包全部已修改 Bundle…";
-				bool directReplacement = dialog.FilterIndex == 1;
-				TexRef[] exportTextures = _textures.ToArray();
-				ModPackageInfo modPackageInfo = await Task.Run(() => _mods.Export(_gameRoot, exportTextures, dialog.FileName, directReplacement));
-				_status.Text = $"已导出 {modPackageInfo.BundleCount:N0} 个 Mod Bundle：{dialog.FileName}";
-				MessageBox.Show(this, $"导出完成。\n\nBundle：{modPackageInfo.BundleCount:N0} 个\n原始大小：{FormatSize(modPackageInfo.TotalSize)}\n文件：{dialog.FileName}" + (directReplacement ? ("\n\n" + Localizer.T("mods.export.directHelp")) : ""), "全部 Mod 已导出", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
-			}
-			catch (Exception ex)
-			{
-				MessageBox.Show(this, ex.Message, "导出 Mod 失败", MessageBoxButtons.OK, MessageBoxIcon.Hand);
-			}
-			finally
-			{
-				base.UseWaitCursor = false;
-			}
-		}
-		finally
-		{
-			if (dialog != null)
-			{
-				((IDisposable)dialog).Dispose();
-			}
-		}
+		await ExportManagedModsAsync(selectedOnly: false);
 	}
 
 	private async Task ImportModsAsync()

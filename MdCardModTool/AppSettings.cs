@@ -14,4 +14,6 @@ public sealed class AppSettings
 	public Dictionary<string, string> LastProfileByGame { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
 	public bool ReduceMotion { get; set; }
+
+	public ModSortOrder ModSortOrder { get; set; } = ModSortOrder.NewestFirst;
 }
