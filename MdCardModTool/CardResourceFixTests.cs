@@ -90,16 +90,18 @@ internal static class CardResourceFixTests
             engine.DecodePng(texture);
             Require(texture.Width == 512 && texture.Height == 1024, kind + " stale dimensions repaired on successful decode");
             texture.Category = "超框卡图";
-            var mapping = GameTextureDisplayMapping.Resolve(texture, "card_frame01");
-            Require(mapping.Kind == TextureDisplayMappingKind.PendulumCardArt && mapping.DisplayHeight == 683, kind + " pendulum mapping independent of old category/frame hint");
-            byte[] normal = Pattern(512, 683);
+            var mapping = GameTextureDisplayMapping.ResolveForInstalledPreview(texture, "card_frame01");
+            Require(mapping.Kind == TextureDisplayMappingKind.PendulumCardArt && mapping.DisplayHeight == 383 && !mapping.StoredArtWindow.IsEmpty,
+                kind + " installed pendulum mapping independent of old category/frame hint");
+            byte[] normal = Pattern(mapping.DisplayWidth, mapping.DisplayHeight);
             byte[] encoded = mapping.EncodeForStorage(normal);
             engine.Replace(texture, encoded, Path.Combine(mirror, "_MD卡图备份", kind));
             byte[] stored = engine.DecodePng(texture);
             Require(PixelsEqual(encoded, stored), kind + " pendulum storage pixels / no second resize");
             byte[] display = mapping.DecodeForDisplay(stored);
             using var roundtrip = Image.Load<Rgba32>(display);
-            Require(roundtrip.Width == 512 && roundtrip.Height == 683 && CircleIsRound(roundtrip), kind + " round-circle geometry survives replacement UV mapping");
+            Require(roundtrip.Width == mapping.DisplayWidth && roundtrip.Height == mapping.DisplayHeight && CircleIsRound(roundtrip),
+                kind + " round-circle geometry survives visible-region replacement mapping");
             File.WriteAllBytes(Path.Combine(output, "pendulum-" + kind + ".png"), display);
         }
         var unrelated = new TexRef { BundlePath = "wallpaper", RelativeBundlePath = "wallpaper", Name = "Wallpaper", Width = 512, Height = 1024, SourceKind = "视觉资源" };

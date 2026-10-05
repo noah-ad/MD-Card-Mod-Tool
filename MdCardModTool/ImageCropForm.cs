@@ -119,6 +119,8 @@ public sealed class ImageCropForm : Form
 
 	public byte[]? OutputPng { get; private set; }
 
+	public byte[]? OutputStoragePng { get; private set; }
+
 	public byte[]? BackgroundPng { get; private set; }
 
 	public string SelectedFrameKey { get; private set; } = "";
@@ -154,7 +156,7 @@ public sealed class ImageCropForm : Form
 			IEnumerable<TexRef> source2;
 			if (!fullCardOverlay)
 			{
-				IEnumerable<TexRef> enumerable = CardFrameCatalog.CompatibleFrames(cardFrames, targetWidth, targetHeight);
+				IEnumerable<TexRef> enumerable = CardFrameCatalog.CompatibleFrames(cardFrames, _displayMapping.StorageWidth, _displayMapping.StorageHeight);
 				source2 = enumerable;
 			}
 			else
@@ -228,7 +230,7 @@ public sealed class ImageCropForm : Form
 		gradientBanner.Controls.Add(value);
 		Label value3 = new Label
 		{
-			Text = (fullCardOverlay ? "图层顺序：叠底背景 → 卡框 → 卡图主体。\n\n• 四类卡框可独立切换\n• 更换卡图不会移除叠底背景\n• 左键拖动卡图，滚轮／滑杆缩放\n• 方向键微调，Shift + 方向键快速移动\n• 双击画面恢复铺满\n\n确认后进入超框编辑器完成应用。" : (flag ? "操作\n\n• 卡框下拉只控制实装预览与构图比例\n• 左键拖动图片，滚轮／滑杆缩放\n• 可缩到画框以内，透明处按游戏白色底板显示\n• 方向键微调，Shift + 方向键快速移动\n• 双击画面恢复铺满\n\n灵摆卡使用正常比例构图；确认后才自动压缩到游戏的高画布。" : (_displayMapping.RequiresMapping ? "操作\n\n• 当前画布使用游戏中的正常显示比例\n• 左键拖动图片，滚轮／滑杆缩放\n• 方向键微调位置\n• 双击恢复铺满\n\n确认后自动转换为 Texture2D 存储比例；游戏映射后会恢复为当前预览效果。" : "操作\n\n• 左键拖动图片\n• 滚轮／滑杆可自由放大和缩小\n• 方向键微调位置\n• 双击恢复铺满\n\n确认后自动转换为目标尺寸，透明 PNG 的 Alpha 会保留。"))),
+			Text = (fullCardOverlay ? "图层顺序：叠底背景 → 卡框 → 卡图主体。\n\n• 四类卡框可独立切换\n• 更换卡图不会移除叠底背景\n• 左键拖动卡图，滚轮／滑杆缩放\n• 方向键微调，Shift + 方向键快速移动\n• 双击画面恢复铺满\n\n确认后进入超框编辑器完成应用。" : (flag ? "操作\n\n• 卡框下拉只控制实装预览与构图比例\n• 左键拖动图片，滚轮／滑杆缩放\n• 可缩到画框以内，透明处按游戏白色底板显示\n• 方向键微调，Shift + 方向键快速移动\n• 双击画面恢复铺满\n\n按实际插图区构图；确认后自动转换为游戏存储纹理，重新读取仍保持当前构图。" : (_displayMapping.RequiresMapping ? "操作\n\n• 当前画布使用游戏中的正常显示比例\n• 左键拖动图片，滚轮／滑杆缩放\n• 方向键微调位置\n• 双击恢复铺满\n\n确认后自动转换为 Texture2D 存储比例；游戏映射后会恢复为当前预览效果。" : "操作\n\n• 左键拖动图片\n• 滚轮／滑杆可自由放大和缩小\n• 方向键微调位置\n• 双击恢复铺满\n\n确认后自动转换为目标尺寸，透明 PNG 的 Alpha 会保留。"))),
 			Dock = DockStyle.Top,
 			Height = (fullCardOverlay ? 190 : (flag ? 260 : 210)),
 			ForeColor = UiTheme.Text,
@@ -618,7 +620,16 @@ public sealed class ImageCropForm : Form
 		try
 		{
 			base.UseWaitCursor = true;
-			OutputPng = ImageCropService.RenderToTarget(_sourcePath, _canvas.RenderSpec, _targetWidth, _targetHeight);
+			if (!_fullCardOverlay && _displayMapping.Kind == TextureDisplayMappingKind.PendulumCardArt && !_displayMapping.StoredArtWindow.IsEmpty)
+			{
+				OutputStoragePng = PendulumCardLayout.RenderEditorToStorage(_sourcePath, _canvas.RenderSpec, _canvas.ArtWindow,
+					_displayMapping.StorageWidth, _displayMapping.StorageHeight);
+				OutputPng = _displayMapping.DecodeForDisplay(OutputStoragePng);
+			}
+			else
+			{
+				OutputPng = ImageCropService.RenderToTarget(_sourcePath, _canvas.RenderSpec, _targetWidth, _targetHeight);
+			}
 			BackgroundPng = ((_backgroundPath != null) ? ImageCropService.RenderCoverToTarget(_backgroundPath, _targetWidth, _targetHeight) : _initialBackgroundPng?.ToArray());
 			base.DialogResult = DialogResult.OK;
 			Close();

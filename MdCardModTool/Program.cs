@@ -35,6 +35,14 @@ internal static class Program
 	private static void Main(string[] args)
 	{
 		ApplicationConfiguration.Initialize();
+		if (args.Length == 3 && args[0] == "--test-pendulum-crop")
+		{
+			WindowsFormsSynchronizationContext.AutoInstall = false;
+			SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+			Control.CheckForIllegalCrossThreadCalls = true;
+			PendulumCropTests.Run(args[1], args[2]);
+			return;
+		}
 		if (args.Length == 3 && args[0] == "--test-card-resource-fixes")
 		{
 			WindowsFormsSynchronizationContext.AutoInstall = false;
@@ -2840,7 +2848,7 @@ internal static class Program
 			TexRef texRef11 = (JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(IndexService.CachePath(IndexService.FindLocalRoot(args[1]) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。"), IndexService.StreamingRoot(args[1])))) ?? new GameIndex()).Textures.Where(x => CardTextureRules.IsCardArt(x) && x.CardKey == args[2]).OrderBy(x => x.SourceKind == "本地卡图" ? 0 : 1).FirstOrDefault() ?? throw new FileNotFoundException("索引中没有卡号 " + args[2] + "。");
 			byte[] array36 = new ModEngine().DecodePng(texRef11);
 			string preferredFrameKey = CardFrameCatalog.RecommendedKey(CardCatalogService.LoadBestAvailable().Find(texRef11.CardKey), texRef11.Width, texRef11.Height);
-			GameTextureDisplayMapping gameTextureDisplayMapping5 = GameTextureDisplayMapping.Resolve(texRef11, preferredFrameKey);
+			GameTextureDisplayMapping gameTextureDisplayMapping5 = GameTextureDisplayMapping.ResolveForInstalledPreview(texRef11, preferredFrameKey);
 			byte[] bytes = (gameTextureDisplayMapping5.RequiresMapping ? gameTextureDisplayMapping5.DecodeForDisplay(array36) : array36);
 			File.WriteAllBytes(args[3], bytes);
 			Console.WriteLine(args[3] + "; " + gameTextureDisplayMapping5.EditorSummary);

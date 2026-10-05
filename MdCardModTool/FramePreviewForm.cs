@@ -142,10 +142,10 @@ public sealed class FramePreviewForm : Form
 			byte[][] sources = await Task.WhenAll<byte[]>(Task.Run(() => _engine.DecodePng(_art)), Task.Run(() => _engine.DecodePng(choice.Texture)));
 			if (generation == _generation)
 			{
-				GameTextureDisplayMapping mapping = GameTextureDisplayMapping.Resolve(_art, choice.Texture.Name);
-				byte[] array = ((!mapping.RequiresMapping) ? sources[0] : (await Task.Run(() => mapping.DecodeForDisplay(sources[0]))));
-				byte[] displayArt = array;
-				byte[] data = await Task.Run(() => (_art.Width == 704 && _art.Height == 1024) ? FrameComposer.Compose(displayArt, sources[1]) : CardFrameRenderer.ComposeStoredArtPreview(displayArt, sources[1]));
+				GameTextureDisplayMapping mapping = GameTextureDisplayMapping.ResolveForInstalledPreview(_art, choice.Texture.Name);
+				byte[] data = await Task.Run(() => (_art.Width == 704 && _art.Height == 1024)
+					? FrameComposer.Compose(sources[0], sources[1])
+					: CardFrameRenderer.ComposeStoredArtPreview(sources[0], sources[1]));
 				Bitmap bitmap = ((_art.Width == 704 && _art.Height == 1024) ? FrameComposer.PreviewBitmap(data) : FrameComposer.BitmapFrom(data));
 				_art.PreviewFrameKey = choice.Texture.Name;
 				Image image = _preview.Image;

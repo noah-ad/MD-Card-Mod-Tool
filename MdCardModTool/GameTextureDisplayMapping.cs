@@ -11,10 +11,15 @@ namespace MdCardModTool;
 
 public sealed record GameTextureDisplayMapping(TextureDisplayMappingKind Kind, int StorageWidth, int StorageHeight, int DisplayWidth, int DisplayHeight)
 {
+	// Empty means the legacy full-illustration / full-canvas mapping. Installed
+	// Pendulum previews sample only the part exposed by the actual card frame.
+	public System.Drawing.RectangleF StoredArtWindow { get; init; }
+
 	public bool RequiresMapping
 	{
 		get
 		{
+			if (!StoredArtWindow.IsEmpty) return true;
 			if (StorageWidth == DisplayWidth)
 			{
 				return StorageHeight != DisplayHeight;
@@ -36,7 +41,9 @@ public sealed record GameTextureDisplayMapping(TextureDisplayMappingKind Kind, i
 		{
 			if (RequiresMapping)
 			{
-				return $"正常预览 {DisplayWidth}×{DisplayHeight} / 游戏存储 {StorageWidth}×{StorageHeight}";
+				return StoredArtWindow.IsEmpty
+					? $"正常预览 {DisplayWidth}×{DisplayHeight} / 游戏存储 {StorageWidth}×{StorageHeight}"
+					: $"实装插图区 {DisplayWidth}×{DisplayHeight} / 游戏纹理 {StorageWidth}×{StorageHeight}（含遮挡区）";
 			}
 			return $"预览与游戏存储均为 {StorageWidth}×{StorageHeight}";
 		}
@@ -53,6 +60,20 @@ public sealed record GameTextureDisplayMapping(TextureDisplayMappingKind Kind, i
 	public const int TallStorageWidth = 512;
 
 	public const int TallStorageHeight = 1024;
+
+	// Keep full-illustration decoding for overframe source material separate from
+	// the visible window of the game's much taller Pendulum RawImage.
+	public static GameTextureDisplayMapping ResolveForInstalledPreview(TexRef texture, string? preferredFrameKey = null)
+	{
+		GameTextureDisplayMapping mapping = Resolve(texture, preferredFrameKey);
+		if (mapping.Kind != TextureDisplayMappingKind.PendulumCardArt) return mapping;
+		System.Drawing.RectangleF window = PendulumCardLayout.ArtWindow(preferredFrameKey);
+		return mapping with
+		{
+			DisplayHeight = Math.Max(1, (int)Math.Round(mapping.DisplayWidth * window.Height / window.Width)),
+			StoredArtWindow = PendulumCardLayout.StorageWindow(window, mapping.StorageWidth, mapping.StorageHeight)
+		};
+	}
 
 	public static GameTextureDisplayMapping Resolve(TexRef texture, string? preferredFrameKey = null)
 	{
@@ -82,12 +103,37 @@ public sealed record GameTextureDisplayMapping(TextureDisplayMappingKind Kind, i
 
 	public byte[] DecodeForDisplay(byte[] storedPng)
 	{
+		if (!StoredArtWindow.IsEmpty) return RenderRegion(storedPng, true);
 		return ResizeFullCanvas(storedPng, StorageWidth, StorageHeight, DisplayWidth, DisplayHeight, "游戏存储纹理");
 	}
 
 	public byte[] EncodeForStorage(byte[] displayPng)
 	{
+		if (!StoredArtWindow.IsEmpty) return RenderRegion(displayPng, false);
 		return ResizeFullCanvas(displayPng, DisplayWidth, DisplayHeight, StorageWidth, StorageHeight, "正常比例预览图");
+	}
+
+	private byte[] RenderRegion(byte[] png, bool decoding)
+	{
+		using System.Drawing.Bitmap source = FrameComposer.BitmapFrom(png);
+		int expectedWidth = decoding ? StorageWidth : DisplayWidth;
+		int expectedHeight = decoding ? StorageHeight : DisplayHeight;
+		if (source.Width != expectedWidth || source.Height != expectedHeight)
+			throw new InvalidDataException($"映射输入尺寸应为 {expectedWidth}×{expectedHeight}，实际为 {source.Width}×{source.Height}。");
+		using var target = new System.Drawing.Bitmap(decoding ? DisplayWidth : StorageWidth, decoding ? DisplayHeight : StorageHeight,
+			System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+		using (var graphics = System.Drawing.Graphics.FromImage(target))
+		{
+			CardFrameRenderer.Configure(graphics);
+			graphics.Clear(System.Drawing.Color.Transparent);
+			graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
+			var sourceRect = decoding ? StoredArtWindow : new System.Drawing.RectangleF(0, 0, source.Width, source.Height);
+			var targetRect = decoding ? new System.Drawing.RectangleF(0, 0, target.Width, target.Height) : StoredArtWindow;
+			graphics.DrawImage(source, targetRect, sourceRect, System.Drawing.GraphicsUnit.Pixel);
+		}
+		using var stream = new MemoryStream();
+		target.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
+		return stream.ToArray();
 	}
 
 	private static byte[] ResizeFullCanvas(byte[] png, int expectedWidth, int expectedHeight, int outputWidth, int outputHeight, string role)
@@ -153,5 +199,6 @@ public sealed record GameTextureDisplayMapping(TextureDisplayMappingKind Kind, i
 		StorageHeight = original.StorageHeight;
 		DisplayWidth = original.DisplayWidth;
 		DisplayHeight = original.DisplayHeight;
+		StoredArtWindow = original.StoredArtWindow;
 	}
 }

@@ -82,6 +82,8 @@ public sealed class CropCanvas : Control
 
 	public bool HasFrame => _frame != null;
 
+	internal RectangleF ArtWindow => _artWindow;
+
 	public bool IsOverFrameEditing => _overFrameEditing;
 
 	public bool ShowingRenderedPreview

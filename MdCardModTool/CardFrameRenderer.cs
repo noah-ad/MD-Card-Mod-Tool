@@ -124,7 +124,9 @@ public static class CardFrameRenderer
 
 	public static Bitmap ComposeStoredArtPreview(Bitmap storedArt, Bitmap frame)
 	{
-		RectangleF destRect = FindArtWindow(frame);
+		RectangleF destRect = storedArt.Width * 2 == storedArt.Height
+			? PendulumCardLayout.TextureRectangle
+			: FindArtWindow(frame);
 		Bitmap bitmap = new Bitmap(704, 1024, PixelFormat.Format32bppArgb);
 		using Graphics graphics = Graphics.FromImage(bitmap);
 		Configure(graphics);
