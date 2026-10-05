@@ -155,6 +155,7 @@ public static class IndexService
 		}
 		return new GameIndex
 		{
+			BuiltInCardIndexVersion = 1,
 			Textures = (from x in bag
 				orderby x.SourceKind, x.Category, x.Name
 				select x).ToList()
@@ -175,6 +176,7 @@ public static class IndexService
 		{
 			Textures = textures.ToList(),
 			AlternateArtIndexVersion = (gameIndex?.AlternateArtIndexVersion ?? 0),
+			BuiltInCardIndexVersion = (gameIndex?.BuiltInCardIndexVersion ?? 0),
 			CheckedLocalBundlePaths = (gameIndex?.CheckedLocalBundlePaths ?? new List<string>())
 		});
 	}
@@ -225,16 +227,19 @@ public static class IndexService
 		string localRoot = FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000");
 		string streamingRoot = StreamingRoot(gameRoot);
 		HashSet<string> knownBundles = (from x in index.Textures
-			where x.SourceKind == "本地卡图" && IsDirectCardIllustration(x)
+			where CardTextureRules.IsCardSource(x.SourceKind) && IsDirectCardIllustration(x)
 			select Path.GetFullPath(x.BundlePath)).ToHashSet<string>(StringComparer.OrdinalIgnoreCase);
 		List<(string Path, string Root)> files = ((cardKey == "0") ? (from path in EnumerateDownloadedCardIllustrationBundles(localRoot)
 			where !knownBundles.Contains(Path.GetFullPath(path))
 			select (Path: path, Root: localRoot)).ToList() : (from path in CardIllustrationBundleCandidates(localRoot, cardKey)
 			where !knownBundles.Contains(Path.GetFullPath(path))
 			select (Path: path, Root: localRoot)).ToList());
-		if (cardKey != "0" && Directory.Exists(streamingRoot))
+		if (Directory.Exists(streamingRoot))
 		{
-			files.AddRange(from path in CardIllustrationBundleCandidates(streamingRoot, cardKey)
+			IEnumerable<string> candidates = cardKey == "0"
+				? Directory.EnumerateFiles(streamingRoot, "*", SearchOption.AllDirectories).Where(IsUnityBundle)
+				: CardIllustrationBundleCandidates(streamingRoot, cardKey);
+			files.AddRange(from path in candidates
 				where !knownBundles.Contains(Path.GetFullPath(path))
 				select (Path: path, Root: streamingRoot));
 		}
@@ -250,7 +255,8 @@ public static class IndexService
 		{
 			try
 			{
-				foreach (TexRef item in engine.ScanBundle(file.Path, file.Root, "本地卡图", includeDependencies: false).Textures.Where(IsDirectCardIllustration))
+				string sourceKind = file.Root.Equals(streamingRoot, StringComparison.OrdinalIgnoreCase) ? "游戏内图片" : "本地卡图";
+				foreach (TexRef item in engine.ScanBundle(file.Path, file.Root, sourceKind, includeDependencies: false).Textures.Where(IsDirectCardIllustration))
 				{
 					added.Add(item);
 					if (item.CardKey == cardKey)
@@ -298,7 +304,7 @@ public static class IndexService
 
 	public static void NormalizeLocalCardCategory(TexRef texture)
 	{
-		if (!(texture.SourceKind != "本地卡图") && texture.CardKey.Length != 0)
+		if (CardTextureRules.IsCardSource(texture.SourceKind) && texture.CardKey.Length != 0)
 		{
 			if (texture.Width == 512 && texture.Height == 1024)
 			{

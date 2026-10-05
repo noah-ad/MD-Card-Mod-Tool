@@ -35,6 +35,12 @@ internal static class Program
 	private static void Main(string[] args)
 	{
 		ApplicationConfiguration.Initialize();
+		if (args.Length == 3 && args[0] == "--test-card-resource-fixes")
+		{
+			WindowsFormsSynchronizationContext.AutoInstall = false;
+			CardResourceFixTests.Run(args[1], args[2]);
+			return;
+		}
 		if (args.Length == 3 && args[0] == "--test-original-animation")
 		{
 			OriginalAnimationTests.Run(args[1], args[2]);
@@ -2829,7 +2835,7 @@ internal static class Program
 		}
 		if (args.Length == 4 && args[0] == "--export-card")
 		{
-			TexRef texRef11 = (JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(IndexService.CachePath(IndexService.FindLocalRoot(args[1]) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。"), IndexService.StreamingRoot(args[1])))) ?? new GameIndex()).Textures.FirstOrDefault((TexRef texRef20) => texRef20.SourceKind == "本地卡图" && texRef20.CardKey == args[2]) ?? throw new FileNotFoundException("索引中没有卡号 " + args[2] + "。");
+			TexRef texRef11 = (JsonSerializer.Deserialize<GameIndex>(File.ReadAllText(IndexService.CachePath(IndexService.FindLocalRoot(args[1]) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。"), IndexService.StreamingRoot(args[1])))) ?? new GameIndex()).Textures.Where(x => CardTextureRules.IsCardArt(x) && x.CardKey == args[2]).OrderBy(x => x.SourceKind == "本地卡图" ? 0 : 1).FirstOrDefault() ?? throw new FileNotFoundException("索引中没有卡号 " + args[2] + "。");
 			byte[] array36 = new ModEngine().DecodePng(texRef11);
 			string preferredFrameKey = CardFrameCatalog.RecommendedKey(CardCatalogService.LoadBestAvailable().Find(texRef11.CardKey), texRef11.Width, texRef11.Height);
 			GameTextureDisplayMapping gameTextureDisplayMapping5 = GameTextureDisplayMapping.Resolve(texRef11, preferredFrameKey);

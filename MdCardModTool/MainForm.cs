@@ -949,7 +949,7 @@ public sealed class MainForm : Form
 			BackColor = UiTheme.Surface,
 			Font = new Font("Segoe UI", 8f),
 			TextAlign = ContentAlignment.MiddleLeft,
-			Text = $"v2.0.21  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
+			Text = $"v2.0.22  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
 		};
 		TableLayoutPanel tableLayoutPanel8 = new TableLayoutPanel
 		{
@@ -1729,7 +1729,8 @@ public sealed class MainForm : Form
 
 	private async Task EnsureVisualAssetsAsync()
 	{
-		if (_index != null && !_textures.Any(IsVisualAsset))
+		if (_index != null && (!_textures.Any(IsVisualAsset)
+			|| (_gameRoot != null && File.Exists(Path.Combine(_gameRoot, "masterduel_Data", "data.unity3d")) && !_textures.Any(x => x.Category == "属性图标"))))
 		{
 			await LoadVisualAssetsAsync();
 		}
@@ -2384,7 +2385,7 @@ public sealed class MainForm : Form
 	{
 		if (filter.Kind == CategoryFilterKind.Animation)
 		{
-			if (texture.SourceKind == "本地卡图")
+			if (CardTextureRules.IsCardArt(texture))
 			{
 				return texture.HasMonsterAnimation;
 			}
@@ -2528,7 +2529,7 @@ public sealed class MainForm : Form
 
 	private TexRef? BestCardTexture(string cardKey)
 	{
-		return _textures.Where((TexRef texture) => texture.SourceKind == "本地卡图" && texture.CardKey == cardKey).OrderBy(CardTextureRank).ThenByDescending((TexRef texture) => (long)texture.Width * (long)texture.Height)
+		return _textures.Where((TexRef texture) => CardTextureRules.IsCardSource(texture.SourceKind) && texture.CardKey == cardKey).OrderBy(CardTextureRank).ThenBy((TexRef texture) => texture.SourceKind == "本地卡图" ? 0 : 1).ThenByDescending((TexRef texture) => (long)texture.Width * (long)texture.Height)
 			.FirstOrDefault();
 	}
 
@@ -2596,6 +2597,9 @@ public sealed class MainForm : Form
 			"头像框" => ("头像框", "頭像框", "アイコンフレーム", "Icon Frames"),
 			"卡盒" => ("卡盒", "卡盒", "デッキケース", "Deck Cases"),
 			"硬币" => ("硬币", "硬幣", "コイン", "Coins"),
+			"属性图标" => ("属性图标", "屬性圖示", "属性アイコン", "Attribute Icons"),
+			"星级图标" => ("星级图标", "星級圖示", "レベル／ランク", "Level / Rank Icons"),
+			"属性／星级界面图集" => ("属性／星级界面图集", "屬性／星級介面圖集", "属性／レベルUIアトラス", "Attribute / Level UI Atlas"),
 			"有怪兽动画" => ("有怪兽动画", "有怪獸動畫", "演出あり", "Has Animation"),
 			"动画" => ("动画", "動畫", "演出", "Animation"),
 			_ => (value, value, value, value),
@@ -2812,7 +2816,7 @@ public sealed class MainForm : Form
 			_preview.Image = bitmap;
 			_previewHint.Visible = false;
 			string text = (displayMapping.RequiresMapping ? ("\n" + displayMapping.EditorSummary + " · 写入时自动反向映射") : "");
-			if (_gameRoot != null && x.SourceKind == "本地卡图" && x.Width == 704 && x.Height == 1024 && ushort.TryParse(x.CardKey, out var result))
+			if (_gameRoot != null && CardTextureRules.IsCardArt(x) && x.Width == 704 && x.Height == 1024 && ushort.TryParse(x.CardKey, out var result))
 			{
 				text = "\n预览：真实 Alpha 显示（透明像素中的 RGB 数据仍原样保留）";
 				if (OverFrameArtStore.HasSettings(_gameRoot, result))
@@ -2825,7 +2829,7 @@ public sealed class MainForm : Form
 					text += "\n卡框：尚未单独合成  ·  点击下方“制作超框”，可直接使用当前原卡图";
 				}
 			}
-			else if (x.SourceKind == "本地卡图" && x.Width == 512 && (x.Height == 512 || x.Height == 1024))
+			else if (CardTextureRules.IsCardArt(x) && x.Width == 512 && (x.Height == 512 || x.Height == 1024))
 			{
 				string text2 = PreferredFrameKeyFor(x);
 				text += ((displayMapping.Kind == TextureDisplayMappingKind.PendulumCardArt) ? ("\n当前为灵摆卡图正常比例预览（未叠加卡框） · 推荐卡框 " + text2 + " · " + CardFrameCatalog.FriendlyName(text2)) : ("\n当前显示原始 Texture2D（未叠加卡框） · 推荐卡框 " + text2 + " · " + CardFrameCatalog.FriendlyName(text2)));
@@ -2835,6 +2839,8 @@ public sealed class MainForm : Form
 				text += "\n怪兽动画：双击动画分类中的卡图，或点击“原始动画资源”，查看 PNG / Atlas / JSON";
 			}
 			string value = (displayMapping.RequiresMapping ? $"正常预览 {displayMapping.DisplayWidth} × {displayMapping.DisplayHeight}   ·   Texture2D {x.Width} × {x.Height}" : $"{x.Width} × {x.Height}");
+			if (x.Category is "属性图标" or "星级图标" or "属性／星级界面图集")
+				text += "\n这是共享图标资源，修改会影响使用它的所有卡片。图集请先导出 PNG，在原位置编辑并保持尺寸后替换。";
 			_info.Text = $"{x.Name}  ·  {x.Category}\n{value}   PathID {x.PathId}\n{x.RelativeBundlePath}{text}";
 		}
 		catch (Exception ex)
@@ -2861,11 +2867,12 @@ public sealed class MainForm : Form
 		string oldBundlePath = texture.BundlePath;
 		string oldAssetFileName = texture.AssetFileName;
 		long oldPathId = texture.PathId;
+		int oldWidth = texture.Width, oldHeight = texture.Height;
 		try
 		{
 			byte[] data = await Task.Run(() => _engine.DecodePng(texture), cancellationToken);
 			cancellationToken.ThrowIfCancellationRequested();
-			bool repaired = oldPathId != texture.PathId || !string.Equals(oldAssetFileName, texture.AssetFileName, StringComparison.Ordinal) || !string.Equals(oldBundlePath, texture.BundlePath, StringComparison.OrdinalIgnoreCase);
+			bool repaired = oldWidth != texture.Width || oldHeight != texture.Height || oldPathId != texture.PathId || !string.Equals(oldAssetFileName, texture.AssetFileName, StringComparison.Ordinal) || !string.Equals(oldBundlePath, texture.BundlePath, StringComparison.OrdinalIgnoreCase);
 			if (repaired && _gameRoot != null && _index != null)
 			{
 				await Task.Run(delegate
@@ -2900,7 +2907,7 @@ public sealed class MainForm : Form
 
 	private GameTextureDisplayMapping DisplayMappingFor(TexRef texture)
 	{
-		string preferredFrameKey = ((texture.SourceKind == "本地卡图" && texture.CardKey.Length > 0) ? PreferredFrameKeyFor(texture) : null);
+		string preferredFrameKey = ((CardTextureRules.IsCardArt(texture)) ? PreferredFrameKeyFor(texture) : null);
 		return GameTextureDisplayMapping.Resolve(texture, preferredFrameKey);
 	}
 
@@ -2952,11 +2959,15 @@ public sealed class MainForm : Form
 				((IDisposable)openFileDialog)?.Dispose();
 			}
 		}
+		// Imported Mods may have changed the Texture2D dimensions without updating
+		// the cached row. Read the current asset before deciding the UV conversion.
+		try { await DecodeWithReferenceRepairAsync(x); }
+		catch (Exception ex) { MessageBox.Show(this, ex.Message, "无法读取替换目标", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
 		GameTextureDisplayMapping displayMapping = DisplayMappingFor(x);
 		byte[] cropped;
 		try
 		{
-			TexRef[] array = ((x.SourceKind == "本地卡图" && x.CardKey.Length > 0 && x.Width == 512 && (x.Height == 512 || x.Height == 1024)) ? OverFrameFrames() : null);
+			TexRef[] array = ((CardTextureRules.IsCardArt(x) && x.Width == 512 && (x.Height == 512 || x.Height == 1024)) ? OverFrameFrames() : null);
 			using ImageCropForm crop = new ImageCropForm(image, displayMapping.DisplayWidth, displayMapping.DisplayHeight, "替换 " + x.Name, array, (array == null) ? null : PreferredFrameKeyFor(x), fullCardOverlay: false, null, displayMapping);
 			if (crop.ShowDialog(this) != DialogResult.OK || crop.OutputPng == null)
 			{
@@ -3190,7 +3201,7 @@ public sealed class MainForm : Form
 		{
 			HashSet<string> hashSet = (await Task.Run(() => _overFrames.ReadCached(root))).Select((OverFrameMapping overFrameMapping) => overFrameMapping.CardId.ToString()).ToHashSet<string>(StringComparer.Ordinal);
 			if (IsDisposed || generation != _scanGeneration || root != _gameRoot || local != _assetRoot) return;
-			foreach (TexRef item in _textures.Where((TexRef texRef) => texRef.SourceKind == "本地卡图" && texRef.CardKey.Length > 0))
+			foreach (TexRef item in _textures.Where(CardTextureRules.IsCardArt))
 			{
 				if (hashSet.Contains(item.CardKey))
 				{
@@ -3225,7 +3236,7 @@ public sealed class MainForm : Form
 		hashSet = ExpandEquivalentAnimationIds(hashSet);
 		foreach (TexRef texture in _textures)
 		{
-			texture.HasMonsterAnimation = texture.SourceKind == "本地卡图" && hashSet.Contains(texture.CardKey);
+			texture.HasMonsterAnimation = CardTextureRules.IsCardArt(texture) && hashSet.Contains(texture.CardKey);
 		}
 		int num = _textures.Count((TexRef x) => x.HasMonsterAnimation);
 		if (num > 0)
@@ -3312,7 +3323,8 @@ public sealed class MainForm : Form
 		{
 			string localRoot = IndexService.FindLocalRoot(gameRoot) ?? "";
 			int newCards = 0;
-			if (await Task.Run(() => GameCardCatalogUpdater.NeedsUpdate(gameRoot), cancellationToken))
+			bool updateCatalog = await Task.Run(() => GameCardCatalogUpdater.NeedsUpdate(gameRoot), cancellationToken);
+			if (updateCatalog)
 			{
 				PostBackgroundStatus("检测到游戏资源、Build 或账号变化，正在后台读取 card_name / card_indx / card_prop…");
 				Action<int, int, int> catalogProgress = CreateThrottledBackgroundProgress(250, (int done, int total, int found) => $"正在更新四语卡片目录：{done:N0}/{total:N0} Bundle · 已定位 {found}/9 项数据…");
@@ -3325,6 +3337,9 @@ public sealed class MainForm : Form
 				_cardCatalog = CardCatalogService.LoadBestAvailable();
 				UpdatePageHeader();
 				RenderList();
+			}
+			if (updateCatalog || index.BuiltInCardIndexVersion < 1)
+			{
 				Action<int, int, int> missingCardProgress = CreateThrottledBackgroundProgress(250, (int done, int total, int added) => $"正在合并新卡图：{done:N0}/{total:N0} · 新增 {added:N0}…");
 				MissingCardScanResult missingCardScanResult = await Task.Run(() => IndexService.ScanMissingLocalCard(gameRoot, index, "0", missingCardProgress, cancellationToken), cancellationToken);
 				cancellationToken.ThrowIfCancellationRequested();
@@ -3340,6 +3355,7 @@ public sealed class MainForm : Form
 					_textures.Add(item);
 					newCards++;
 				}
+				index.BuiltInCardIndexVersion = 1;
 				await Task.Run(delegate
 				{
 					IndexService.Save(gameRoot, index);
@@ -3357,7 +3373,7 @@ public sealed class MainForm : Form
 			HashSet<string> hashSet2 = ExpandEquivalentAnimationIds(hashSet);
 			foreach (TexRef texture in _textures)
 			{
-				if (texture.SourceKind == "本地卡图")
+				if (CardTextureRules.IsCardArt(texture))
 				{
 					texture.HasMonsterAnimation = hashSet2.Contains(texture.CardKey);
 				}
@@ -3571,7 +3587,7 @@ public sealed class MainForm : Form
 
 	private TexRef? PreviewFrameFor(TexRef texture)
 	{
-		if (texture.SourceKind != "本地卡图" || texture.Width != 512 || (texture.Height != 512 && texture.Height != 1024))
+		if (!CardTextureRules.IsCardArt(texture) || texture.Width != 512 || (texture.Height != 512 && texture.Height != 1024))
 		{
 			return null;
 		}
@@ -3588,9 +3604,9 @@ public sealed class MainForm : Form
 	private async Task OpenCardFrameStudioAsync()
 	{
 		TexRef texRef = Selected();
-		if (texRef == null || _gameRoot == null || texRef.SourceKind != "本地卡图" || !ushort.TryParse(texRef.CardKey, out var _))
+		if (texRef == null || _gameRoot == null || !CardTextureRules.IsCardArt(texRef))
 		{
-			MessageBox.Show(this, "请先选择一张本地卡图。", Text);
+			MessageBox.Show(this, "请先选择一张卡图（支持 LocalData 与游戏内置卡图）。", Text);
 		}
 		else
 		{
@@ -3606,9 +3622,9 @@ public sealed class MainForm : Form
 			MessageBox.Show(this, "先选择一张本地卡图。", Text);
 			return false;
 		}
-		if (texRef.SourceKind != "本地卡图" || !ushort.TryParse(texRef.CardKey, out var cardId))
+		if (!CardTextureRules.IsCardArt(texRef) || !ushort.TryParse(texRef.CardKey, out var cardId))
 		{
-			MessageBox.Show(this, "制作超框只能用于名称为卡号的“本地卡图”。", Text);
+			MessageBox.Show(this, "制作超框需要可识别卡号的卡图，支持 LocalData 与 StreamingAssets。", Text);
 			return false;
 		}
 		TexRef[] array = OverFrameFrames();

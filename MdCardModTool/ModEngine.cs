@@ -104,7 +104,7 @@ public sealed class ModEngine
 							Width = width,
 							Height = height,
 							Category = CategoryForSource(name, width, height, sourceKind),
-							CardKey = sourceKind == "本地卡图" && CardBundleIdentity.Find(bundlePath) is { Length: > 0 } targetId
+							CardKey = CardTextureRules.IsCardSource(sourceKind) && CardBundleIdentity.Find(bundlePath) is { Length: > 0 } targetId
 								? targetId : CardKey(name),
 							SourceKind = sourceKind
 						});
@@ -707,6 +707,9 @@ public sealed class ModEngine
 			{
 				throw new InvalidDataException($"贴图 {texture.Name} 的解码数据不足（格式 {textureFile.m_TextureFormat}）。");
 			}
+			texture.Width = asInt;
+			texture.Height = asInt2;
+			IndexService.NormalizeLocalCardCategory(texture);
 			using Image<Bgra32> image = Image.LoadPixelData<Bgra32>(textureData.AsSpan(0, asInt * asInt2 * 4), asInt, asInt2);
 			image.Mutate(delegate(IImageProcessingContext x)
 			{
@@ -882,7 +885,7 @@ public sealed class ModEngine
 				}
 			}
 		}
-		if (!(texture.SourceKind == "本地卡图") || texture.CardKey.Length <= 0 || !texture.CardKey.All(char.IsAsciiDigit))
+		if (!CardTextureRules.IsCardSource(texture.SourceKind) || texture.CardKey.Length <= 0 || !texture.CardKey.All(char.IsAsciiDigit))
 		{
 			yield break;
 		}

@@ -590,6 +590,7 @@ public sealed class OverFrameFrameEditorForm : Form
 				else
 				{
 					byte[] current = await Task.Run(() => _engine.DecodePng(_art));
+					liveSourceMapping = GameTextureDisplayMapping.Resolve(_art, mappingFrameKey);
 					if (liveSourceMapping.RequiresMapping)
 					{
 						current = await Task.Run(() => liveSourceMapping.DecodeForDisplay(current));

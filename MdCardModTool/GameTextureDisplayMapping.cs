@@ -140,19 +140,9 @@ public sealed record GameTextureDisplayMapping(TextureDisplayMappingKind Kind, i
 
 	private static bool IsPendulumCardArt(TexRef texture, string? preferredFrameKey)
 	{
-		if (!texture.SourceKind.Equals("本地卡图", StringComparison.OrdinalIgnoreCase))
-		{
-			return false;
-		}
-		if (!texture.Category.Contains("灵摆", StringComparison.OrdinalIgnoreCase) && !texture.Category.Contains("靈擺", StringComparison.OrdinalIgnoreCase))
-		{
-			if (!string.IsNullOrWhiteSpace(preferredFrameKey))
-			{
-				return CardFrameCatalog.IsPendulum(preferredFrameKey);
-			}
-			return false;
-		}
-		return true;
+		// ResolveCanvas already checked the 1:2 storage shape. This layout belongs
+		// to the illustration, not the selected preview frame or translated category.
+		return CardTextureRules.IsCardArt(texture);
 	}
 
 	[CompilerGenerated]

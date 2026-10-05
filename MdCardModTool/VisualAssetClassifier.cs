@@ -13,6 +13,10 @@ public static class VisualAssetClassifier
 			return null;
 		}
 		string text = name.ToLowerInvariant();
+		if (text == "cardattributeset") return "属性图标";
+		if (text is "levelstar01_64" or "tex_iconlv" or "tex_iconrank") return "星级图标";
+		if (text.StartsWith("sactx-", StringComparison.Ordinal) && text.Contains("-cardspriteatlas-", StringComparison.Ordinal))
+			return "属性／星级界面图集";
 		if (text.StartsWith("shopbgbase", StringComparison.Ordinal))
 		{
 			return "大厅背景";

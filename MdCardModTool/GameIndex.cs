@@ -11,4 +11,6 @@ public sealed class GameIndex
 	public List<string> CheckedLocalBundlePaths { get; init; } = new List<string>();
 
 	public int AlternateArtIndexVersion { get; set; }
+
+	public int BuiltInCardIndexVersion { get; set; }
 }

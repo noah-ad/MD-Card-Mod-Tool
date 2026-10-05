@@ -85,7 +85,7 @@ public static class VisualAssetIndexService
 			foreach (TexRef texture2 in new ModEngine().ScanBundle(text, gameRoot, "基础视觉资源", includeDependencies: false).Textures)
 			{
 				string text2 = VisualAssetClassifier.CategoryFor(texture2.Name);
-				if (text2 == "大厅背景" || text2 == "决斗场地")
+				if (text2 is "大厅背景" or "决斗场地" or "属性图标" or "星级图标" or "属性／星级界面图集")
 				{
 					texture2.Category = text2;
 					found.Add(texture2);
