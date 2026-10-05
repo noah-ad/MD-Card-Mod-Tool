@@ -11,6 +11,26 @@ public static class FrameComposer
 
 	public const int Height = 1024;
 
+	// Read-only frame preview: normalize a same-layout high-resolution Mod to
+	// the packaged frame canvas. This must not rescale replacement output.
+	internal static byte[] ComposeFullCardPreview(byte[] artPng, byte[] framePng)
+	{
+		using Bitmap art = BitmapFrom(artPng);
+		if (!CardTextureRules.IsFullCardCanvas(art.Width, art.Height))
+			throw new InvalidDataException($"超框预览需要 11:16 卡面，实际为 {art.Width}×{art.Height}。");
+		if (art.Width == Width && art.Height == Height) return Compose(artPng, framePng);
+		using var scaled = new Bitmap(Width, Height, PixelFormat.Format32bppArgb);
+		using (var graphics = Graphics.FromImage(scaled))
+		{
+			CardFrameRenderer.Configure(graphics);
+			graphics.CompositingMode = CompositingMode.SourceCopy;
+			graphics.DrawImage(art, new Rectangle(0, 0, Width, Height), new Rectangle(0, 0, art.Width, art.Height), GraphicsUnit.Pixel);
+		}
+		using var stream = new MemoryStream();
+		scaled.Save(stream, ImageFormat.Png);
+		return Compose(stream.ToArray(), framePng);
+	}
+
 	public static byte[] Compose(byte[] artPng, byte[] framePng)
 	{
 		using Bitmap image = BitmapFrom(artPng);

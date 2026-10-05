@@ -35,6 +35,14 @@ internal static class Program
 	private static void Main(string[] args)
 	{
 		ApplicationConfiguration.Initialize();
+		if (args.Length == 3 && args[0] == "--test-card-resolution")
+		{
+			WindowsFormsSynchronizationContext.AutoInstall = false;
+			SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+			Control.CheckForIllegalCrossThreadCalls = true;
+			CardResolutionCompatibilityTests.Run(args[1], args[2]);
+			return;
+		}
 		if (args.Length == 3 && args[0] == "--test-pendulum-crop")
 		{
 			WindowsFormsSynchronizationContext.AutoInstall = false;

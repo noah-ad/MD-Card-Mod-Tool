@@ -146,7 +146,8 @@ public static class CardFrameCatalog
 	public static IEnumerable<TexRef> CompatibleFrames(IEnumerable<TexRef> frames, int storedWidth, int storedHeight)
 	{
 		return frames.Where((TexRef x) => BuiltInCardFrameCatalog.IsNormalFrame(x) && x.Width == 704 && x.Height == 1024
-			&& (storedWidth != 512 || storedHeight is not (512 or 1024) || IsPendulum(x.Name) == (storedHeight == 1024)))
+			&& (!(CardTextureRules.IsSquareCanvas(storedWidth, storedHeight) || CardTextureRules.IsPendulumCanvas(storedWidth, storedHeight))
+				|| IsPendulum(x.Name) == CardTextureRules.IsPendulumCanvas(storedWidth, storedHeight)))
 			.OrderBy<TexRef, string>((TexRef x) => x.Name, StringComparer.OrdinalIgnoreCase);
 	}
 

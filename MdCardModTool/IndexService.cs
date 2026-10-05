@@ -291,26 +291,18 @@ public static class IndexService
 
 	public static bool IsDirectCardIllustration(TexRef texture)
 	{
-		if (texture.CardKey.Length > 0 && texture.Width == 512)
-		{
-			if (texture.Height != 512)
-			{
-				return texture.Height == 1024;
-			}
-			return true;
-		}
-		return false;
+		return CardTextureRules.IsCardArt(texture);
 	}
 
 	public static void NormalizeLocalCardCategory(TexRef texture)
 	{
-		if (CardTextureRules.IsCardSource(texture.SourceKind) && texture.CardKey.Length != 0)
+		if (CardTextureRules.IsNativeIllustration(texture))
 		{
-			if (texture.Width == 512 && texture.Height == 1024)
+			if (CardTextureRules.IsPendulumCanvas(texture.Width, texture.Height))
 			{
 				texture.Category = "灵摆卡图";
 			}
-			else if (texture.Width == 512 && texture.Height == 512)
+			else if (CardTextureRules.IsSquareCanvas(texture.Width, texture.Height))
 			{
 				texture.Category = (texture.IsAlternateArt ? "异画卡图" : (texture.IsTokenOrMisc ? "Token／杂图" : "卡图缩略图"));
 			}
@@ -388,7 +380,8 @@ public static class IndexService
 
 	public static int RemoveSpineAtlasParts(GameIndex index)
 	{
-		return index.Textures.RemoveAll((TexRef x) => x.SourceKind == "本地卡图" && x.Name.Length > 1 && x.Name[0] == 'P' && x.Name.AsSpan(1).ToString().All(char.IsAsciiDigit));
+		return index.Textures.RemoveAll((TexRef x) => x.SourceKind == "本地卡图" && x.Name.Length > 1 && x.Name[0] == 'P'
+			&& x.Name.AsSpan(1).ToString().All(char.IsAsciiDigit) && !CardTextureRules.HasCardIdentity(x));
 	}
 
 	public static int RemoveNonCardLocalTextures(GameIndex index)

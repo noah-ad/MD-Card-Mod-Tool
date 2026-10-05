@@ -951,7 +951,7 @@ public sealed partial class MainForm : Form
 			BackColor = UiTheme.Surface,
 			Font = new Font("Segoe UI", 8f),
 			TextAlign = ContentAlignment.MiddleLeft,
-			Text = $"v2.0.24  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
+			Text = $"v2.0.25  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
 		};
 		TableLayoutPanel tableLayoutPanel8 = new TableLayoutPanel
 		{
@@ -1396,9 +1396,9 @@ public sealed partial class MainForm : Form
 		{
 			await OpenFrameEditorAsync();
 		});
-		Button button3 = Button("预览所选卡框", delegate
+		Button button3 = Button("预览所选卡框", async delegate
 		{
-			OpenFramePreview();
+			await OpenFramePreviewAsync();
 		});
 		Button button4 = Button("刷新超框表", delegate
 		{
@@ -2532,7 +2532,9 @@ public sealed partial class MainForm : Form
 						SelectAllCategory();
 						RenderList();
 						SelectTexture(texRef3);
-						_status.Text = ((texRef3.Width != 512) ? $"卡号 {cardKey} 的完整插图尚未下载；已显示现有 {texRef3.Width}×{texRef3.Height} 缩略图。进入游戏查看该卡后可再次定位完整卡图。" : ((texRef3.Height == 1024) ? ("已定位灵摆卡 " + cardKey + " 的 512×1024 原生卡图；可直接预览、裁剪和替换，映射已保存。") : ("已定位卡号 " + cardKey + " 的 512×512 卡图；映射已保存。")));
+					_status.Text = CardTextureRules.IsCardArt(texRef3)
+						? $"已定位卡号 {cardKey} 的 {texRef3.Width}×{texRef3.Height} 卡图；可直接预览、裁剪和替换，映射已保存。"
+						: $"已定位卡号 {cardKey} 的 {texRef3.Width}×{texRef3.Height} 贴图；可查看 Bundle 检查实际资源。";
 					}
 					else
 					{
@@ -2567,11 +2569,11 @@ public sealed partial class MainForm : Form
 
 	private static int CardTextureRank(TexRef texture)
 	{
-		if (texture.Width == 704 && texture.Height == 1024)
+		if (CardTextureRules.IsFullCardArt(texture))
 		{
 			return 0;
 		}
-		if (texture.Width == 512 && (texture.Height == 512 || texture.Height == 1024))
+		if (CardTextureRules.IsNativeIllustration(texture))
 		{
 			return 1;
 		}
@@ -2857,7 +2859,7 @@ public sealed partial class MainForm : Form
 			_preview.Image = bitmap;
 			_previewHint.Visible = false;
 			string text = (displayMapping.RequiresMapping ? ("\n" + displayMapping.EditorSummary + " · 写入时自动反向映射") : "");
-			if (_gameRoot != null && CardTextureRules.IsCardArt(x) && x.Width == 704 && x.Height == 1024 && ushort.TryParse(x.CardKey, out var result))
+			if (_gameRoot != null && CardTextureRules.IsFullCardArt(x) && ushort.TryParse(x.CardKey, out var result))
 			{
 				text = "\n预览：真实 Alpha 显示（透明像素中的 RGB 数据仍原样保留）";
 				if (OverFrameArtStore.HasSettings(_gameRoot, result))
@@ -2870,7 +2872,7 @@ public sealed partial class MainForm : Form
 					text += "\n卡框：尚未单独合成  ·  点击下方“制作超框”，可直接使用当前原卡图";
 				}
 			}
-			else if (CardTextureRules.IsCardArt(x) && x.Width == 512 && (x.Height == 512 || x.Height == 1024))
+			else if (CardTextureRules.IsNativeIllustration(x))
 			{
 				string text2 = PreferredFrameKeyFor(x);
 				text += ((displayMapping.Kind == TextureDisplayMappingKind.PendulumCardArt) ? ("\n当前为灵摆卡框插图区预览（未叠加卡框） · 推荐卡框 " + text2 + " · " + CardFrameCatalog.FriendlyName(text2)) : ("\n当前显示原始 Texture2D（未叠加卡框） · 推荐卡框 " + text2 + " · " + CardFrameCatalog.FriendlyName(text2)));
@@ -3008,7 +3010,7 @@ public sealed partial class MainForm : Form
 		byte[] cropped;
 		try
 		{
-			TexRef[] array = ((CardTextureRules.IsCardArt(x) && x.Width == 512 && (x.Height == 512 || x.Height == 1024)) ? OverFrameFrames() : null);
+			TexRef[] array = CardTextureRules.IsNativeIllustration(x) ? OverFrameFrames() : null;
 			using ImageCropForm crop = new ImageCropForm(image, displayMapping.DisplayWidth, displayMapping.DisplayHeight, "替换 " + x.Name, array, (array == null) ? null : PreferredFrameKeyFor(x), fullCardOverlay: false, null, displayMapping);
 			if (crop.ShowDialog(this) != DialogResult.OK || crop.OutputPng == null)
 			{
@@ -3489,17 +3491,18 @@ public sealed partial class MainForm : Form
 		}
 	}
 
-	private void OpenFramePreview()
+	private async Task OpenFramePreviewAsync()
 	{
 		TexRef art = Selected();
-		if (art == null)
+		if (art == null || _gameRoot == null)
 		{
-			MessageBox.Show(this, "先选择一张卡图，再打开卡框预览。", Text);
+			MessageBox.Show(this, Localizer.T("cards.editor.choose"), Text);
 			return;
 		}
-		if ((art.Width != 704 || art.Height != 1024) && (art.Width != 512 || (art.Height != 512 && art.Height != 1024)))
+		try { await PrepareCardArtAsync(art); }
+		catch (Exception ex)
 		{
-			MessageBox.Show(this, $"当前图片尺寸 {art.Width}×{art.Height} 不是可预览的卡图。", Text, MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
+			if (!IsDisposed) MessageBox.Show(this, ex.Message, Localizer.T("cards.editor.error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
 			return;
 		}
 		TexRef[] array = OverFrameFrames();
@@ -3630,7 +3633,7 @@ public sealed partial class MainForm : Form
 
 	private TexRef? PreviewFrameFor(TexRef texture)
 	{
-		if (!CardTextureRules.IsCardArt(texture) || texture.Width != 512 || (texture.Height != 512 && texture.Height != 1024))
+		if (!CardTextureRules.IsNativeIllustration(texture))
 		{
 			return null;
 		}
@@ -3646,15 +3649,7 @@ public sealed partial class MainForm : Form
 
 	private async Task OpenCardFrameStudioAsync()
 	{
-		TexRef texRef = Selected();
-		if (texRef == null || _gameRoot == null || !CardTextureRules.IsCardArt(texRef))
-		{
-			MessageBox.Show(this, "请先选择一张卡图（支持 LocalData 与游戏内置卡图）。", Text);
-		}
-		else
-		{
-			await OpenFrameEditorAsync(texRef);
-		}
+		await OpenFrameEditorAsync();
 	}
 
 	private async Task<bool> OpenFrameEditorAsync(TexRef? texture = null, byte[]? initialArt = null, string? initialFrameKey = null, byte[]? initialBackground = null, bool replaceStoredBackground = false)
@@ -3662,14 +3657,16 @@ public sealed partial class MainForm : Form
 		TexRef texRef = texture ?? Selected();
 		if (texRef == null || _gameRoot == null)
 		{
-			MessageBox.Show(this, "先选择一张本地卡图。", Text);
+			MessageBox.Show(this, Localizer.T("cards.editor.choose"), Text);
 			return false;
 		}
-		if (!CardTextureRules.IsCardArt(texRef) || !ushort.TryParse(texRef.CardKey, out var cardId))
+		try { await PrepareCardArtAsync(texRef); }
+		catch (Exception ex)
 		{
-			MessageBox.Show(this, "制作超框需要可识别卡号的卡图，支持 LocalData 与 StreamingAssets。", Text);
+			if (!IsDisposed) MessageBox.Show(this, ex.Message, Localizer.T("cards.editor.error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
 			return false;
 		}
+		ushort cardId = ushort.Parse(texRef.CardKey);
 		TexRef[] array = OverFrameFrames();
 		if (array.Length == 0)
 		{

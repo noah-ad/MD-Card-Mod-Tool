@@ -250,7 +250,7 @@ public sealed class ModEngine
 		}
 		if (Regex.IsMatch(name, "^\\d+$"))
 		{
-			if (width != 512 || height != 1024)
+			if (!CardTextureRules.IsPendulumCanvas(width, height))
 			{
 				return "卡图缩略图";
 			}

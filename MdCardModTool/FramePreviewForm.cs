@@ -85,7 +85,7 @@ public sealed class FramePreviewForm : Form
 		}, 0, 0);
 		tableLayoutPanel.Controls.Add(_frames, 1, 0);
 		tableLayoutPanel.Controls.Add(control, 2, 0);
-		bool flag = art.Width == 512 && (art.Height == 512 || art.Height == 1024);
+		bool flag = CardTextureRules.IsNativeIllustration(art);
 		tableLayoutPanel.Controls.Add(new Label
 		{
 			Text = (flag ? "按游戏实际插图区还原显示比例；卡框只用于预览，不会修改全局卡框。" : "按游戏超框层级预览：卡框在下、透明高图在上；只合成显示，不写入游戏。"),
@@ -143,10 +143,11 @@ public sealed class FramePreviewForm : Form
 			if (generation == _generation)
 			{
 				GameTextureDisplayMapping mapping = GameTextureDisplayMapping.ResolveForInstalledPreview(_art, choice.Texture.Name);
-				byte[] data = await Task.Run(() => (_art.Width == 704 && _art.Height == 1024)
-					? FrameComposer.Compose(sources[0], sources[1])
+				byte[] data = await Task.Run(() => CardTextureRules.IsFullCardArt(_art)
+					? FrameComposer.ComposeFullCardPreview(sources[0], sources[1])
 					: CardFrameRenderer.ComposeStoredArtPreview(sources[0], sources[1]));
-				Bitmap bitmap = ((_art.Width == 704 && _art.Height == 1024) ? FrameComposer.PreviewBitmap(data) : FrameComposer.BitmapFrom(data));
+				if (IsDisposed || generation != _generation) return;
+				Bitmap bitmap = CardTextureRules.IsFullCardArt(_art) ? FrameComposer.PreviewBitmap(data) : FrameComposer.BitmapFrom(data);
 				_art.PreviewFrameKey = choice.Texture.Name;
 				Image image = _preview.Image;
 				_preview.Image = bitmap;
@@ -160,7 +161,7 @@ public sealed class FramePreviewForm : Form
 		}
 		finally
 		{
-			base.UseWaitCursor = false;
+			if (!IsDisposed) base.UseWaitCursor = false;
 		}
 	}
 

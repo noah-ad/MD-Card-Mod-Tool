@@ -93,7 +93,7 @@ public sealed record GameTextureDisplayMapping(TextureDisplayMappingKind Kind, i
 			int displayWidth = Math.Max(1, (int)Math.Round((double)height * 0.6875));
 			return new GameTextureDisplayMapping(TextureDisplayMappingKind.CardSleeve, width, height, displayWidth, height);
 		}
-		if (IsTallStorage(width, height) && IsPendulumCardArt(texture, preferredFrameKey))
+		if (CardTextureRules.IsPendulumCanvas(width, height) && CardTextureRules.HasCardIdentity(texture))
 		{
 			int displayHeight = Math.Max(1, (int)Math.Round((double)width * 4.0 / 3.0));
 			return new GameTextureDisplayMapping(TextureDisplayMappingKind.PendulumCardArt, width, height, width, displayHeight);
@@ -182,13 +182,6 @@ public sealed record GameTextureDisplayMapping(TextureDisplayMappingKind Kind, i
 			return texture.Name.StartsWith("ProtectorIcon", StringComparison.OrdinalIgnoreCase);
 		}
 		return true;
-	}
-
-	private static bool IsPendulumCardArt(TexRef texture, string? preferredFrameKey)
-	{
-		// ResolveCanvas already checked the 1:2 storage shape. This layout belongs
-		// to the illustration, not the selected preview frame or translated category.
-		return CardTextureRules.IsCardArt(texture);
 	}
 
 	[CompilerGenerated]
