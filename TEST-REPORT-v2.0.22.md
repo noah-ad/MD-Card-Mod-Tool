@@ -43,7 +43,8 @@
 
 - x64 Release 自包含发布通过；反编译恢复源码仍有原有的 nullable 警告。
 - 四语布局回归通过：页面切换、导航、动画工作区、资源动作网格，`clipped=False`、`ready=True`。
+- 卡图修复回归在 WinForms UI 同步上下文下重复通过，并开启跨线程控件访问检查；未发现非法跨线程访问。
 - 新分类沿用现有视觉资源列表，不新增拥挤的顶栏按钮。
 - 发布包保持根目录 EXE 与 data 并列，包含 FFmpeg 和既有授权说明，不打包游戏纹理或 Bundle。
 
-日志：`recovery-evidence/card-fixes-2.0.22/regression-final.log`、`mapping-ui.log`、`layout.log` 与 `publish.log`。测试结束逐项核对被读取的原始 Bundle 哈希，`gameWrites=False`。
+日志：`recovery-evidence/card-fixes-2.0.22/regression-final.log`、`regression-ui-checked.log`、`mapping-ui.log`、`layout.log` 与 `publish.log`。测试结束逐项核对被读取的原始 Bundle 哈希，`gameWrites=False`。

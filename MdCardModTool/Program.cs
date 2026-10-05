@@ -38,6 +38,8 @@ internal static class Program
 		if (args.Length == 3 && args[0] == "--test-card-resource-fixes")
 		{
 			WindowsFormsSynchronizationContext.AutoInstall = false;
+			SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+			Control.CheckForIllegalCrossThreadCalls = true;
 			CardResourceFixTests.Run(args[1], args[2]);
 			return;
 		}
