@@ -164,7 +164,30 @@ public static class UiTheme
 			using SolidBrush solidBrush = new SolidBrush(flag ? Color.White : ((flag2 && e.ColumnIndex == 0) ? Gold : ((e.ColumnIndex == 0) ? Text : Muted)));
 			e.Graphics.FillRectangle(brush, e.Bounds);
 			string text = e.SubItem?.Text ?? "";
-			TextRenderer.DrawText(e.Graphics, text, list.Font, new Rectangle(e.Bounds.X + 10, e.Bounds.Y + 6, e.Bounds.Width - 14, e.Bounds.Height - 8), solidBrush.Color, TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter);
+			int textLeft = e.Bounds.X + 10;
+			if (e.ColumnIndex == 0 && list is BufferedListView { ToggleSelectionOnClick: true })
+			{
+				int size = Scale(list, 14), inset = Scale(list, 8);
+				Rectangle marker = new(e.Bounds.Left + inset, e.Bounds.Top + (e.Bounds.Height - size) / 2, size, size);
+				using SolidBrush markerBrush = new(flag ? PrimaryDark : Elevated);
+				using Pen markerBorder = new(flag ? Primary : Muted);
+				e.Graphics.FillRectangle(markerBrush, marker);
+				e.Graphics.DrawRectangle(markerBorder, marker);
+				if (flag)
+				{
+					using Pen tick = new(Color.White, Math.Max(1.5f, size / 9f));
+					e.Graphics.DrawLines(tick, new PointF[]
+					{
+						new(marker.Left + size * 0.20f, marker.Top + size * 0.50f),
+						new(marker.Left + size * 0.43f, marker.Top + size * 0.73f),
+						new(marker.Left + size * 0.82f, marker.Top + size * 0.25f)
+					});
+				}
+				if (e.Item?.Focused == true && list.Focused)
+					ControlPaint.DrawFocusRectangle(e.Graphics, Rectangle.Inflate(marker, 3, 3), Primary, flag ? Selection : Surface);
+				textLeft = marker.Right + inset;
+			}
+			TextRenderer.DrawText(e.Graphics, text, list.Font, new Rectangle(textLeft, e.Bounds.Y + 6, Math.Max(0, e.Bounds.Right - textLeft - 4), e.Bounds.Height - 8), solidBrush.Color, TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter);
 		};
 	}
 

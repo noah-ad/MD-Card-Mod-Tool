@@ -134,7 +134,17 @@ internal static class ModManagementTests
 			Assert(!Directory.Exists(Path.Combine(target, "LocalData", "test001")), "Import maps selected account");
 		}
 
-		RunUi(mirror, textures, output);
+		RunUi(mirror, textures, output, selection =>
+		{
+			Assert(selection.ToHashSet().SetEquals(new[] { visual, cardA }), "Export snapshot must use the mouse-selected Mods");
+			foreach (bool direct in new[] { true, false })
+			{
+				string package = Path.Combine(output, direct ? "ui-selected-direct.zip" : "ui-selected.mdmod.zip");
+				service.ExportSelected(mirror, textures, selection, package, direct);
+				CheckScope(package, aScope.Append(visual.BundlePath));
+			}
+			Console.WriteLine("mouseSelectedExport=True; exactScope=True; formats=2");
+		});
 		Assert(originals.All(x => Hash(x.Key) == x.Value), "Original game hashes unchanged");
 		AppSettings settings = new() { ModSortOrder = ModSortOrder.OldestFirst };
 		Assert(JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(settings))?.ModSortOrder == ModSortOrder.OldestFirst, "Sort preference serialization");
@@ -175,7 +185,7 @@ internal static class ModManagementTests
 		}
 	}
 
-	private static void RunUi(string mirror, List<TexRef> textures, string output)
+	private static void RunUi(string mirror, List<TexRef> textures, string output, Action<TexRef[]> verifyExport)
 	{
 		using MainForm form = new(null, backgroundRefresh: false) { ShowInTaskbar = false, Opacity = 0 };
 		SetField(form, "_assetRoot", null); // Avoid automatic real-resource scans.
@@ -190,15 +200,32 @@ internal static class ModManagementTests
 		Button export = GetField<Button>(form, "_exportSelectedModsButton");
 		Button recovery = GetField<Button>(form, "_recoverModsButton");
 		FlowLayoutPanel bar = GetField<FlowLayoutPanel>(form, "_modContextActions");
-		Assert(list.MultiSelect && list.Columns.Count == 5, "Mod-only multiselect and time column");
+		Assert(list.MultiSelect && list.ToggleSelectionOnClick && list.Columns.Count == 5, "Mod-only checklist multiselect and time column");
 		Assert(visible[0].SourceKind == "视觉资源", "Newest first includes all Mod categories");
 		Assert(!export.Enabled, "Empty selection disabled");
 		Assert(recovery.Visible && recovery.Enabled, "Recovery available without selecting a Mod");
-		list.SelectedIndices.Add(0);
-		list.SelectedIndices.Add(1);
+		ModSelectionInputTests.RunClicks(list, export);
+		Button selectAll = GetField<Button>(form, "_selectAllModsButton");
+		Button clear = GetField<Button>(form, "_clearModSelectionButton");
+		int previewGeneration = GetField<int>(form, "_previewGeneration");
+		selectAll.PerformClick();
+		Application.DoEvents();
+		Assert(list.SelectedIndices.Count == visible.Count && !selectAll.Enabled && clear.Enabled, "Select Visible button and feedback");
+		Assert(GetField<int>(form, "_previewGeneration") - previewGeneration == 1, "Bulk selection coalesces preview updates");
+		clear.PerformClick();
+		Application.DoEvents();
+		Assert(list.SelectedIndices.Count == 0 && selectAll.Enabled && !clear.Enabled && !export.Enabled, "Clear button and feedback");
+		ModSelectionInputTests.ClickRow(list, 0);
+		ModSelectionInputTests.ClickRow(list, 1);
 		Application.DoEvents();
 		TexRef[] selected = list.SelectedIndices.Cast<int>().Select(i => visible[i]).ToArray();
 		Assert(export.Enabled && export.Text.Contains("2"), "Selection counter");
+		Assert(GetField<Label>(form, "_previewHint").Text == Localizer.F("mods.selection.preview", 2), "Multi-selection preview explains export instead of claiming nothing selected");
+		export.Focus();
+		Application.DoEvents();
+		TexRef[] exportSelection = (TexRef[])typeof(MainForm).GetMethod("SelectedModTextures", BindingFlags.Instance | BindingFlags.NonPublic)!
+			.Invoke(form, new object[] { false })!;
+		verifyExport(exportSelection);
 		form.SetModSortOrder(ModSortOrder.OldestFirst, persist: false);
 		Assert(visible[0].CardKey == "22524", "Oldest first");
 		Assert(list.SelectedIndices.Cast<int>().Select(i => visible[i]).ToHashSet().SetEquals(selected), "Sort preserves selection");
@@ -213,12 +240,16 @@ internal static class ModManagementTests
 			Application.DoEvents();
 			Assert(list.Columns[3].Text.StartsWith(Localizer.T("mods.column.modified"), StringComparison.Ordinal), "Localized timestamp header");
 			Assert(export.Text == Localizer.F("action.mods.export.selectedCount", 2), "Localized selection action");
+			Assert(selectAll.Text == Localizer.T("mods.selection.all") && clear.Text == Localizer.T("mods.selection.clear"), "Localized selection buttons");
+			Assert(list.AccessibleDescription == Localizer.T("mods.selection.hint"), "Localized multi-selection instructions");
+			Assert(GetField<Label>(form, "_previewHint").Text == Localizer.F("mods.selection.preview", 2), "Localized batch-selection preview hint");
 			Assert(recovery.Text == Localizer.T("mods.recovery.action"), "Localized recovery action");
 			Assert(GetField<ComboBox>(form, "_modSortSelector").Items.Count == 3, "Localized sort choices");
 			CheckBar();
 		}
 		Localizer.SetLanguage(AppLanguage.SimplifiedChinese);
 		form.SetModSortOrder(ModSortOrder.NewestFirst, persist: false);
+		Application.DoEvents();
 		using (Bitmap snapshot = new(form.ClientSize.Width, form.ClientSize.Height))
 		{
 			form.DrawToBitmap(snapshot, form.ClientRectangle);
@@ -260,7 +291,12 @@ internal static class ModManagementTests
 		GetField<System.Windows.Forms.Timer>(form, "_searchDebounce").Stop();
 		Invoke(form, "SetModsOnly", false);
 		Invoke(form, "RenderList");
-		Assert(!list.MultiSelect && list.Columns.Count == 4, "Ordinary resource view unchanged");
+		Assert(!list.MultiSelect && !list.ToggleSelectionOnClick && list.Columns.Count == 4,
+			$"Ordinary resource view unchanged: multiSelect={list.MultiSelect}; toggle={list.ToggleSelectionOnClick}; columns={list.Columns.Count}; modsOnly={GetField<bool>(form, "_modsOnly")}");
+		list.SelectedIndices.Clear();
+		ModSelectionInputTests.ClickRow(list, 0);
+		ModSelectionInputTests.ClickRow(list, 1);
+		Assert(list.SelectedIndices.Count == 1 && list.SelectedIndices[0] == 1, "Ordinary resource clicks remain single-selection");
 		foreach (TexRef texture in textures) texture.IsModded = false;
 		Invoke(form, "RefreshCategories");
 		Invoke(form, "SelectGroup", "__mods__");

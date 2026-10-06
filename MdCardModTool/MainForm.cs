@@ -460,11 +460,8 @@ public sealed partial class MainForm : Form
 		{
 			ResizeResourceColumns();
 		};
-		_list.SelectedIndexChanged += async delegate
-		{
-			UpdateSelectedModAction();
-			await ShowSelectionAsync();
-		};
+		_list.SelectedIndexChanged += delegate { QueueResourceSelectionUpdate(); };
+		_list.VirtualItemsSelectionRangeChanged += delegate { QueueResourceSelectionUpdate(); };
 		_list.DoubleClick += async delegate
 		{
 			if (!IsAnimationFilterSelected() || !(Selected()?.HasMonsterAnimation ?? false))
@@ -543,7 +540,7 @@ public sealed partial class MainForm : Form
 		};
 		_groups.AfterSelect += delegate(object? _, TreeViewEventArgs e)
 		{
-			SelectGroup(e.Node?.Tag as string);
+			if (!_changingCategory && !_changingModFilter) SelectGroup(e.Node?.Tag as string);
 		};
 		BuildInterface();
 		_layoutSurfaceReset.Tick += delegate
@@ -955,7 +952,7 @@ public sealed partial class MainForm : Form
 			BackColor = UiTheme.Surface,
 			Font = new Font("Segoe UI", 8f),
 			TextAlign = ContentAlignment.MiddleLeft,
-			Text = $"v2.0.26  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
+			Text = $"v2.0.27  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
 		};
 		TableLayoutPanel tableLayoutPanel8 = new TableLayoutPanel
 		{
@@ -1357,10 +1354,13 @@ public sealed partial class MainForm : Form
 		_modContextActions.Controls.Add(_recoverModsButton);
 		_modContextActions.Controls.Add(_snapshotModsButton);
 		_modContextActions.Controls.Add(_exportSelectedModsButton);
+		_modContextActions.Controls.Add(_selectAllModsButton);
+		_modContextActions.Controls.Add(_clearModSelectionButton);
 		_modContextActions.Controls.Add(exportMods);
 		_modContextActions.Controls.Add(importMods);
 		_modContextActions.Controls.Add(value);
 		_modContextActions.Controls.Add(_modSortField);
+		_modContextActions.Controls.Add(_modSelectionHint);
 		_modContextActions.Layout += delegate { UpdateModContextHeight(); };
 		_resourceContextBar.SizeChanged += delegate { UpdateModContextHeight(); };
 		Button value2 = Bind(Button("", delegate
@@ -1934,6 +1934,7 @@ public sealed partial class MainForm : Form
 		UpdateModsOnlyButtonText();
 		UpdateModSortLabels();
 		UpdateSelectedModAction();
+		_list.AccessibleDescription = _modsOnly ? Localizer.T("mods.selection.hint") : "";
 		UpdateModSummary();
 		UpdatePageHeader();
 		UpdateVisualShortcutStyles();
@@ -2335,6 +2336,7 @@ public sealed partial class MainForm : Form
 		_resultCount.Update();
 		_list.BeginUpdate();
 		HashSet<TexRef> selectedTextures = SelectedModTextures(includeUnmodified: true).ToHashSet();
+		_renderingResourceList = true;
 		try
 		{
 			_list.VirtualListSize = 0;
@@ -2366,9 +2368,11 @@ public sealed partial class MainForm : Form
 		finally
 		{
 			_list.EndUpdate();
+			_renderingResourceList = false;
 		}
 		UpdateResourceContextBar();
 		UpdateSelectedModAction();
+		QueueResourceSelectionUpdate();
 	}
 
 	private ListViewItem CreateListItem(TexRef texture)
@@ -2747,11 +2751,19 @@ public sealed partial class MainForm : Form
 
 	private void SetModsOnly(bool enabled)
 	{
-		_modsOnly = enabled;
-		UpdateModColumns();
-		UpdateModsOnlyButtonText();
-		UpdateModSummary();
-		UpdateResourceContextBar();
+		bool previous = _changingModFilter;
+		_changingModFilter = true;
+		try
+		{
+			// Hiding a focused Mod toolbar can move focus into the category
+			// tree and cause AfterSelect. That is not a new navigation request.
+			_modsOnly = enabled;
+			UpdateModColumns();
+			UpdateModsOnlyButtonText();
+			UpdateModSummary();
+			UpdateResourceContextBar();
+		}
+		finally { _changingModFilter = previous; }
 	}
 
 	private void UpdateModsOnlyButtonText()
@@ -2850,6 +2862,10 @@ public sealed partial class MainForm : Form
 		_previewHint.Visible = true;
 		if (x == null)
 		{
+			int selectedCount = _modsOnly ? SelectedModTextures().Length : 0;
+			if (selectedCount > 1) _previewHint.Text = Localizer.F("mods.selection.preview", selectedCount);
+			_info.Text = selectedCount > 1 ? Localizer.F("mods.selection.summary", selectedCount) : "";
+			_previewHint.BringToFront();
 			return;
 		}
 		try

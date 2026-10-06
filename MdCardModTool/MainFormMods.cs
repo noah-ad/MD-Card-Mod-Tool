@@ -36,6 +36,12 @@ public sealed partial class MainForm
 	};
 	private Control? _modSortField;
 	private Button? _exportSelectedModsButton;
+	private Button? _selectAllModsButton;
+	private Button? _clearModSelectionButton;
+	private Label? _modSelectionHint;
+	private bool _selectionUpdateQueued;
+	private bool _renderingResourceList;
+	private bool _changingModFilter;
 	private bool _updatingModSort;
 	private bool _updatingModContextHeight;
 	private bool _exportingMods;
@@ -43,6 +49,14 @@ public sealed partial class MainForm
 	private void ConfigureModManagementControls()
 	{
 		_exportSelectedModsButton = Button("", async delegate { await ExportManagedModsAsync(selectedOnly: true); }, ButtonTone.Primary);
+		_selectAllModsButton = Bind(Button("", delegate { _list.SelectAllRows(); }), "mods.selection.all");
+		_clearModSelectionButton = Bind(Button("", delegate { _list.SelectedIndices.Clear(); }), "mods.selection.clear");
+		_modSelectionHint = Bind(new Label
+		{
+			AutoSize = true,
+			ForeColor = UiTheme.Muted,
+			Margin = new Padding(10, 12, 4, 4)
+		}, "mods.selection.hint");
 		UiTheme.StyleComboBox(_modSortSelector);
 		_modSortField = UiTheme.Field(_modSortSelector);
 		_modSortField.Dock = DockStyle.None;
@@ -117,12 +131,32 @@ public sealed partial class MainForm
 		_exportSelectedModsButton.Text = count == 0 ? Localizer.T("action.mods.export.selected") : Localizer.F("action.mods.export.selectedCount", count);
 		_exportSelectedModsButton.AccessibleName = _exportSelectedModsButton.Text;
 		_exportSelectedModsButton.Enabled = _gameRoot != null && count > 0 && !_exportingMods;
+		if (_selectAllModsButton != null) _selectAllModsButton.Enabled = _modsOnly && _visibleTextures.Count > count && !_exportingMods;
+		if (_clearModSelectionButton != null) _clearModSelectionButton.Enabled = _modsOnly && count > 0 && !_exportingMods;
 		UpdateModContextHeight();
+	}
+
+	private void QueueResourceSelectionUpdate()
+	{
+		if (_renderingResourceList || _selectionUpdateQueued || IsDisposed || Disposing || !IsHandleCreated) return;
+		_selectionUpdateQueued = true;
+		BeginInvoke(async delegate
+		{
+			_selectionUpdateQueued = false;
+			if (IsDisposed || Disposing) return;
+			// A gesture may notify both individual items and virtual ranges.
+			// Read the final selection once, rather than a partially updated
+			// count or thousands of preview requests when selecting all.
+			UpdateSelectedModAction();
+			await ShowSelectionAsync();
+		});
 	}
 
 	private void UpdateModColumns()
 	{
 		_list.MultiSelect = _modsOnly;
+		_list.ToggleSelectionOnClick = _modsOnly;
+		_list.AccessibleDescription = _modsOnly ? Localizer.T("mods.selection.hint") : "";
 		if (_modsOnly && _list.Columns.Count == 4)
 			_list.Columns.Insert(3, Localizer.T("mods.column.modified"), 140);
 		else if (!_modsOnly && _list.Columns.Count == 5)
