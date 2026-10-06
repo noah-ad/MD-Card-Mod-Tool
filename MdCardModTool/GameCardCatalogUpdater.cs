@@ -22,7 +22,9 @@ public static class GameCardCatalogUpdater
 
 	private sealed record UpdateState
 	{
-		public int FormatVersion { get; init; } = 3;
+		public int FormatVersion { get; init; } = 5;
+
+		public string CurrentFamilyVersion { get; init; } = "";
 
 		public string ResourceFingerprint { get; init; } = "";
 
@@ -56,7 +58,7 @@ public static class GameCardCatalogUpdater
 			}
 			UpdateState updateState = JsonSerializer.Deserialize<UpdateState>(File.ReadAllText(path2));
 			string text = IndexService.FindLocalRoot(gameRoot) ?? "";
-			return updateState == null || updateState.FormatVersion != 3 || !string.Equals(updateState.BuildId, PortableIndexService.GetGameBuildId(gameRoot), StringComparison.Ordinal) || !string.Equals(Path.GetFullPath(updateState.LocalDataRoot), Path.GetFullPath(text), StringComparison.OrdinalIgnoreCase) || updateState.ResourceFingerprint != CaptureResourceFingerprint(text, IndexService.StreamingRoot(gameRoot));
+			return updateState == null || updateState.FormatVersion != 5 || !string.Equals(updateState.BuildId, PortableIndexService.GetGameBuildId(gameRoot), StringComparison.Ordinal) || !string.Equals(Path.GetFullPath(updateState.LocalDataRoot), Path.GetFullPath(text), StringComparison.OrdinalIgnoreCase) || updateState.ResourceFingerprint != CaptureResourceFingerprint(text, IndexService.StreamingRoot(gameRoot));
 		}
 		catch
 		{
@@ -83,7 +85,7 @@ public static class GameCardCatalogUpdater
 		}
 		string text2 = IndexService.FindLocalRoot(gameRoot) ?? "";
 		string text3 = CaptureResourceFingerprint(text2, IndexService.StreamingRoot(gameRoot));
-		IReadOnlyList<CardCatalogEntry> readOnlyList = Extract(gameRoot, progress, cancellationToken);
+		IReadOnlyList<CardCatalogEntry> readOnlyList = ExtractWithDiscoveryCache(gameRoot, cacheDirectory, progress, cancellationToken, out string familyVersion);
 		if (readOnlyList.Count == 0)
 		{
 			throw new InvalidDataException("没有从当前游戏 Build 解析出卡片目录；保留原目录不变。");
@@ -109,18 +111,17 @@ public static class GameCardCatalogUpdater
 		CardCatalogService.Write(path, readOnlyList);
 		UpdateState value = new UpdateState
 		{
+			CurrentFamilyVersion = familyVersion,
 			BuildId = PortableIndexService.GetGameBuildId(gameRoot),
 			LocalDataRoot = (IndexService.FindLocalRoot(gameRoot) ?? ""),
 			CardCount = readOnlyList.Count,
 			ResourceFingerprint = text3
 		};
 		Directory.CreateDirectory(cacheDirectory);
-		string text4 = text + ".tmp";
-		File.WriteAllText(text4, JsonSerializer.Serialize(value, new JsonSerializerOptions
+		ModRecoveryStore.AtomicWrite(text, JsonSerializer.SerializeToUtf8Bytes(value, new JsonSerializerOptions
 		{
 			WriteIndented = true
 		}));
-		File.Move(text4, text, overwrite: true);
 		return readOnlyList;
 	}
 
@@ -145,6 +146,127 @@ public static class GameCardCatalogUpdater
 	}
 
 	public static IReadOnlyList<CardCatalogEntry> Extract(string gameRoot, Action<int, int, int>? progress = null, CancellationToken cancellationToken = default(CancellationToken))
+		=> ExtractWithDiscoveryCache(gameRoot, AppSettingsStore.AppDataRoot, progress, cancellationToken, out _);
+
+	internal static string ReadCurrentFamilyVersion(string gameRoot, string? cacheDirectory = null, bool requireCurrentBuild = true)
+	{
+		try
+		{
+			string path = Path.Combine(cacheDirectory ?? AppSettingsStore.AppDataRoot, "card-catalog-game-state-v2.json");
+			var state = File.Exists(path) ? JsonSerializer.Deserialize<UpdateState>(File.ReadAllText(path)) : null;
+			return state is { FormatVersion: 5 } && (!requireCurrentBuild || state.BuildId == PortableIndexService.GetGameBuildId(gameRoot))
+				&& state.LocalDataRoot.Equals(IndexService.FindLocalRoot(gameRoot), StringComparison.OrdinalIgnoreCase) ? state.CurrentFamilyVersion : "";
+		}
+		catch (Exception ex) when (ex is IOException or JsonException) { return ""; }
+	}
+
+	internal static string RefreshCurrentFamilyVersion(string gameRoot, CancellationToken token, string? cacheDirectory = null, Action<int, int, int>? progress = null)
+	{
+		try { UpdateIfNeeded(gameRoot, cacheDirectory ?? AppSettingsStore.AppDataRoot, progress, token); }
+		catch (InvalidDataException) when (ReadCurrentFamilyVersion(gameRoot, cacheDirectory, requireCurrentBuild: false).Length == 0)
+		{
+			return ""; // Older installations can have a gate but no dictionary family.
+		}
+		return ReadCurrentFamilyVersion(gameRoot, cacheDirectory);
+	}
+
+	private sealed record DictionaryBundle(string Stamp, string[] Containers);
+	private sealed record DictionaryDiscoveryCache
+	{
+		public int FormatVersion { get; init; } = 1;
+		public Dictionary<string, DictionaryBundle> Bundles { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+	}
+
+	// Scan every changed unknown bundle once; remember non-dictionary results too.
+	// Unlike the old first-hit algorithm, collect coherent families and merge them
+	// oldest-to-newest so a touched old/partial dictionary cannot hide new IDs.
+	private static IReadOnlyList<CardCatalogEntry> ExtractWithDiscoveryCache(string gameRoot, string cacheDirectory, Action<int, int, int>? progress, CancellationToken cancellationToken, out string currentFamilyVersion)
+	{
+		currentFamilyVersion = "";
+		string local = IndexService.FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到活动 LocalData 账号。");
+		string streaming = IndexService.StreamingRoot(gameRoot);
+		string key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(local).ToUpperInvariant() + "|" + Path.GetFullPath(streaming).ToUpperInvariant())))[..20];
+		string cachePath = Path.Combine(cacheDirectory, "dictionary-discovery-" + key + ".json");
+		DictionaryDiscoveryCache cached;
+		try { cached = File.Exists(cachePath) ? JsonSerializer.Deserialize<DictionaryDiscoveryCache>(File.ReadAllText(cachePath))! : new(); }
+		catch (Exception ex) when (ex is IOException or JsonException) { cached = new(); }
+		if (cached == null || cached.FormatVersion != 1) cached = new();
+		var files = new[] { local, streaming }.Where(Directory.Exists).SelectMany(root => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)).ToArray();
+		var results = new ConcurrentDictionary<string, DictionaryBundle>(StringComparer.OrdinalIgnoreCase);
+		int done = 0;
+		int found = 0;
+		Parallel.ForEach(files, new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 4, 2, 4), CancellationToken = cancellationToken }, file =>
+		{
+			try
+			{
+				string stamp = IndexService.BundleScanStamp(file);
+				if (cached.Bundles.TryGetValue(file, out var hit) && hit.Stamp == stamp) results[file] = hit;
+				else
+				{
+					string[] containers = CardBundleIdentity.Find(file).Length > 0 || !IsUnityBundle(file) ? Array.Empty<string>()
+						: new ModEngine().ReadAssetBundleContainerPaths(file).Select(x => x.Replace('\\', '/').ToLowerInvariant())
+							.Where(x => Path.GetFileName(x) is "card_name.bytes" or "card_indx.bytes" or "card_prop.bytes").ToArray();
+					if (stamp == IndexService.BundleScanStamp(file)) results[file] = new DictionaryBundle(stamp, containers);
+				}
+				if (results.TryGetValue(file, out var value) && value.Containers.Length > 0) Interlocked.Add(ref found, value.Containers.Length);
+			}
+			catch (OperationCanceledException) { throw; }
+			catch (Exception ex) when (ex is not OutOfMemoryException) { }
+			finally { int count = Interlocked.Increment(ref done); if (count % 100 == 0 || count == files.Length) progress?.Invoke(count, files.Length, Volatile.Read(ref found)); }
+		});
+		cancellationToken.ThrowIfCancellationRequested();
+		var observations = results.Where(x => x.Value.Containers.Length > 0).OrderBy(x => File.GetLastWriteTimeUtc(x.Key)).ToArray();
+		var familyKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		IReadOnlyList<CardCatalogEntry> merged = Array.Empty<CardCatalogEntry>();
+		var families = new List<(string Version, int MaxId, int Count, DateTime Modified)>();
+		var diagnostics = new List<string>();
+		foreach (var observed in observations)
+		{
+			foreach (string container in observed.Value.Containers)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var match = Regex.Match(container, "^assets/resourcesassetbundle/card/data/([^/]+)/");
+				if (!match.Success || familyKeys.Contains(match.Groups[1].Value)) continue;
+				try
+				{
+					var family = TryLocateDictionaryFamily(observed.Key, container, local, streaming);
+					if (family == null) continue;
+					byte[] properties = ReadDecodedTextAsset(family["prop"]);
+					var entries = new Dictionary<int, CardCatalogEntry>();
+					foreach (string language in Languages)
+					{
+						if (!family.TryGetValue(language + "|name", out var name) || !family.TryGetValue(language + "|index", out var index)) continue;
+						MergeLanguage(entries, language, ReadDecodedTextAsset(name), ReadDecodedTextAsset(index), properties);
+					}
+					if (entries.Values.Any(HasAnyName))
+					{
+						merged = CardCatalogService.MergeGameCatalogs(merged, entries.Values.Where(HasAnyName));
+						var named = entries.Values.Where(HasAnyName).ToArray();
+						families.Add((match.Groups[1].Value, named.Max(x => x.CardId), named.Length,
+							family.Values.Max(x => File.GetLastWriteTimeUtc(x.BundlePath))));
+						familyKeys.Add(match.Groups[1].Value);
+					}
+				}
+				catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException) { diagnostics.Add(ex.Message); }
+			}
+		}
+		Directory.CreateDirectory(cacheDirectory);
+		ModRecoveryStore.AtomicWrite(cachePath, JsonSerializer.SerializeToUtf8Bytes(new DictionaryDiscoveryCache { Bundles = new Dictionary<string, DictionaryBundle>(results, StringComparer.OrdinalIgnoreCase) }));
+		if (merged.Count == 0)
+		{
+			// Support older unversioned installations, but never fall back to mixing
+			// incomplete versioned families: that produces incorrect card/name links.
+			if (observations.Any(x => x.Value.Containers.Any(c => !c.Contains("/card/data/", StringComparison.Ordinal)))) return ExtractLegacy(gameRoot, progress, cancellationToken);
+			throw new InvalidDataException("当前已下载资源中没有完整的卡名／索引／属性数据组。完成游戏下载后会自动重试。" + (diagnostics.Count > 0 ? "\n" + diagnostics[0] : ""));
+		}
+		// A newly downloaded complete family includes the newly added card IDs.
+		// Rank by coverage first so touching an old gate cannot make it current.
+		currentFamilyVersion = families.OrderByDescending(x => x.MaxId).ThenByDescending(x => x.Count)
+			.ThenByDescending(x => x.Modified).ThenBy(x => x.Version, StringComparer.Ordinal).First().Version;
+		return merged;
+	}
+
+	private static IReadOnlyList<CardCatalogEntry> ExtractLegacy(string gameRoot, Action<int, int, int>? progress, CancellationToken cancellationToken)
 	{
 		string localRoot = IndexService.FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到活动 LocalData 账号。");
 		string streamingRoot = IndexService.StreamingRoot(gameRoot);
@@ -410,6 +532,8 @@ public static class GameCardCatalogUpdater
 			}
 		}
 	}
+
+	internal static byte[] ReadDictionary(string bundlePath, string fileName) => ReadDecodedTextAsset(new LocatedAsset(bundlePath, fileName, 0));
 
 	private static byte[] ReadDecodedTextAsset(LocatedAsset location)
 	{

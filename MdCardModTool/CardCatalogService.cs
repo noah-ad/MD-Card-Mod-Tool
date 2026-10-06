@@ -82,6 +82,11 @@ public sealed class CardCatalogService
 			{
 			}
 		}
+		if (File.Exists(NewCardDiscovery.DiscoveredCatalogPath))
+		{
+			try { list = MergeGameCatalogs(list, Read(NewCardDiscovery.DiscoveredCatalogPath)).ToList(); }
+			catch (Exception ex) when (ex is IOException or InvalidDataException or JsonException) { }
+		}
 		return new CardCatalogService(list);
 	}
 

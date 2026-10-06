@@ -177,7 +177,8 @@ public static class IndexService
 			Textures = textures.ToList(),
 			AlternateArtIndexVersion = (gameIndex?.AlternateArtIndexVersion ?? 0),
 			BuiltInCardIndexVersion = (gameIndex?.BuiltInCardIndexVersion ?? 0),
-			CheckedLocalBundlePaths = (gameIndex?.CheckedLocalBundlePaths ?? new List<string>())
+			CheckedLocalBundlePaths = (gameIndex?.CheckedLocalBundlePaths ?? new List<string>()),
+			CardBundleScanStamps = gameIndex?.CardBundleScanStamps ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
 		});
 	}
 
@@ -230,7 +231,7 @@ public static class IndexService
 			where CardTextureRules.IsCardSource(x.SourceKind) && IsDirectCardIllustration(x)
 			select Path.GetFullPath(x.BundlePath)).ToHashSet<string>(StringComparer.OrdinalIgnoreCase);
 		List<(string Path, string Root)> files = ((cardKey == "0") ? (from path in EnumerateDownloadedCardIllustrationBundles(localRoot)
-			where !knownBundles.Contains(Path.GetFullPath(path))
+			where !index.CardBundleScanStamps.TryGetValue(Path.GetFullPath(path), out string stamp) || stamp != BundleScanStamp(path)
 			select (Path: path, Root: localRoot)).ToList() : (from path in CardIllustrationBundleCandidates(localRoot, cardKey)
 			where !knownBundles.Contains(Path.GetFullPath(path))
 			select (Path: path, Root: localRoot)).ToList());
@@ -240,23 +241,28 @@ public static class IndexService
 				? Directory.EnumerateFiles(streamingRoot, "*", SearchOption.AllDirectories).Where(IsUnityBundle)
 				: CardIllustrationBundleCandidates(streamingRoot, cardKey);
 			files.AddRange(from path in candidates
-				where !knownBundles.Contains(Path.GetFullPath(path))
+				where cardKey == "0" ? !index.CardBundleScanStamps.TryGetValue(Path.GetFullPath(path), out string stamp) || stamp != BundleScanStamp(path) : !knownBundles.Contains(Path.GetFullPath(path))
 				select (Path: path, Root: streamingRoot));
 		}
 		int found = 0;
 		int done = 0;
 		ConcurrentBag<TexRef> added = new ConcurrentBag<TexRef>();
+		ConcurrentDictionary<string, string> stamps = new(StringComparer.OrdinalIgnoreCase);
 		ModEngine engine = new ModEngine();
 		Parallel.ForEach(files, new ParallelOptions
 		{
-			MaxDegreeOfParallelism = Math.Max(2, Environment.ProcessorCount / 2),
+			MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 4, 2, 4),
 			CancellationToken = cancellationToken
 		}, delegate((string Path, string Root) file, ParallelLoopState state)
 		{
 			try
 			{
 				string sourceKind = file.Root.Equals(streamingRoot, StringComparison.OrdinalIgnoreCase) ? "游戏内图片" : "本地卡图";
-				foreach (TexRef item in engine.ScanBundle(file.Path, file.Root, sourceKind, includeDependencies: false).Textures.Where(IsDirectCardIllustration))
+				string before = BundleScanStamp(file.Path);
+				var scanned = engine.ScanBundle(file.Path, file.Root, sourceKind, includeDependencies: false).Textures.Where(IsDirectCardIllustration).ToArray();
+				if (before != BundleScanStamp(file.Path)) return; // Incomplete downloads are retried.
+				stamps[Path.GetFullPath(file.Path)] = before;
+				foreach (TexRef item in scanned)
 				{
 					added.Add(item);
 					if (item.CardKey == cardKey)
@@ -285,13 +291,20 @@ public static class IndexService
 			Textures = textures,
 			ScannedBundles = done,
 			TotalBundles = files.Count,
-			Found = (Volatile.Read(in found) != 0)
+			Found = (Volatile.Read(in found) != 0),
+			ScanStamps = new Dictionary<string, string>(stamps, StringComparer.OrdinalIgnoreCase)
 		};
 	}
 
 	public static bool IsDirectCardIllustration(TexRef texture)
 	{
 		return CardTextureRules.IsCardArt(texture);
+	}
+
+	internal static string BundleScanStamp(string path)
+	{
+		var file = new FileInfo(path);
+		return file.Exists ? file.Length + ":" + file.LastWriteTimeUtc.Ticks : "";
 	}
 
 	public static void NormalizeLocalCardCategory(TexRef texture)
@@ -349,21 +362,9 @@ public static class IndexService
 			localFiles = (IReadOnlyCollection<FileInfo>)(object)(from x in Directory.EnumerateFiles(localRoot, "*", SearchOption.AllDirectories)
 				select new FileInfo(x)).ToArray();
 		}
-		Dictionary<string, string> available = localFiles.ToDictionary<FileInfo, string, string>((FileInfo x) => Path.GetRelativePath(localRoot, x.FullName), (FileInfo x) => x.FullName, StringComparer.OrdinalIgnoreCase);
-		foreach (int cardId in from id in CardCatalogService.LoadBestAvailable().Entries.Select((CardCatalogEntry entry) => entry.CardId).Distinct()
-			orderby id
-			select id)
+		foreach (FileInfo file in localFiles)
 		{
-			string[] array = new string[2] { "tcg", "ocg" };
-			string[] array2 = array;
-			foreach (string illustrationType in array2)
-			{
-				string key = CardIllustrationRelativePath(cardId.ToString(), illustrationType);
-				if (available.TryGetValue(key, out string value) && IsUnityBundle(value))
-				{
-					yield return value;
-				}
-			}
+			if (CardBundleIdentity.Find(file.FullName).Length > 0 && IsUnityBundle(file.FullName)) yield return file.FullName;
 		}
 	}
 

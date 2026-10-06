@@ -1271,6 +1271,7 @@ public sealed class OverFrameFrameEditorForm : Form
 				try
 				{
 					byte[] output = _outputBytes.ToArray();
+					DirectModArchive.EnsureGameClosed();
 					base.UseWaitCursor = true;
 					_status.Text = "正在定位 LocalData 超框表…";
 					await Task.Run(() => _overFrames.FindGate(_gameRoot, delegate(int done, int total)
@@ -1302,6 +1303,8 @@ public sealed class OverFrameFrameEditorForm : Form
 					ImageRenderSpec renderSpec = _canvas.RenderSpec;
 					OverFrameArtStore.SaveSettings(_gameRoot, _cardId, new OverFrameFrameSettings(choice.Key, choice.IsCustom, UserSelected: true, CurrentMode.ToString(), renderSpec.ImageScale, renderSpec.OffsetX, renderSpec.OffsetY, _canvas.BackgroundRenderSpec.ImageScale, _canvas.BackgroundRenderSpec.OffsetX, _canvas.BackgroundRenderSpec.OffsetY, _removeFoilInnerFrame.Checked));
 					_art.Category = "超框卡图";
+					try { await Task.Run(() => new ModRecoveryStore().RecordTexture(_gameRoot, _art, output, _cardId)); }
+					catch (Exception ex) { MessageBox.Show(this, Localizer.F("mods.recovery.saveWarning", ex.Message), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); }
 					AppliedFrameName = modeLabel + " · " + choice.DisplayName;
 					base.DialogResult = DialogResult.OK;
 					Close();

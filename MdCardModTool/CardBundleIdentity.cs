@@ -9,9 +9,7 @@ internal static class CardBundleIdentity
 {
 	private static readonly object Gate = new object();
 
-	private static string stamp = "";
-
-	private static Dictionary<string, string> ids = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+	private static Dictionary<string, string>? ids;
 
 	internal static string Find(string path)
 	{
@@ -22,17 +20,20 @@ internal static class CardBundleIdentity
 		}
 		lock (Gate)
 		{
-			string text = File.GetLastWriteTimeUtc(CardCatalogService.BundledPath).Ticks + ":" + File.GetLastWriteTimeUtc(GameCardCatalogUpdater.ExtraCatalogPath).Ticks;
-			if (stamp != text)
+			if (ids == null)
 			{
 				Dictionary<string, string> dictionary = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-				foreach (CardCatalogEntry entry in CardCatalogService.LoadBestAvailable().Entries)
+				// CARD_Prop and of_card_asset encode IDs as unsigned 16-bit values.
+				// Cover the format's domain, not the last known release/catalog.
+				// No cards are fabricated: only installed, verified Bundles are indexed.
+				for (int cardId = 1; cardId <= ushort.MaxValue; cardId++)
 				{
+					string cardKey = cardId.ToString(System.Globalization.CultureInfo.InvariantCulture);
 					string[] array = new string[2] { "tcg", "ocg" };
 					foreach (string illustrationType in array)
 					{
-						string fileName2 = Path.GetFileName(IndexService.CardIllustrationRelativePath(entry.CardId.ToString(), illustrationType));
-						string text2 = entry.CardId.ToString();
+						string fileName2 = Path.GetFileName(IndexService.CardIllustrationRelativePath(cardKey, illustrationType));
+						string text2 = cardKey;
 						if (dictionary.TryGetValue(fileName2, out var value) && value != text2)
 						{
 							dictionary[fileName2] = "";
@@ -44,7 +45,6 @@ internal static class CardBundleIdentity
 					}
 				}
 				ids = dictionary;
-				stamp = text;
 			}
 			return ids.GetValueOrDefault(fileName, "");
 		}

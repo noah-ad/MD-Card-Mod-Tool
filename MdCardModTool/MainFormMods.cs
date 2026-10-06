@@ -9,6 +9,21 @@ namespace MdCardModTool;
 
 public sealed partial class MainForm
 {
+	private sealed class WrappingContextPanel : Panel
+	{
+		public override Size GetPreferredSize(Size proposedSize)
+		{
+			var flow = Controls.OfType<FlowLayoutPanel>().FirstOrDefault(x => x.Visible && x.AutoSize);
+			if (flow == null) return base.GetPreferredSize(proposedSize);
+			// Panel's default preferred-size calculation offers a Top-docked child
+			// unlimited width. A wrapping toolbar must instead use the table's
+			// actual column width, including during the autosize measuring pass.
+			int width = proposedSize.Width > 0 ? proposedSize.Width : ClientSize.Width;
+			Size content = flow.GetPreferredSize(new Size(Math.Max(1, width - Padding.Horizontal), 0));
+			return new Size(width, content.Height + Padding.Vertical);
+		}
+	}
+
 	private sealed record ModSortChoice(ModSortOrder Order, string Label)
 	{
 		public override string ToString() => Label;
@@ -143,19 +158,32 @@ public sealed partial class MainForm
 
 	private void UpdateModContextHeight()
 	{
+		RefreshResourceRowReferences();
 		if (_updatingModContextHeight || !_modsOnly || _resourceContextRow == null ||
 			!_resourceContextBar.Visible || _modContextActions.ClientSize.Width <= 0) return;
 		_updatingModContextHeight = true;
 		try
 		{
-			_modContextActions.PerformLayout();
-			int bottom = _modContextActions.Controls.Cast<Control>().Where(x => x.Visible)
-				.Select(x => x.Bottom + x.Margin.Bottom).DefaultIfEmpty(_modContextActions.Padding.Top).Max();
-			int height = Math.Max(UiTheme.Scale(this, 52), bottom + _modContextActions.Padding.Bottom);
-			if (Math.Abs(_resourceContextRow.Height - height) > 1)
-				_resourceContextRow.Height = height;
+			// Let the table measure the wrapping flow panel itself. Mutating an
+			// absolute RowStyle from a child Layout event can leave the table's
+			// cached row heights stale after autoscaling or language changes.
+			_resourceContextRow.SizeType = SizeType.AutoSize;
+			_resourceContextBar.PerformLayout();
 		}
 		finally { _updatingModContextHeight = false; }
+	}
+
+	private void RefreshResourceRowReferences()
+	{
+		// WinForms autoscaling may replace RowStyle objects. Cached references
+		// must be rebound, otherwise height updates only change detached styles.
+		if (_resourceContextBar.Parent is TableLayoutPanel table)
+		{
+			int contextRow = table.GetRow(_resourceContextBar);
+			int shortcutsRow = table.GetRow(_visualShortcutBar);
+			if (contextRow >= 0 && contextRow < table.RowStyles.Count) _resourceContextRow = table.RowStyles[contextRow];
+			if (shortcutsRow >= 0 && shortcutsRow < table.RowStyles.Count) _visualShortcutRow = table.RowStyles[shortcutsRow];
+		}
 	}
 
 	private async Task ExportManagedModsAsync(bool selectedOnly)

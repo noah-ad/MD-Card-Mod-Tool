@@ -12,6 +12,9 @@ namespace MdCardModTool;
 public sealed class OverFrameService
 {
 	private readonly ModEngine _engine = new ModEngine();
+	private readonly string? _catalogCacheDirectory;
+	public OverFrameService() { }
+	internal OverFrameService(string catalogCacheDirectory) => _catalogCacheDirectory = catalogCacheDirectory;
 
 	public const string GateName = "of_card_asset";
 
@@ -19,6 +22,8 @@ public sealed class OverFrameService
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		string localRoot = IndexService.FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");
+		string currentVersion = GameCardCatalogUpdater.RefreshCurrentFamilyVersion(gameRoot, cancellationToken, _catalogCacheDirectory,
+			(done, total, _) => progress?.Invoke(done, total));
 		string path = GateCachePath(localRoot);
 		if (File.Exists(path))
 		{
@@ -26,10 +31,10 @@ public sealed class OverFrameService
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				string text = File.ReadAllText(path).Trim();
-				if (File.Exists(text))
+				if (File.Exists(text) && ModRecoveryStore.IsUnder(text, localRoot))
 				{
 					TextAssetRef textAssetRef = _engine.FindTextAssetFast(text, localRoot, "of_card_asset");
-					if (textAssetRef != null)
+					if (textAssetRef != null && MatchesFamily(text, currentVersion))
 					{
 						return textAssetRef;
 					}
@@ -70,7 +75,7 @@ public sealed class OverFrameService
 				try
 				{
 					TextAssetRef textAssetRef2 = _engine.FindTextAssetFast(file, localRoot, "of_card_asset");
-					if (textAssetRef2 != null)
+					if (textAssetRef2 != null && MatchesFamily(file, currentVersion))
 					{
 						lock (sync)
 						{
@@ -102,12 +107,15 @@ public sealed class OverFrameService
 		}
 		if (found == null)
 		{
-			throw new FileNotFoundException("没有在 LocalData 中找到 of_card_asset。请先启动游戏完成资源下载。");
+			throw new FileNotFoundException("没有在 LocalData 中找到与当前卡片数据版本配套的 of_card_asset。请先启动游戏完成资源下载。" + (currentVersion.Length > 0 ? "\n数据版本：" + currentVersion : ""));
 		}
 		Directory.CreateDirectory(Path.GetDirectoryName(path));
 		File.WriteAllText(path, found.BundlePath);
 		return found;
 	}
+
+	private bool MatchesFamily(string path, string version) => version.Length == 0 || _engine.ReadAssetBundleContainerPaths(path)
+		.Any(x => x.Replace('\\', '/').Equals($"assets/resourcesassetbundle/card/data/{version}/md/of_card_asset.bytes", StringComparison.OrdinalIgnoreCase));
 
 	public TextAssetRef? FindCachedGate(string gameRoot)
 	{
@@ -124,7 +132,8 @@ public sealed class OverFrameService
 		try
 		{
 			string text2 = File.ReadAllText(path).Trim();
-			return File.Exists(text2) ? _engine.FindTextAssetFast(text2, text, "of_card_asset") : null;
+			return File.Exists(text2) && ModRecoveryStore.IsUnder(text2, text) && MatchesFamily(text2, GameCardCatalogUpdater.ReadCurrentFamilyVersion(gameRoot, _catalogCacheDirectory))
+				? _engine.FindTextAssetFast(text2, text, "of_card_asset") : null;
 		}
 		catch
 		{

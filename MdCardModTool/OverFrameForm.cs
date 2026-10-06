@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Threading;
@@ -272,6 +273,8 @@ public sealed class OverFrameForm : Form
 			{
 				_service.EnableOrUpdate(_gameRoot, card, art);
 			});
+			try { new ModRecoveryStore().SetOverFrameIntent(_gameRoot, card, art); }
+			catch (Exception ex) { MessageBox.Show(this, Localizer.F("mods.recovery.saveWarning", ex.Message), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); }
 			await LoadAsync();
 		}
 		catch (Exception ex)
@@ -297,6 +300,8 @@ public sealed class OverFrameForm : Form
 			{
 				_service.Disable(_gameRoot, card);
 			});
+			try { new ModRecoveryStore().SetOverFrameIntent(_gameRoot, card, null); }
+			catch (Exception ex) { MessageBox.Show(this, Localizer.F("mods.recovery.saveWarning", ex.Message), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); }
 			await LoadAsync();
 		}
 		catch (Exception ex)
@@ -322,6 +327,17 @@ public sealed class OverFrameForm : Form
 			{
 				_service.RestoreBackup(_gameRoot);
 			});
+			try
+			{
+				var store = new ModRecoveryStore();
+				var rows = _service.ReadCached(_gameRoot).GroupBy(x => x.CardId).ToDictionary(x => x.Key, x => x.Last().ArtId);
+				foreach (var entry in store.Load(_gameRoot).Textures.Where(x => x.OverFrameArtId.HasValue && ushort.TryParse(x.CardKey, out _)))
+				{
+					ushort card = ushort.Parse(entry.CardKey);
+					store.SetOverFrameIntent(_gameRoot, card, rows.TryGetValue(card, out ushort art) ? art : null);
+				}
+			}
+			catch (Exception ex) { MessageBox.Show(this, Localizer.F("mods.recovery.saveWarning", ex.Message), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); }
 			await LoadAsync();
 		}
 		catch (Exception ex)

@@ -11,4 +11,6 @@ public sealed class MissingCardScanResult
 	public int TotalBundles { get; init; }
 
 	public bool Found { get; init; }
+
+	public Dictionary<string, string> ScanStamps { get; init; } = new(System.StringComparer.OrdinalIgnoreCase);
 }

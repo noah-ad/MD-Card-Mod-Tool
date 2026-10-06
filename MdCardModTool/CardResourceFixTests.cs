@@ -60,7 +60,8 @@ internal static class CardResourceFixTests
         var cachedCards = new GameIndex();
         var recoveredCards = IndexService.ScanMissingLocalCard(mirror, cachedCards, "0");
         Require(recoveredCards.Textures.Count == 2 && recoveredCards.Textures.All(x => x.SourceKind == "游戏内图片"), "old-index background merge discovers built-in illustrations");
-        cachedCards.Textures.AddRange(recoveredCards.Textures);
+        NewCardDiscovery.Merge(cachedCards, cachedCards.Textures, recoveredCards);
+        Require(cachedCards.Textures.Count == 2, "built-in index merge keeps unique current records");
         Require(IndexService.ScanMissingLocalCard(mirror, cachedCards, "0").Textures.Count == 0, "built-in index merge does not duplicate known cards");
 
         // Use a genuine pendulum bundle, in both resource roots, with a stale square

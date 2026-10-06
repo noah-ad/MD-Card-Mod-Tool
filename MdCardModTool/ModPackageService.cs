@@ -71,6 +71,15 @@ public sealed class ModPackageService
 		return new ModChangeSummary(array.Length, array.Count((ChangedBundle x) => x.SourceKind.StartsWith("召唤动画", StringComparison.Ordinal)));
 	}
 
+	internal HashSet<string> ChangedTextureBundlePaths(string gameRoot, IReadOnlyCollection<TexRef> textures)
+	{
+		// Card rows can also be flagged by a related animation/gate-only edit.
+		// Do not snapshot their unchanged original pictures as desired image Mods.
+		return EnumerateChangedBundles(gameRoot, textures)
+			.Where(x => x.SourceKind != "超框开关" && !x.SourceKind.StartsWith("召唤动画", StringComparison.Ordinal))
+			.Select(x => Path.GetFullPath(x.LivePath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+	}
+
 	public ModPackageInfo Export(string gameRoot, IEnumerable<TexRef> textures, string outputPath, bool directReplacement = false)
 	{
 		List<ChangedBundle> list = EnumerateChangedBundles(gameRoot, textures.ToList()).DistinctBy<ChangedBundle, string>((ChangedBundle x) => x.LivePath, StringComparer.OrdinalIgnoreCase).ToList();

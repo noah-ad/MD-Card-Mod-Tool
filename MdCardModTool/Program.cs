@@ -35,6 +35,16 @@ internal static class Program
 	private static void Main(string[] args)
 	{
 		ApplicationConfiguration.Initialize();
+		if (args.Length == 3 && args[0] == "--test-mod-update-recovery")
+		{
+			ModUpdateRecoveryTests.Run(args[1], args[2]);
+			return;
+		}
+		if (args.Length == 3 && args[0] == "--test-auto-card-update")
+		{
+			AutomaticCardUpdateTests.Run(args[1], args[2]);
+			return;
+		}
 		if (args.Length == 3 && args[0] == "--test-card-resolution")
 		{
 			WindowsFormsSynchronizationContext.AutoInstall = false;
@@ -2764,7 +2774,12 @@ internal static class Program
 				Console.WriteLine($"{done}/{total}; added={added}");
 			});
 			HashSet<string> known = gameIndex.Textures.Select((TexRef texRef20) => $"{texRef20.BundlePath}\0{texRef20.AssetFileName}\0{texRef20.PathId}").ToHashSet<string>(StringComparer.OrdinalIgnoreCase);
-			gameIndex.Textures.AddRange(missingCardScanResult.Textures.Where((TexRef texRef20) => known.Add($"{texRef20.BundlePath}\0{texRef20.AssetFileName}\0{texRef20.PathId}")));
+			if (args[2] == "0") NewCardDiscovery.Merge(gameIndex, gameIndex.Textures, missingCardScanResult);
+			else
+			{
+				gameIndex.Textures.AddRange(missingCardScanResult.Textures.Where((TexRef texRef20) => known.Add($"{texRef20.BundlePath}\0{texRef20.AssetFileName}\0{texRef20.PathId}")));
+				foreach (var stamp in missingCardScanResult.ScanStamps) gameIndex.CardBundleScanStamps[stamp.Key] = stamp.Value;
+			}
 			IndexService.Save(args[1], gameIndex);
 			{
 				foreach (TexRef item10 in gameIndex.Textures.Where((TexRef texRef20) => texRef20.SourceKind == "本地卡图" && texRef20.CardKey == args[2]))
@@ -2782,12 +2797,10 @@ internal static class Program
 			{
 				Console.WriteLine($"{done}/{total}; added={added}");
 			});
-			HashSet<string> known2 = gameIndex2.Textures.Select((TexRef texRef20) => $"{texRef20.BundlePath}\0{texRef20.AssetFileName}\0{texRef20.PathId}").ToHashSet<string>(StringComparer.OrdinalIgnoreCase);
-			List<TexRef> list8 = missingCardScanResult2.Textures.Where((TexRef texRef20) => known2.Add($"{texRef20.BundlePath}\0{texRef20.AssetFileName}\0{texRef20.PathId}")).ToList();
-			YgoCdbCardCatalog.ClassifyTexturesAsync(list8).GetAwaiter().GetResult();
-			gameIndex2.Textures.AddRange(list8);
+			YgoCdbCardCatalog.ClassifyTexturesAsync(missingCardScanResult2.Textures).GetAwaiter().GetResult();
+			int discovered = NewCardDiscovery.Merge(gameIndex2, gameIndex2.Textures, missingCardScanResult2);
 			IndexService.Save(args[1], gameIndex2);
-			Console.WriteLine($"added={list8.Count}; total={gameIndex2.Textures.Count}");
+			Console.WriteLine($"added={discovered}; total={gameIndex2.Textures.Count}");
 			return;
 		}
 		if (args.Length == 2 && args[0] == "--sanitize-card-index")

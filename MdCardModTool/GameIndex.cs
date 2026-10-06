@@ -13,4 +13,6 @@ public sealed class GameIndex
 	public int AlternateArtIndexVersion { get; set; }
 
 	public int BuiltInCardIndexVersion { get; set; }
+
+	public Dictionary<string, string> CardBundleScanStamps { get; init; } = new(System.StringComparer.OrdinalIgnoreCase);
 }

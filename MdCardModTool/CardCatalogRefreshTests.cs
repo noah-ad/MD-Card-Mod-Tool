@@ -60,7 +60,7 @@ internal static class CardCatalogRefreshTests
 		{
 			throw new Exception("Legacy cache not invalidated");
 		}
-		jsonNode["FormatVersion"] = 3;
+		jsonNode["FormatVersion"] = 5;
 		jsonNode["ResourceFingerprint"] = "old-resources-same-build";
 		File.WriteAllText(path2, jsonNode.ToJsonString());
 		if (!GameCardCatalogUpdater.NeedsUpdate(gameRoot, text4))

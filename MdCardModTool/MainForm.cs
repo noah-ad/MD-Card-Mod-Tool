@@ -224,9 +224,11 @@ public sealed partial class MainForm : Form
 
 	private Control _cardSearchField;
 
-	private readonly Panel _resourceContextBar = new Panel
+	private readonly Panel _resourceContextBar = new WrappingContextPanel
 	{
 		Dock = DockStyle.Fill,
+		AutoSize = true,
+		AutoSizeMode = AutoSizeMode.GrowAndShrink,
 		BackColor = UiTheme.SurfaceAlt,
 		Visible = false,
 		Margin = Padding.Empty
@@ -234,7 +236,9 @@ public sealed partial class MainForm : Form
 
 	private readonly FlowLayoutPanel _modContextActions = new FlowLayoutPanel
 	{
-		Dock = DockStyle.Fill,
+		Dock = DockStyle.Top,
+		AutoSize = true,
+		AutoSizeMode = AutoSizeMode.GrowAndShrink,
 		FlowDirection = FlowDirection.LeftToRight,
 		WrapContents = true,
 		Padding = new Padding(14, 5, 14, 5),
@@ -951,7 +955,7 @@ public sealed partial class MainForm : Form
 			BackColor = UiTheme.Surface,
 			Font = new Font("Segoe UI", 8f),
 			TextAlign = ContentAlignment.MiddleLeft,
-			Text = $"v2.0.25  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
+			Text = $"v2.0.26  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
 		};
 		TableLayoutPanel tableLayoutPanel8 = new TableLayoutPanel
 		{
@@ -1349,6 +1353,9 @@ public sealed partial class MainForm : Form
 		_modContextActions.Controls.Add(ContextLabel("context.mods.title"));
 		_modContextActions.Controls.Add(_modsOnlyButton);
 		ConfigureModManagementControls();
+		ConfigureRecoveryControls();
+		_modContextActions.Controls.Add(_recoverModsButton);
+		_modContextActions.Controls.Add(_snapshotModsButton);
 		_modContextActions.Controls.Add(_exportSelectedModsButton);
 		_modContextActions.Controls.Add(exportMods);
 		_modContextActions.Controls.Add(importMods);
@@ -1524,9 +1531,10 @@ public sealed partial class MainForm : Form
 		{
 			HideSearchSuggestions();
 		}
+		RefreshResourceRowReferences();
 		if (_visualShortcutRow != null)
 		{
-			_visualShortcutRow.Height = ((page == WorkspacePage.Visuals) ? 62f : 0f);
+			_visualShortcutRow.Height = ((page == WorkspacePage.Visuals) ? UiTheme.Scale(this, 62) : 0f);
 		}
 		_visualShortcutBar.Visible = page == WorkspacePage.Visuals;
 		if (page == WorkspacePage.Visuals && string.IsNullOrWhiteSpace(_activeVisualShortcut))
@@ -2756,6 +2764,7 @@ public sealed partial class MainForm : Form
 
 	private void UpdateResourceContextBar()
 	{
+		RefreshResourceRowReferences();
 		if (_resourceContextRow != null)
 		{
 			bool num = _currentPage == WorkspacePage.Cards;
@@ -2775,11 +2784,12 @@ public sealed partial class MainForm : Form
 			_resourceContextBar.Visible = flag3;
 			if (flag)
 			{
-				if (_resourceContextRow.Height <= 0) _resourceContextRow.Height = UiTheme.Scale(this, 52);
+				_resourceContextRow.SizeType = SizeType.AutoSize;
 				UpdateModContextHeight();
 			}
 			else
 			{
+				_resourceContextRow.SizeType = SizeType.Absolute;
 				_resourceContextRow.Height = flag2 ? UiTheme.Scale(this, 52) : 0f;
 			}
 		}
@@ -3038,12 +3048,20 @@ public sealed partial class MainForm : Form
 		}
 		try
 		{
+			if (!IndexWorkspaceGuard.Belongs(_gameRoot, x)) throw new InvalidOperationException("目标账号或目录已切换，请重新选择资源。");
+			Enabled = false;
+			_backgroundRefreshCancellation?.Cancel();
 			base.UseWaitCursor = true;
+			if (_backgroundRefreshTask != null) await _backgroundRefreshTask;
 			x.OverrideBundlePath = null;
 			await Task.Run(delegate
 			{
+				DirectModArchive.EnsureGameClosed();
 				_engine.Replace(x, cropped, Path.Combine(_gameRoot, "_MD卡图备份", x.SourceKind));
 			});
+			ushort? recoveryArt = ushort.TryParse(x.CardKey, out ushort recoveryCard)
+				? _overFrames.ReadCached(_gameRoot).FirstOrDefault(mapping => mapping.CardId == recoveryCard)?.ArtId : null;
+			await SaveRecoveryTextureAsync(_gameRoot, x, cropped, recoveryArt);
 			await RefreshModFlagsAsync();
 			await Task.Run(delegate
 			{
@@ -3062,6 +3080,7 @@ public sealed partial class MainForm : Form
 		finally
 		{
 			base.UseWaitCursor = false;
+			if (!IsDisposed) Enabled = true;
 		}
 	}
 
@@ -3087,14 +3106,20 @@ public sealed partial class MainForm : Form
 		}
 		try
 		{
+			if (!IndexWorkspaceGuard.Belongs(_gameRoot, x)) throw new InvalidOperationException("目标账号或目录已切换，请重新选择资源。");
+			Enabled = false;
+			_backgroundRefreshCancellation?.Cancel();
 			base.UseWaitCursor = true;
+			if (_backgroundRefreshTask != null) await _backgroundRefreshTask;
 			await Task.Run(delegate
 			{
+				DirectModArchive.EnsureGameClosed();
 				File.Copy(backup, x.BundlePath, overwrite: true);
 				if (isOverFrame)
 				{
 					_overFrames.Disable(_gameRoot, cardId);
 				}
+				_recoveryStore.DeactivateBundle(_gameRoot, x);
 				TexRef texRef = _engine.ScanBundle(x.BundlePath, _assetRoot, x.SourceKind, includeDependencies: false).Textures.FirstOrDefault((TexRef t) => t.PathId == x.PathId && t.AssetFileName == x.AssetFileName);
 				if (texRef != null)
 				{
@@ -3135,6 +3160,7 @@ public sealed partial class MainForm : Form
 		finally
 		{
 			base.UseWaitCursor = false;
+			if (!IsDisposed) Enabled = true;
 		}
 	}
 
@@ -3368,12 +3394,20 @@ public sealed partial class MainForm : Form
 		{
 			string localRoot = IndexService.FindLocalRoot(gameRoot) ?? "";
 			int newCards = 0;
+			string catalogWarning = "";
 			bool updateCatalog = await Task.Run(() => GameCardCatalogUpdater.NeedsUpdate(gameRoot), cancellationToken);
 			if (updateCatalog)
 			{
 				PostBackgroundStatus("检测到游戏资源、Build 或账号变化，正在后台读取 card_name / card_indx / card_prop…");
 				Action<int, int, int> catalogProgress = CreateThrottledBackgroundProgress(250, (int done, int total, int found) => $"正在更新四语卡片目录：{done:N0}/{total:N0} Bundle · 已定位 {found}/9 项数据…");
-				await Task.Run(() => GameCardCatalogUpdater.UpdateIfNeeded(gameRoot, catalogProgress, cancellationToken), cancellationToken);
+				try { await Task.Run(() => GameCardCatalogUpdater.UpdateIfNeeded(gameRoot, catalogProgress, cancellationToken), cancellationToken); }
+				catch (OperationCanceledException) { throw; }
+				catch (Exception ex)
+				{
+					catalogWarning = ex.Message;
+					_lastCheckedResourceSignature = "";
+					PostBackgroundStatus("卡名更新暂不可用，继续独立检测新卡图：" + ex.Message);
+				}
 				cancellationToken.ThrowIfCancellationRequested();
 				if (!IsSameWorkspace(gameRoot, localRoot, index))
 				{
@@ -3383,7 +3417,7 @@ public sealed partial class MainForm : Form
 				UpdatePageHeader();
 				RenderList();
 			}
-			if (updateCatalog || index.BuiltInCardIndexVersion < 1)
+			if (updateCatalog || index.BuiltInCardIndexVersion < 2)
 			{
 				Action<int, int, int> missingCardProgress = CreateThrottledBackgroundProgress(250, (int done, int total, int added) => $"正在合并新卡图：{done:N0}/{total:N0} · 新增 {added:N0}…");
 				MissingCardScanResult missingCardScanResult = await Task.Run(() => IndexService.ScanMissingLocalCard(gameRoot, index, "0", missingCardProgress, cancellationToken), cancellationToken);
@@ -3392,19 +3426,17 @@ public sealed partial class MainForm : Form
 				{
 					return;
 				}
-				HashSet<string> known = index.Textures.Select((TexRef x) => $"{x.BundlePath}\0{x.AssetFileName}\0{x.PathId}").ToHashSet<string>(StringComparer.OrdinalIgnoreCase);
-				foreach (TexRef item in missingCardScanResult.Textures.Where((TexRef x) => known.Add($"{x.BundlePath}\0{x.AssetFileName}\0{x.PathId}")))
-				{
-					IndexService.NormalizeLocalCardCategory(item);
-					index.Textures.Add(item);
-					_textures.Add(item);
-					newCards++;
-				}
-				index.BuiltInCardIndexVersion = 1;
+				newCards = NewCardDiscovery.Merge(index, _textures, missingCardScanResult);
+				var observedTextures = index.Textures.ToArray();
 				await Task.Run(delegate
 				{
+					NewCardDiscovery.SaveObservedIds(observedTextures);
 					IndexService.Save(gameRoot, index);
 				}, cancellationToken);
+				_cardCatalog = CardCatalogService.LoadBestAvailable();
+				await ApplyOverFrameTagsAsync();
+				RefreshCategories();
+				RenderList();
 			}
 			PostBackgroundStatus("正在校验当前 Build 的官方怪兽动画索引；首次更新可能需要数分钟…");
 			Action<int, int, int> animationProgress = CreateThrottledBackgroundProgress(100, (int done, int total, int found) => $"正在更新动画索引：{done:N0}/{total:N0} Bundle · {found:N0} 项资源…");
@@ -3427,6 +3459,7 @@ public sealed partial class MainForm : Form
 			UpdatePageHeader();
 			RenderList();
 			_status.Text = $"当前 Build 增量更新完成：四语卡片 {_cardCatalog.Count:N0} 张，新卡图 {newCards:N0} 张，官方动画 {hashSet.Count:N0} 套（含同名异画映射 {hashSet2.Count:N0} 张）。";
+			if (catalogWarning.Length > 0) _status.Text += " 卡名待下载／重试：" + catalogWarning;
 		}
 		catch (OperationCanceledException)
 		{
@@ -3726,16 +3759,32 @@ public sealed partial class MainForm : Form
 				string text = $"准备导入“{modPackageInfo.Name}”。\n\nBundle：{modPackageInfo.BundleCount:N0} 个\n原始大小：{FormatSize(modPackageInfo.TotalSize)}\n目标账号：{Path.GetFileName(Path.GetDirectoryName(IndexService.FindLocalRoot(_gameRoot)))}\n\n请先退出游戏。LocalData 将映射到当前选中账号；每个文件首次覆盖前都会保存原版备份。继续？";
 				if (MessageBox.Show(this, text, "确认导入 Mod", MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation) == DialogResult.OK)
 				{
-					base.UseWaitCursor = true;
-					_status.Text = "正在校验并导入 Mod 包…";
+					string importRoot = _gameRoot;
 					TexRef[] importTextures = _textures.ToArray();
-					ModImportResult result = await Task.Run(() => _mods.Import(_gameRoot, dialog.FileName, importTextures));
+					Enabled = false; // Keep the account stable through import and recovery capture.
+					_backgroundRefreshCancellation?.Cancel();
+					base.UseWaitCursor = true;
+					if (_backgroundRefreshTask != null) await _backgroundRefreshTask;
+					_status.Text = "正在校验并导入 Mod 包…";
+					ModImportResult result = await Task.Run(() => _mods.Import(importRoot, dialog.FileName, importTextures));
 					await ReloadChangedBundlesAsync(result.ChangedBundlePaths);
 					await ApplyOverFrameTagsAsync();
 					await RefreshModFlagsAsync();
+					var recoveryPaths = result.ChangedBundlePaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+					foreach (TexRef imported in _textures.Where(t => recoveryPaths.Contains(t.BundlePath) && !BuiltInCardFrameCatalog.IsPackagedFrame(t)).ToArray())
+					{
+						try
+						{
+							byte[] png = await Task.Run(() => _engine.DecodePng(imported));
+							ushort? art = ushort.TryParse(imported.CardKey, out ushort card)
+								? _overFrames.ReadCached(importRoot).FirstOrDefault(m => m.CardId == card)?.ArtId : null;
+								await SaveRecoveryTextureAsync(importRoot, imported, png, art);
+						}
+						catch (Exception ex) { MessageBox.Show(this, Localizer.F("mods.recovery.saveWarning", ex.Message), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+					}
 					await Task.Run(delegate
 					{
-						IndexService.Save(_gameRoot, _textures);
+						IndexService.Save(importRoot, _textures);
 					});
 					RefreshCategories();
 					SetModsOnly(enabled: false);
@@ -3752,6 +3801,7 @@ public sealed partial class MainForm : Form
 			finally
 			{
 				base.UseWaitCursor = false;
+				if (!IsDisposed) Enabled = true;
 			}
 		}
 		finally

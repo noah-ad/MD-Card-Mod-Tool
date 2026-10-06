@@ -107,6 +107,10 @@ internal static class ModManagementTests
 		Write(cardA.BundlePath, original);
 		service.RefreshState(mirror, textures);
 		Assert(cardA.IsModded && cardA.ModModifiedAtUtc == recent, "Animation-only card is still listed");
+		var recoveryImages = service.ChangedTextureBundlePaths(mirror, textures);
+		Assert(!recoveryImages.Contains(Path.GetFullPath(cardA.BundlePath)) && !recoveryImages.Contains(Path.GetFullPath(gateLive))
+			&& animationPaths.All(x => !recoveryImages.Contains(Path.GetFullPath(x))) && recoveryImages.Contains(Path.GetFullPath(cardB.BundlePath)),
+			"Recovery snapshots only changed image Bundles, not animation/gate-only card flags");
 		string animationOnlyPackage = Path.Combine(output, "selected-animation-only.zip");
 		service.ExportSelected(mirror, textures, new[] { cardA }, animationOnlyPackage, true);
 		CheckScope(animationOnlyPackage, animationPaths.Append(gateLive));
@@ -184,10 +188,12 @@ internal static class ModManagementTests
 		BufferedListView list = GetField<BufferedListView>(form, "_list");
 		List<TexRef> visible = GetField<List<TexRef>>(form, "_visibleTextures");
 		Button export = GetField<Button>(form, "_exportSelectedModsButton");
+		Button recovery = GetField<Button>(form, "_recoverModsButton");
 		FlowLayoutPanel bar = GetField<FlowLayoutPanel>(form, "_modContextActions");
 		Assert(list.MultiSelect && list.Columns.Count == 5, "Mod-only multiselect and time column");
 		Assert(visible[0].SourceKind == "视觉资源", "Newest first includes all Mod categories");
 		Assert(!export.Enabled, "Empty selection disabled");
+		Assert(recovery.Visible && recovery.Enabled, "Recovery available without selecting a Mod");
 		list.SelectedIndices.Add(0);
 		list.SelectedIndices.Add(1);
 		Application.DoEvents();
@@ -207,6 +213,7 @@ internal static class ModManagementTests
 			Application.DoEvents();
 			Assert(list.Columns[3].Text.StartsWith(Localizer.T("mods.column.modified"), StringComparison.Ordinal), "Localized timestamp header");
 			Assert(export.Text == Localizer.F("action.mods.export.selectedCount", 2), "Localized selection action");
+			Assert(recovery.Text == Localizer.T("mods.recovery.action"), "Localized recovery action");
 			Assert(GetField<ComboBox>(form, "_modSortSelector").Items.Count == 3, "Localized sort choices");
 			CheckBar();
 		}
@@ -254,6 +261,13 @@ internal static class ModManagementTests
 		Invoke(form, "SetModsOnly", false);
 		Invoke(form, "RenderList");
 		Assert(!list.MultiSelect && list.Columns.Count == 4, "Ordinary resource view unchanged");
+		foreach (TexRef texture in textures) texture.IsModded = false;
+		Invoke(form, "RefreshCategories");
+		Invoke(form, "SelectGroup", "__mods__");
+		Application.DoEvents();
+		Assert(recovery.Visible && recovery.Enabled && visible.Count == 0, "Recovery remains available when the current Mod list is empty");
+		CheckBar();
+		CheckRecoveryProgress();
 		Console.WriteLine($"ui=True; languages=4; selectionPreserved=True; sortChoices=3; scaleTest=150%; systemScale={systemScale}; wrapping=True; searchScoped=True; ready=True");
 		form.Close();
 
@@ -263,8 +277,36 @@ internal static class ModManagementTests
 			bar.PerformLayout();
 			Application.DoEvents();
 			Control[] clipped = bar.Controls.Cast<Control>().Where(x => x.Visible && !bar.ClientRectangle.Contains(x.Bounds)).ToArray();
+			if (clipped.Length > 0 && bar.Parent?.Parent is TableLayoutPanel layout)
+				Console.WriteLine($"contextStyle={GetField<RowStyle>(form, "_resourceContextRow").Height}; actualStyle={layout.RowStyles[layout.GetRow(bar.Parent)].Height}; rowHeights={string.Join(",", layout.GetRowHeights())}; table={layout.ClientSize}; parent={bar.Parent.ClientSize}; preferred={bar.GetPreferredSize(new Size(bar.Width, 0))}; language={Localizer.Language}; rowType={layout.RowStyles[layout.GetRow(bar.Parent)].SizeType}");
 			Assert(clipped.Length == 0, "Mod actions clipped: " + string.Join(", ", clipped.Select(x => $"{x.Text}:{x.Bounds} in {bar.ClientRectangle}")));
+			Assert(bar.Parent!.ClientRectangle.Contains(bar.Bounds), $"Mod toolbar extends beyond its allocated table row: {bar.Bounds} in {bar.Parent.ClientRectangle}");
 			Assert(list.Columns.Cast<ColumnHeader>().Sum(x => x.Width) <= list.ClientSize.Width, "Mod column widths fit");
+		}
+		void CheckRecoveryProgress()
+		{
+			using var progress = new ModRecoveryProgressForm { ShowInTaskbar = false, Opacity = 0 };
+			progress.Show(form);
+			progress.Report(1, 3, "4007");
+			Application.DoEvents();
+			CheckBounds();
+			progress.AutoScaleDimensions = new SizeF(progress.DeviceDpi / 1.5f, progress.DeviceDpi / 1.5f);
+			progress.PerformAutoScale();
+			Application.DoEvents();
+			CheckBounds();
+			progress.Report(1, 3, "commit");
+			Application.DoEvents();
+			Assert(!GetField<Button>(progress, "_cancel").Enabled, "Commit disables cancellation");
+			progress.Close();
+			void CheckBounds()
+			{
+				var message = GetField<Label>(progress, "_message");
+				var indicator = GetField<ProgressBar>(progress, "_bar");
+				var cancel = GetField<Button>(progress, "_cancel");
+				Assert(progress.Controls.Cast<Control>().All(x => progress.ClientRectangle.Contains(x.Bounds))
+					&& message.Bottom <= indicator.Top && indicator.Bottom <= cancel.Top,
+					"Recovery progress controls fit at normal and 150% scaling");
+			}
 		}
 	}
 
@@ -293,7 +335,7 @@ internal static class ModManagementTests
 		using Stream stream = File.OpenRead(path);
 		return Convert.ToHexString(SHA256.HashData(stream));
 	}
-	private static T GetField<T>(MainForm form, string name) => (T)typeof(MainForm).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(form)!;
+	private static T GetField<T>(Form form, string name) => (T)form.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(form)!;
 	private static void SetField(MainForm form, string name, object? value) => typeof(MainForm).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(form, value);
 	private static void Invoke(MainForm form, string name, params object?[] args) => typeof(MainForm).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, args);
 	private static void Assert(bool success, string message)
