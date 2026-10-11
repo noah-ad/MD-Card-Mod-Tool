@@ -38,4 +38,11 @@
 
 x64 Debug／Release 构建与自包含发布成功，0 编译错误。全编译保留恢复源码的 366 个警告；发布另有源码未提供 FFmpeg 的提示，打包补入 2.0.27 同一二进制并核对 SHA-256：`228D7A8556258DE907FDB55F36850078EBC7680B84EC30D84EA02E99BEC1D1EB`。根目录保持 EXE + data，文件版本 2.0.28.0／产品版本 2.0.28。
 
-证据目录：工作区 `recovery-evidence/release-2.0.28`，最终 9 项退出状态见 `published-regressions/results.json`。游戏文件写入只在独立镜像执行，真实游戏 fixture 哈希及旧实际索引保持不变。游戏内显示、其他玩家电脑和真实跨屏 DPI 未验收，手机端不测试。本次没有上传 GitHub。
+证据目录：工作区 `recovery-evidence/release-2.0.28`，最终 9 项退出状态见 `published-regressions/results.json`。游戏文件写入只在独立镜像执行，真实游戏 fixture 哈希及旧实际索引保持不变。游戏内显示、其他玩家电脑和真实跨屏 DPI 未验收，手机端不测试。
+
+## GitHub 发布校验
+
+GitHub 预发行版使用上述已验证的完整 ZIP，不重新构建程序；发布提交仅更新在线说明及校验文件。包内文档保留本地验证时的快照，最新发布状态以 GitHub Release 为准。ZIP 共 184 项，根目录只有 EXE 与 data；全部条目长度及关键文件解压流哈希已校验，不含游戏图片、Bundle 或开发镜像。
+
+- `MD-Card-Mod-Tool-v2.0.28-test.zip`：147,361,008 字节，SHA-256 `C6166CD72B2F147B9A73C6000D0AFD2B03FEF06C339891F47D3AC370D016BE02`。
+- `MD卡图查看替换器.exe`：78,371,901 字节，SHA-256 `DDCE0A9A80BD17AFD7564439B30C144EE6D13A54F6ACA929F928D7217A4C5043`。
