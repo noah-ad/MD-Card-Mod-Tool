@@ -15,7 +15,7 @@
 	<DebugType>None</DebugType>
 	<DebugSymbols>false</DebugSymbols>
     <Nullable>enable</Nullable>
-    <Version>2.0.27</Version>
+    <Version>2.0.28</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationIcon>Resources\app-icon.ico</ApplicationIcon>
 	<Win32Icon>Resources\app-icon.ico</Win32Icon>
@@ -59,6 +59,8 @@
 	<None Include="..\TEST-REPORT-v2.0.26.md" Link="data\TEST-REPORT-v2.0.26.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 	<None Include="..\RELEASE-NOTES-v2.0.27.md" Link="data\RELEASE-NOTES-v2.0.27.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 	<None Include="..\TEST-REPORT-v2.0.27.md" Link="data\TEST-REPORT-v2.0.27.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\RELEASE-NOTES-v2.0.28.md" Link="data\RELEASE-NOTES-v2.0.28.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\TEST-REPORT-v2.0.28.md" Link="data\TEST-REPORT-v2.0.28.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 	<None Include="..\THIRD_PARTY_NOTICES.md" Link="data\licenses\THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 	<None Include="..\FLOOWAN-NOTICE.txt" Link="data\licenses\FLOOWAN-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\ASTELLAR-NOTICE.txt" Link="data\licenses\ASTELLAR-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

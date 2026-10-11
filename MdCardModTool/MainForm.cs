@@ -394,15 +394,18 @@ public sealed partial class MainForm : Form
 	private Icon? _windowIcon;
 
 	private readonly bool _allowBackgroundRefresh;
+	private readonly string _backgroundDataDirectory;
 
 	public MainForm()
 		: this(null)
 	{
 	}
 
-	internal MainForm(Action<MainForm>? beforeDpiInitialization, string? resourceRoot = null, bool backgroundRefresh = true)
+	internal MainForm(Action<MainForm>? beforeDpiInitialization, string? resourceRoot = null, bool backgroundRefresh = true, string? backgroundDataDirectory = null)
 	{
 		_allowBackgroundRefresh = backgroundRefresh;
+		_backgroundDataDirectory = backgroundDataDirectory ?? AppSettingsStore.AppDataRoot;
+		if (backgroundDataDirectory != null) _cardCatalog = CardCatalogService.LoadBestAvailable(backgroundDataDirectory);
 		SuspendLayout();
 		base.AutoScaleMode = AutoScaleMode.None;
 		Localizer.SetLanguage(_settings.Language);
@@ -3399,29 +3402,54 @@ public sealed partial class MainForm : Form
 		}
 		else
 		{
+			_lastCheckedResourceSignature = "";
 			_backgroundRefreshCancellation = new CancellationTokenSource();
-			_backgroundRefreshTask = RefreshGameBuildDataAsync(_gameRoot, _index, _backgroundRefreshCancellation.Token);
+			_backgroundRefreshTask = RefreshGameBuildDataAsync(_gameRoot, _index, _backgroundRefreshCancellation.Token, backgroundRefreshTask);
 		}
 	}
 
-	private async Task RefreshGameBuildDataAsync(string gameRoot, GameIndex index, CancellationToken cancellationToken)
+	private async Task RefreshGameBuildDataAsync(string gameRoot, GameIndex index, CancellationToken cancellationToken, Task? previousRefresh = null)
 	{
 		try
 		{
+			// A page/account change can cancel an in-flight worker. Wait for that
+			// worker before starting another one so catalog/index saves cannot race.
+			if (previousRefresh != null) await previousRefresh;
+			cancellationToken.ThrowIfCancellationRequested();
 			string localRoot = IndexService.FindLocalRoot(gameRoot) ?? "";
-			int newCards = 0;
+			if (!IsSameWorkspace(gameRoot, localRoot, index)) return;
+			string startedSignature = await Task.Run(() => GameResourceSignature(gameRoot, localRoot), cancellationToken);
+			// Always check illustration metadata first, independently of the name
+			// cache and animation scan. Publish new cards before slower stages.
+			PostBackgroundStatus("正在检测已下载的新卡图与变更资源…");
+			Action<int, int, int> missingCardProgress = CreateThrottledBackgroundProgress(250, (int done, int total, int added) => $"正在合并新卡图：{done:N0}/{total:N0} · 已读取 {added:N0}…");
+			MissingCardScanResult missingCards = await Task.Run(() => IndexService.ScanMissingLocalCard(gameRoot, index, "0", missingCardProgress, cancellationToken), cancellationToken);
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!IsSameWorkspace(gameRoot, localRoot, index)) return;
+			int newCards = NewCardDiscovery.Merge(index, _textures, missingCards);
+			var observedTextures = index.Textures.ToArray();
+			await Task.Run(() =>
+			{
+				NewCardDiscovery.SaveObservedIds(observedTextures, Path.Combine(_backgroundDataDirectory, "card-catalog-discovered-v1.json.br"));
+				if (_backgroundDataDirectory == AppSettingsStore.AppDataRoot) IndexService.Save(gameRoot, index);
+				else ModRecoveryStore.AtomicWrite(Path.Combine(_backgroundDataDirectory, "index.json"), JsonSerializer.SerializeToUtf8Bytes(index));
+			}, cancellationToken);
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!IsSameWorkspace(gameRoot, localRoot, index)) return;
+			_cardCatalog = CardCatalogService.LoadBestAvailable(_backgroundDataDirectory);
+			RefreshCategories();
+			RefreshSearchResults();
 			string catalogWarning = "";
-			bool updateCatalog = await Task.Run(() => GameCardCatalogUpdater.NeedsUpdate(gameRoot), cancellationToken);
+			bool updateCatalog = await Task.Run(() => GameCardCatalogUpdater.NeedsUpdate(gameRoot, _backgroundDataDirectory), cancellationToken);
 			if (updateCatalog)
 			{
 				PostBackgroundStatus("检测到游戏资源、Build 或账号变化，正在后台读取 card_name / card_indx / card_prop…");
 				Action<int, int, int> catalogProgress = CreateThrottledBackgroundProgress(250, (int done, int total, int found) => $"正在更新四语卡片目录：{done:N0}/{total:N0} Bundle · 已定位 {found}/9 项数据…");
-				try { await Task.Run(() => GameCardCatalogUpdater.UpdateIfNeeded(gameRoot, catalogProgress, cancellationToken), cancellationToken); }
+				try { await Task.Run(() => GameCardCatalogUpdater.UpdateIfNeeded(gameRoot, _backgroundDataDirectory, catalogProgress, cancellationToken), cancellationToken); }
 				catch (OperationCanceledException) { throw; }
 				catch (Exception ex)
 				{
 					catalogWarning = ex.Message;
-					_lastCheckedResourceSignature = "";
 					PostBackgroundStatus("卡名更新暂不可用，继续独立检测新卡图：" + ex.Message);
 				}
 				cancellationToken.ThrowIfCancellationRequested();
@@ -3429,31 +3457,12 @@ public sealed partial class MainForm : Form
 				{
 					return;
 				}
-				_cardCatalog = CardCatalogService.LoadBestAvailable();
+				_cardCatalog = CardCatalogService.LoadBestAvailable(_backgroundDataDirectory);
 				UpdatePageHeader();
-				RenderList();
+				RefreshSearchResults();
 			}
-			if (updateCatalog || index.BuiltInCardIndexVersion < 2)
-			{
-				Action<int, int, int> missingCardProgress = CreateThrottledBackgroundProgress(250, (int done, int total, int added) => $"正在合并新卡图：{done:N0}/{total:N0} · 新增 {added:N0}…");
-				MissingCardScanResult missingCardScanResult = await Task.Run(() => IndexService.ScanMissingLocalCard(gameRoot, index, "0", missingCardProgress, cancellationToken), cancellationToken);
-				cancellationToken.ThrowIfCancellationRequested();
-				if (!IsSameWorkspace(gameRoot, localRoot, index))
-				{
-					return;
-				}
-				newCards = NewCardDiscovery.Merge(index, _textures, missingCardScanResult);
-				var observedTextures = index.Textures.ToArray();
-				await Task.Run(delegate
-				{
-					NewCardDiscovery.SaveObservedIds(observedTextures);
-					IndexService.Save(gameRoot, index);
-				}, cancellationToken);
-				_cardCatalog = CardCatalogService.LoadBestAvailable();
-				await ApplyOverFrameTagsAsync();
-				RefreshCategories();
-				RenderList();
-			}
+			await ApplyOverFrameTagsAsync();
+			cancellationToken.ThrowIfCancellationRequested();
 			PostBackgroundStatus("正在校验当前 Build 的官方怪兽动画索引；首次更新可能需要数分钟…");
 			Action<int, int, int> animationProgress = CreateThrottledBackgroundProgress(100, (int done, int total, int found) => $"正在更新动画索引：{done:N0}/{total:N0} Bundle · {found:N0} 项资源…");
 			PortableMonsterAnimationIndex index2 = await Task.Run(() => MonsterAnimationIndexService.EnsureCurrentIndex(gameRoot, animationProgress, cancellationToken), cancellationToken);
@@ -3476,6 +3485,14 @@ public sealed partial class MainForm : Form
 			RenderList();
 			_status.Text = $"当前 Build 增量更新完成：四语卡片 {_cardCatalog.Count:N0} 张，新卡图 {newCards:N0} 张，官方动画 {hashSet.Count:N0} 套（含同名异画映射 {hashSet2.Count:N0} 张）。";
 			if (catalogWarning.Length > 0) _status.Text += " 卡名待下载／重试：" + catalogWarning;
+			if (missingCards.PendingBundles.Count > 0) _status.Text += $" {missingCards.PendingBundles.Count:N0} 个卡图 Bundle 未能读取，保留原索引并自动重试。";
+			string completedSignature = await Task.Run(() => GameResourceSignature(gameRoot, localRoot), cancellationToken);
+			cancellationToken.ThrowIfCancellationRequested();
+			// Only acknowledge a stable, fully completed attempt. If parsing fails,
+			// a download changes mid-scan, or a page change cancels it, the timer
+			// must retry even when no further file/build metadata changes occur.
+			if (IsSameWorkspace(gameRoot, localRoot, index) && catalogWarning.Length == 0 && missingCards.PendingBundles.Count == 0 && startedSignature == completedSignature)
+				_lastCheckedResourceSignature = completedSignature;
 		}
 		catch (OperationCanceledException)
 		{

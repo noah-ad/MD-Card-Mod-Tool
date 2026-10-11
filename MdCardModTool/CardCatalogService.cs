@@ -45,7 +45,9 @@ public sealed class CardCatalogService
 		});
 	}
 
-	public static CardCatalogService LoadBestAvailable()
+	public static CardCatalogService LoadBestAvailable() => LoadBestAvailable(AppSettingsStore.AppDataRoot);
+
+	internal static CardCatalogService LoadBestAvailable(string cacheDirectory)
 	{
 		List<CardCatalogEntry> list = new List<CardCatalogEntry>();
 		foreach (string item in BundledCandidates())
@@ -66,7 +68,7 @@ public sealed class CardCatalogService
 			{
 			}
 		}
-		string extraCatalogPath = GameCardCatalogUpdater.ExtraCatalogPath;
+		string extraCatalogPath = Path.Combine(cacheDirectory, "card-catalog-extra-v2.json.br");
 		if (File.Exists(extraCatalogPath))
 		{
 			try
@@ -82,9 +84,10 @@ public sealed class CardCatalogService
 			{
 			}
 		}
-		if (File.Exists(NewCardDiscovery.DiscoveredCatalogPath))
+		string discoveredCatalogPath = Path.Combine(cacheDirectory, "card-catalog-discovered-v1.json.br");
+		if (File.Exists(discoveredCatalogPath))
 		{
-			try { list = MergeGameCatalogs(list, Read(NewCardDiscovery.DiscoveredCatalogPath)).ToList(); }
+			try { list = MergeGameCatalogs(list, Read(discoveredCatalogPath)).ToList(); }
 			catch (Exception ex) when (ex is IOException or InvalidDataException or JsonException) { }
 		}
 		return new CardCatalogService(list);

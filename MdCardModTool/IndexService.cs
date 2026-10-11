@@ -230,24 +230,31 @@ public static class IndexService
 		HashSet<string> knownBundles = (from x in index.Textures
 			where CardTextureRules.IsCardSource(x.SourceKind) && IsDirectCardIllustration(x)
 			select Path.GetFullPath(x.BundlePath)).ToHashSet<string>(StringComparer.OrdinalIgnoreCase);
-		List<(string Path, string Root)> files = ((cardKey == "0") ? (from path in EnumerateDownloadedCardIllustrationBundles(localRoot)
-			where !index.CardBundleScanStamps.TryGetValue(Path.GetFullPath(path), out string stamp) || stamp != BundleScanStamp(path)
+		// A dictionary cache hit must not hide a card downloaded afterwards, or a
+		// bundle whose old scan stamp survived after its texture was lost.
+		bool NeedsScan(string path) => !knownBundles.Contains(Path.GetFullPath(path))
+			|| !index.CardBundleScanStamps.TryGetValue(Path.GetFullPath(path), out string stamp) || stamp != BundleScanStamp(path);
+		bool NeedsStreamingScan(string path) => CardBundleIdentity.Find(path).Length > 0 ? NeedsScan(path)
+			: !index.CardBundleScanStamps.TryGetValue(Path.GetFullPath(path), out string stamp) || stamp != BundleScanStamp(path);
+		List<(string Path, string Root)> files = ((cardKey == "0") ? (from path in EnumerateDownloadedCardIllustrationBundles(localRoot, includeIncomplete: true)
+			where NeedsScan(path)
 			select (Path: path, Root: localRoot)).ToList() : (from path in CardIllustrationBundleCandidates(localRoot, cardKey)
 			where !knownBundles.Contains(Path.GetFullPath(path))
 			select (Path: path, Root: localRoot)).ToList());
 		if (Directory.Exists(streamingRoot))
 		{
 			IEnumerable<string> candidates = cardKey == "0"
-				? Directory.EnumerateFiles(streamingRoot, "*", SearchOption.AllDirectories).Where(IsUnityBundle)
+				? Directory.EnumerateFiles(streamingRoot, "*", SearchOption.AllDirectories).Where(path => IsUnityBundle(path) || CardBundleIdentity.Find(path).Length > 0)
 				: CardIllustrationBundleCandidates(streamingRoot, cardKey);
 			files.AddRange(from path in candidates
-				where cardKey == "0" ? !index.CardBundleScanStamps.TryGetValue(Path.GetFullPath(path), out string stamp) || stamp != BundleScanStamp(path) : !knownBundles.Contains(Path.GetFullPath(path))
+				where cardKey == "0" ? NeedsStreamingScan(path) : !knownBundles.Contains(Path.GetFullPath(path))
 				select (Path: path, Root: streamingRoot));
 		}
 		int found = 0;
 		int done = 0;
 		ConcurrentBag<TexRef> added = new ConcurrentBag<TexRef>();
 		ConcurrentDictionary<string, string> stamps = new(StringComparer.OrdinalIgnoreCase);
+		ConcurrentBag<string> pending = new();
 		ModEngine engine = new ModEngine();
 		Parallel.ForEach(files, new ParallelOptions
 		{
@@ -255,12 +262,17 @@ public static class IndexService
 			CancellationToken = cancellationToken
 		}, delegate((string Path, string Root) file, ParallelLoopState state)
 		{
+			bool expectedCard = CardBundleIdentity.Find(file.Path).Length > 0 || knownBundles.Contains(Path.GetFullPath(file.Path));
 			try
 			{
 				string sourceKind = file.Root.Equals(streamingRoot, StringComparison.OrdinalIgnoreCase) ? "游戏内图片" : "本地卡图";
 				string before = BundleScanStamp(file.Path);
 				var scanned = engine.ScanBundle(file.Path, file.Root, sourceKind, includeDependencies: false).Textures.Where(IsDirectCardIllustration).ToArray();
-				if (before != BundleScanStamp(file.Path)) return; // Incomplete downloads are retried.
+				if (before != BundleScanStamp(file.Path) || (expectedCard && scanned.Length == 0))
+				{
+					pending.Add(file.Path);
+					return;
+				}
 				stamps[Path.GetFullPath(file.Path)] = before;
 				foreach (TexRef item in scanned)
 				{
@@ -272,8 +284,10 @@ public static class IndexService
 					}
 				}
 			}
+			catch (OperationCanceledException) { throw; }
 			catch
 			{
+				if (expectedCard) pending.Add(file.Path);
 			}
 			finally
 			{
@@ -292,7 +306,8 @@ public static class IndexService
 			ScannedBundles = done,
 			TotalBundles = files.Count,
 			Found = (Volatile.Read(in found) != 0),
-			ScanStamps = new Dictionary<string, string>(stamps, StringComparer.OrdinalIgnoreCase)
+			ScanStamps = new Dictionary<string, string>(stamps, StringComparer.OrdinalIgnoreCase),
+			PendingBundles = pending.Distinct(StringComparer.OrdinalIgnoreCase).ToList()
 		};
 	}
 
@@ -355,7 +370,7 @@ public static class IndexService
 		}
 	}
 
-	private static IEnumerable<string> EnumerateDownloadedCardIllustrationBundles(string localRoot, IReadOnlyCollection<FileInfo>? localFiles = null)
+	private static IEnumerable<string> EnumerateDownloadedCardIllustrationBundles(string localRoot, IReadOnlyCollection<FileInfo>? localFiles = null, bool includeIncomplete = false)
 	{
 		if (localFiles == null)
 		{
@@ -364,7 +379,7 @@ public static class IndexService
 		}
 		foreach (FileInfo file in localFiles)
 		{
-			if (CardBundleIdentity.Find(file.FullName).Length > 0 && IsUnityBundle(file.FullName)) yield return file.FullName;
+			if (CardBundleIdentity.Find(file.FullName).Length > 0 && (includeIncomplete || IsUnityBundle(file.FullName))) yield return file.FullName;
 		}
 	}
 

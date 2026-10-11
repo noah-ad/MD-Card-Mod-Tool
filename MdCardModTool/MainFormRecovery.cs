@@ -132,6 +132,8 @@ public sealed partial class MainForm
 
 	// Resource downloads can happen without a Steam build change. Check metadata in
 	// the background, coalesce refreshes, and never write a Mod automatically.
+	private static string GameResourceSignature(string root, string local) => PortableIndexService.GetGameBuildId(root) + ":" + GameCardCatalogUpdater.CaptureResourceFingerprint(local, IndexService.StreamingRoot(root));
+
 	private async Task CheckGameResourceChangesAsync()
 	{
 		if (_checkingGameResources || _recoveringMods || !Enabled || UseWaitCursor || PausesBackgroundRefresh(_currentPage) || !_allowBackgroundRefresh || _gameRoot == null || _index == null
@@ -142,11 +144,10 @@ public sealed partial class MainForm
 		var index = _index;
 		try
 		{
-			string signature = await Task.Run(() => PortableIndexService.GetGameBuildId(root) + ":" + GameCardCatalogUpdater.CaptureResourceFingerprint(local, IndexService.StreamingRoot(root)));
+			string signature = await Task.Run(() => GameResourceSignature(root, local));
 			if (!IsSameWorkspace(root, local, index)) return;
 			if (signature != _lastCheckedResourceSignature)
 			{
-				_lastCheckedResourceSignature = signature;
 				StartGameBuildRefresh();
 			}
 		}

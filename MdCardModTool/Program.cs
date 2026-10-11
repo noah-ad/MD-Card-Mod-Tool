@@ -35,6 +35,19 @@ internal static class Program
 	private static void Main(string[] args)
 	{
 		ApplicationConfiguration.Initialize();
+		if (args.Length == 3 && args[0] == "--test-new-card-refresh")
+		{
+			WindowsFormsSynchronizationContext.AutoInstall = false;
+			SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+			Control.CheckForIllegalCrossThreadCalls = true;
+			NewCardRefreshTests.Run(args[1], args[2]);
+			return;
+		}
+		if (args.Length == 4 && args[0] == "--audit-card-update")
+		{
+			NewCardRefreshTests.Audit(args[1], args[2], args[3]);
+			return;
+		}
 		if (args.Length == 3 && args[0] == "--test-mod-update-recovery")
 		{
 			ModUpdateRecoveryTests.Run(args[1], args[2]);

@@ -195,25 +195,37 @@ public static class GameCardCatalogUpdater
 		var results = new ConcurrentDictionary<string, DictionaryBundle>(StringComparer.OrdinalIgnoreCase);
 		int done = 0;
 		int found = 0;
-		Parallel.ForEach(files, new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 4, 2, 4), CancellationToken = cancellationToken }, file =>
+		try
 		{
-			try
+			Parallel.ForEach(files, new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 4, 2, 4), CancellationToken = cancellationToken }, file =>
 			{
-				string stamp = IndexService.BundleScanStamp(file);
-				if (cached.Bundles.TryGetValue(file, out var hit) && hit.Stamp == stamp) results[file] = hit;
-				else
+				try
 				{
-					string[] containers = CardBundleIdentity.Find(file).Length > 0 || !IsUnityBundle(file) ? Array.Empty<string>()
-						: new ModEngine().ReadAssetBundleContainerPaths(file).Select(x => x.Replace('\\', '/').ToLowerInvariant())
-							.Where(x => Path.GetFileName(x) is "card_name.bytes" or "card_indx.bytes" or "card_prop.bytes").ToArray();
-					if (stamp == IndexService.BundleScanStamp(file)) results[file] = new DictionaryBundle(stamp, containers);
+					string stamp = IndexService.BundleScanStamp(file);
+					if (cached.Bundles.TryGetValue(file, out var hit) && hit.Stamp == stamp) results[file] = hit;
+					else
+					{
+						string[] containers = CardBundleIdentity.Find(file).Length > 0 || !IsUnityBundle(file) ? Array.Empty<string>()
+							: new ModEngine().ReadAssetBundleContainerPaths(file).Select(x => x.Replace('\\', '/').ToLowerInvariant())
+								.Where(x => Path.GetFileName(x) is "card_name.bytes" or "card_indx.bytes" or "card_prop.bytes").ToArray();
+						if (stamp == IndexService.BundleScanStamp(file)) results[file] = new DictionaryBundle(stamp, containers);
+					}
+					if (results.TryGetValue(file, out var value) && value.Containers.Length > 0) Interlocked.Add(ref found, value.Containers.Length);
 				}
-				if (results.TryGetValue(file, out var value) && value.Containers.Length > 0) Interlocked.Add(ref found, value.Containers.Length);
-			}
-			catch (OperationCanceledException) { throw; }
-			catch (Exception ex) when (ex is not OutOfMemoryException) { }
-			finally { int count = Interlocked.Increment(ref done); if (count % 100 == 0 || count == files.Length) progress?.Invoke(count, files.Length, Volatile.Read(ref found)); }
-		});
+				catch (OperationCanceledException) { throw; }
+				catch (Exception ex) when (ex is not OutOfMemoryException) { }
+				finally { int count = Interlocked.Increment(ref done); if (count % 100 == 0 || count == files.Length) progress?.Invoke(count, files.Length, Volatile.Read(ref found)); }
+			});
+		}
+		catch (OperationCanceledException)
+		{
+			// Discovery is read-only and stamp-validated. Retain completed work,
+			// not a successful catalog state, so switching to the animation page
+			// cannot repeatedly throw away a lengthy first-installation scan.
+			SaveDiscoveryCheckpoint();
+			throw;
+		}
+		SaveDiscoveryCheckpoint();
 		cancellationToken.ThrowIfCancellationRequested();
 		var observations = results.Where(x => x.Value.Containers.Length > 0).OrderBy(x => File.GetLastWriteTimeUtc(x.Key)).ToArray();
 		var familyKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -250,8 +262,6 @@ public static class GameCardCatalogUpdater
 				catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException) { diagnostics.Add(ex.Message); }
 			}
 		}
-		Directory.CreateDirectory(cacheDirectory);
-		ModRecoveryStore.AtomicWrite(cachePath, JsonSerializer.SerializeToUtf8Bytes(new DictionaryDiscoveryCache { Bundles = new Dictionary<string, DictionaryBundle>(results, StringComparer.OrdinalIgnoreCase) }));
 		if (merged.Count == 0)
 		{
 			// Support older unversioned installations, but never fall back to mixing
@@ -264,6 +274,14 @@ public static class GameCardCatalogUpdater
 		currentFamilyVersion = families.OrderByDescending(x => x.MaxId).ThenByDescending(x => x.Count)
 			.ThenByDescending(x => x.Modified).ThenBy(x => x.Version, StringComparer.Ordinal).First().Version;
 		return merged;
+
+		void SaveDiscoveryCheckpoint()
+		{
+			var bundles = new Dictionary<string, DictionaryBundle>(cached.Bundles, StringComparer.OrdinalIgnoreCase);
+			foreach (var result in results) bundles[result.Key] = result.Value;
+			Directory.CreateDirectory(cacheDirectory);
+			ModRecoveryStore.AtomicWrite(cachePath, JsonSerializer.SerializeToUtf8Bytes(new DictionaryDiscoveryCache { Bundles = bundles }));
+		}
 	}
 
 	private static IReadOnlyList<CardCatalogEntry> ExtractLegacy(string gameRoot, Action<int, int, int>? progress, CancellationToken cancellationToken)
