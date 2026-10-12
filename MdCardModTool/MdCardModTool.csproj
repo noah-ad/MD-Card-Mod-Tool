@@ -47,24 +47,24 @@
     <None Update="DIRECTXTEX-NOTICE.txt" Link="data\licenses\DIRECTXTEX-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="FFMPEG-NOTICE.txt" Link="data\licenses\FFMPEG-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\README.md" Link="data\README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-	<None Include="..\RELEASE-NOTES-v2.0.21.md" Link="data\RELEASE-NOTES-v2.0.21.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-	<None Include="..\RELEASE-NOTES-v2.0.22.md" Link="data\RELEASE-NOTES-v2.0.22.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-	<None Include="..\RELEASE-NOTES-v2.0.23.md" Link="data\RELEASE-NOTES-v2.0.23.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-	<None Include="..\TEST-REPORT-v2.0.23.md" Link="data\TEST-REPORT-v2.0.23.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-	<None Include="..\RELEASE-NOTES-v2.0.24.md" Link="data\RELEASE-NOTES-v2.0.24.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-	<None Include="..\TEST-REPORT-v2.0.24.md" Link="data\TEST-REPORT-v2.0.24.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-	<None Include="..\RELEASE-NOTES-v2.0.25.md" Link="data\RELEASE-NOTES-v2.0.25.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-	<None Include="..\TEST-REPORT-v2.0.25.md" Link="data\TEST-REPORT-v2.0.25.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-	<None Include="..\RELEASE-NOTES-v2.0.26.md" Link="data\RELEASE-NOTES-v2.0.26.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-	<None Include="..\TEST-REPORT-v2.0.26.md" Link="data\TEST-REPORT-v2.0.26.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-	<None Include="..\RELEASE-NOTES-v2.0.27.md" Link="data\RELEASE-NOTES-v2.0.27.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-	<None Include="..\TEST-REPORT-v2.0.27.md" Link="data\TEST-REPORT-v2.0.27.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-	<None Include="..\RELEASE-NOTES-v2.0.28.md" Link="data\RELEASE-NOTES-v2.0.28.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-	<None Include="..\TEST-REPORT-v2.0.28.md" Link="data\TEST-REPORT-v2.0.28.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-	<None Include="..\THIRD_PARTY_NOTICES.md" Link="data\licenses\THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-	<None Include="..\FLOOWAN-NOTICE.txt" Link="data\licenses\FLOOWAN-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="..\ASTELLAR-NOTICE.txt" Link="data\licenses\ASTELLAR-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="..\TEST-REPORT.md" Link="data\TEST-REPORT.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\docs\releases\RELEASE-NOTES-v2.0.21.md" Link="data\RELEASE-NOTES-v2.0.21.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\docs\releases\RELEASE-NOTES-v2.0.22.md" Link="data\RELEASE-NOTES-v2.0.22.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\docs\releases\RELEASE-NOTES-v2.0.23.md" Link="data\RELEASE-NOTES-v2.0.23.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\docs\testing\TEST-REPORT-v2.0.23.md" Link="data\TEST-REPORT-v2.0.23.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\docs\releases\RELEASE-NOTES-v2.0.24.md" Link="data\RELEASE-NOTES-v2.0.24.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\docs\testing\TEST-REPORT-v2.0.24.md" Link="data\TEST-REPORT-v2.0.24.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\docs\releases\RELEASE-NOTES-v2.0.25.md" Link="data\RELEASE-NOTES-v2.0.25.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\docs\testing\TEST-REPORT-v2.0.25.md" Link="data\TEST-REPORT-v2.0.25.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\docs\releases\RELEASE-NOTES-v2.0.26.md" Link="data\RELEASE-NOTES-v2.0.26.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\docs\testing\TEST-REPORT-v2.0.26.md" Link="data\TEST-REPORT-v2.0.26.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\docs\releases\RELEASE-NOTES-v2.0.27.md" Link="data\RELEASE-NOTES-v2.0.27.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\docs\testing\TEST-REPORT-v2.0.27.md" Link="data\TEST-REPORT-v2.0.27.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\docs\releases\RELEASE-NOTES-v2.0.28.md" Link="data\RELEASE-NOTES-v2.0.28.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\docs\testing\TEST-REPORT-v2.0.28.md" Link="data\TEST-REPORT-v2.0.28.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\docs\licenses\THIRD_PARTY_NOTICES.md" Link="data\licenses\THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\docs\licenses\FLOOWAN-NOTICE.txt" Link="data\licenses\FLOOWAN-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\docs\licenses\ASTELLAR-NOTICE.txt" Link="data\licenses\ASTELLAR-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\docs\testing\TEST-REPORT.md" Link="data\TEST-REPORT.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 	<None Include="..\LICENSE" Link="data\LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 	<None Update="使用说明-v2.0.txt" Link="data\使用说明-v2.0.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="启动 MD卡图查看替换器.bat" Link="data\启动 MD卡图查看替换器.bat" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

@@ -11,6 +11,15 @@
 - 清理范围仅为 GitHub Release 记录及其远端附件。不要删除本地程序目录、源码、用户 Mod、恢复库、游戏文件或备份，也不要将归档安装包提交到源码仓库。
 - 已发布的安装包不要因修改说明而无谓重建或改名；保持字节和校验值可追溯。发布后核验 Latest、发行状态、目标提交、附件长度／哈希及 README 下载入口。
 
+## 仓库布局
+
+用户于 2026-10-12 要求清理仓库首页的历史文件列表。
+
+- 根目录只保留源码目录 `MdCardModTool`、构建工具 `tools`、文档目录 `docs`、`.gitignore`、`AGENTS.md`、`LICENSE` 和 `README.md`。
+- 新发行说明放在 `docs/releases/RELEASE-NOTES-v<版本号>.md`，测试报告放在 `docs/testing/TEST-REPORT-v<版本号>.md`，校验文件放在 `docs/checksums`；不要继续在根目录堆放版本文件。
+- 恢复记录放在 `docs/recovery`，第三方署名与许可索引放在 `docs/licenses`。更新 README、文档入口和项目文件的源路径；保留发布包的 `data` 布局及许可文件位置。
+- 仓库文档归档与上述 GitHub Release 清理是两项独立操作；文档整理不重建既有安装包、不改标签、不删除历史内容。
+
 ## 保持既有边界
 
 - 手机端兼容继续搁置，不开发或测试。
