@@ -1,20 +1,20 @@
-# MD Card Mod Tool 2.0.28
+# MD Card Mod Tool 2.0.29
 
 面向《游戏王 Master Duel》的 Windows x64 资源查看与 Mod 制作工具，支持四语卡名搜索、卡图与超框编辑、视觉资源替换、官方怪兽动画替换及 Mod 管理。
 
-当前版本修复新卡自动发现与中断重试，补充 22730「四天之龙 暗反叛超量龙」检索。新版内容与已知限制见 [2.0.28 说明](docs/releases/RELEASE-NOTES-v2.0.28.md)及[验证记录](docs/testing/TEST-REPORT-v2.0.28.md)；历史版本、测试与恢复资料统一放在[文档目录](docs/README.md)。
+2.0.29 修复动画依赖与多页图集漏找，并在还原图片 Mod 时同步恢复该卡原始超框登记。14741「原始生命态 尼比鲁」等能正确识别为官方原生 Timeline，但本版仍不支持其播放／替换；不再误报没有动画。详见 [2.0.29 说明](docs/releases/RELEASE-NOTES-v2.0.29.md)和[验证记录](docs/testing/TEST-REPORT-v2.0.29.md)。历史资料统一放在[文档目录](docs/README.md)。
 
 ## 下载
 
-下载 [最新发行版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/latest)（当前为 [2.0.28](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.28)，[完整 ZIP](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/download/v2.0.28/MD-Card-Mod-Tool-v2.0.28-test.zip)），或使用 [2.0.19 回退版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.19)。建议解压到独立目录，根目录只有 `MD卡图查看替换器.exe` 与 `data` 文件夹，直接运行 EXE 即可。不要删除游戏目录中的 `_MD卡图备份`。若文件带有 Windows 下载标记，可先运行 `data\首次启动-解除下载封锁.bat`。包的 SHA-256 见 [校验文件](docs/checksums/SHA256SUMS-v2.0.28.txt)；已上传的 ZIP 保留原文件名和字节，不破坏已有下载链接。随包说明保留测试时的快照，最新发布状态以本页和 GitHub Release 为准。
+下载 [最新发行版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/latest)（当前为 [2.0.29](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.29)，[完整 ZIP](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/download/v2.0.29/MD-Card-Mod-Tool-v2.0.29-win-x64.zip)），或使用 [2.0.28 回退版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.28)。建议解压到独立目录，根目录只有 `MD卡图查看替换器.exe` 与 `data` 文件夹，直接运行 EXE 即可。不要删除游戏目录中的 `_MD卡图备份`。若文件带有 Windows 下载标记，可先运行 `data\首次启动-解除下载封锁.bat`。包的 SHA-256 见 [校验文件](docs/checksums/SHA256SUMS-v2.0.29.txt)；已上传的 ZIP 保留原文件名和字节，不破坏已有下载链接。随包说明保留测试时的快照，最新发布状态以本页和 GitHub Release 为准。
 
 以后版本更新默认同步源码、README 和 GitHub 普通发行版，并标记为 Latest，不再堆叠预发行测试版。发行列表只保留最新版与一个回退版；旧发行版清理前在维护电脑归档安装包和说明，Git 标签与源码历史保留。本地程序、用户 Mod、恢复库及游戏备份不属于发行版清理范围。
 
 ## Mod 导出与导入（2.0.6／2.0.24／2.0.27）
 
-卡片资源 → 左侧“Mod 管理”：直接点击多行即可勾选，再点取消，然后点击“导出选中（数量）”。可使用 Shift 连选，或点击“全选当前列表”／“清空选择”；列表获得焦点后 Ctrl+A 全选、Esc 清空、空格切换当前行。全选只包含当前搜索及分类筛选下可见的 Mod；搜索或分类切换会移除不再可见的选择，避免暗中导出隐藏条目。原有“导出全部 Mod”继续保留。排序菜单和修改时间列默认最新在前；点击时间列可切换升降序，排序偏好会保存。Mod 搜索只在已修改资源中进行，排序与语言切换后不会丢失仍在列表中的选择。预览和编辑需要只选中一项，多选用于批量导出。
+卡片资源 → 左侧“Mod 管理”：直接点击多行即可勾选，再点取消，然后点击“导出选中（数量）”。可使用 Shift 连选，或点击“全选当前列表”／“清空选择”；列表获得焦点后 Ctrl+A 全选、Esc 清空、空格切换当前行。全选只包含当前搜索及分类筛选下可见的 Mod；搜索或分类切换会移除不再可见的选择，避免暗中导出隐藏条目。原有“导出全部 Mod”继续保留。排序菜单和修改时间列默认最新在前；点击时间列可切换升降序，排序偏好会保存。Mod 搜索只在已修改资源中进行，排序与语言切换后不会丢失仍在列表中的选择。预览和编辑需要只选中一项，多选可批量导出或点击“还原所选”。
 
-选中卡片会带上其已修改的动画 Bundle 和超框登记，已还原的文件不导出。导出以完整 Bundle 为单位：共享图集或超框登记表中其他卡的修改可能一起带上，不能保证共享文件内部只保留单卡改动。时间取自资源文件，关联动画取最新时间；复制／导入或外部修改后的时间不等于原创制作时间。“还原所选”仍还原图片 Bundle，动画需在怪兽动画页还原。
+选中卡片会带上其已修改的动画 Bundle 和超框登记，已还原的文件不导出。导出以完整 Bundle 为单位：共享图集或超框登记表中其他卡的修改可能一起带上，不能保证共享文件内部只保留单卡改动。时间取自资源文件，关联动画取最新时间；复制／导入或外部修改后的时间不等于原创制作时间。“还原所选”同时恢复图片 Bundle 和所选卡原本的超框登记：后来添加的超框关闭，官方原生映射保留，其他卡登记不变。贴图与登记表验证后一起提交，失败一起回滚；动画仍需在怪兽动画页还原。
 
 在卡片资源的“我的 Mod”中选择“导出全部 Mod”，保存类型可选：
 
@@ -62,6 +62,8 @@
 
 工具可读取尚未替换的原版六 Bundle，在本机预览 Spine 4.2 动画。渲染器是独立的只读实现，不捆绑官方 Spine Runtime。2.0.5 修复 90°／180°／270° 图集 UV、旋转区域宽高与 mesh 裁边偏移。复杂约束、物理时间线等仍需逐资源核对，不能把“能渲染非空帧”视为与游戏逐帧一致的证明。
 
+官方演出与 Spine 替换资格分开识别：原生 Timeline 卡（本机为 14741、23487、23488）会显示已找到官方演出并提供资源诊断，但当前不能播放／替换。其他未下载或缺页的资源显示未定位／不完整，不断言没有官方演出。后续图集页按 Atlas 中的真实页名补找；旧缓存同 Build 下也会升级查找规则。
+
 “怪兽动画 → 使用其他卡动画”可按卡号／四语卡名选择已安装的来源动画，预览后完整移植 HD/SD 图集、骨骼与时间线，不混用两张卡的关节贴图。目标卡必须已有完整官方演出；来源与目标 Spine 主次版本必须兼容。制作先在临时副本进行，重新打开检查后提交；首次备份可通过“还原该卡动画”恢复。此功能已通过临时真实 Bundle 测试，尚未执行真实游戏召唤验收。
 
 导入 GIF、视频或图片序列只用于替换一张已经拥有完整官方召唤演出的怪兽。写入前会确认同一地区的 HighEnd_HD／SD Texture、Atlas、Skeleton 均完整，并在失败时回滚；没有官方演出的怪兽不能启用导入或写入。
@@ -79,7 +81,7 @@ dotnet build '.\MdCardModTool\MdCardModTool.csproj' -c Release -p:Platform=x64
 
 dotnet publish '.\MdCardModTool\MdCardModTool.csproj' `
   -c Release -r win-x64 -p:Platform=x64 --self-contained true `
-  -o '.\发布\MD-Card-Mod-Tool-v2.0.28-test'
+  -o '.\发布\MD-Card-Mod-Tool-v2.0.29-win-x64'
 ```
 
 发布包根目录只允许包含 EXE 与 `data`。`data` 内必须包含 `classdata.tpk`、预绑定卡图／动画索引、Astellar 超框模板、Floowan 卡框、`tools/texconv.exe`、`tools/ffmpeg.exe`、说明与第三方许可文件。

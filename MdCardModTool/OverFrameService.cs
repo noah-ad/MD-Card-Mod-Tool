@@ -30,7 +30,7 @@ public sealed class OverFrameService
 			try
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				string text = File.ReadAllText(path).Trim();
+				string text = File.ReadLines(path).FirstOrDefault()?.Trim() ?? "";
 				if (File.Exists(text) && ModRecoveryStore.IsUnder(text, localRoot))
 				{
 					TextAssetRef textAssetRef = _engine.FindTextAssetFast(text, localRoot, "of_card_asset");
@@ -125,20 +125,28 @@ public sealed class OverFrameService
 			return null;
 		}
 		string path = GateCachePath(text);
-		if (!File.Exists(path))
+		string folder = Path.GetDirectoryName(path)!;
+		// Earlier builds used different path casing / cache keys and some wrote a
+		// build ID on line two. Reuse only a cache that resolves inside this account
+		// and matches the currently known dictionary family.
+		var candidates = new[] { path }.Concat(Directory.Exists(folder)
+			? Directory.EnumerateFiles(folder, "overframe_gate_*.txt") : Array.Empty<string>()).Distinct(StringComparer.OrdinalIgnoreCase);
+		foreach (string candidate in candidates)
 		{
-			return null;
+			try
+			{
+				if (!File.Exists(candidate)) continue;
+				string location = File.ReadLines(candidate).FirstOrDefault()?.Trim() ?? "";
+				if (File.Exists(location) && ModRecoveryStore.IsUnder(location, text)
+					&& MatchesFamily(location, GameCardCatalogUpdater.ReadCurrentFamilyVersion(gameRoot, _catalogCacheDirectory)))
+				{
+					var gate = _engine.FindTextAssetFast(location, text, GateName);
+					if (gate != null) return gate;
+				}
+			}
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { }
 		}
-		try
-		{
-			string text2 = File.ReadAllText(path).Trim();
-			return File.Exists(text2) && ModRecoveryStore.IsUnder(text2, text) && MatchesFamily(text2, GameCardCatalogUpdater.ReadCurrentFamilyVersion(gameRoot, _catalogCacheDirectory))
-				? _engine.FindTextAssetFast(text2, text, "of_card_asset") : null;
-		}
-		catch
-		{
-			return null;
-		}
+		return null;
 	}
 
 	public List<OverFrameMapping> Read(string gameRoot, Action<int, int>? progress = null, CancellationToken cancellationToken = default(CancellationToken))
@@ -184,6 +192,29 @@ public sealed class OverFrameService
 		List<OverFrameMapping> list = Parse(textAssetRef.Data);
 		list.RemoveAll((OverFrameMapping x) => x.CardId == cardId);
 		Save(gameRoot, textAssetRef, list);
+	}
+
+	internal (TextAssetRef Gate, byte[] Data)? PrepareRegistrationRestore(string gameRoot, IReadOnlyCollection<ushort> cards)
+	{
+		if (cards.Count == 0) return null;
+		var selected = cards.ToHashSet();
+		TextAssetRef gate = FindGate(gameRoot);
+		var current = Parse(gate.Data);
+		string backup = BackupPath(gameRoot, gate);
+		if (!File.Exists(backup))
+		{
+			if (!current.Any(row => selected.Contains(row.CardId))) return null;
+			throw new FileNotFoundException("缺少当前版本的超框登记原始备份，无法安全区分官方超框与 Mod；尚未还原任何贴图。", backup);
+		}
+		TextAssetRef original = _engine.FindTextAssetFast(backup, Path.Combine(gameRoot, "_MD卡图备份", "超框开关"), GateName)
+			?? throw new InvalidDataException("超框登记备份无法读取，尚未开始还原。");
+		var rows = Parse(original.Data).Where(row => selected.Contains(row.CardId)).ToArray();
+		var activeRows = current.Where(row => selected.Contains(row.CardId)).OrderBy(row => row.CardId).ThenBy(row => row.ArtId);
+		if (activeRows.SequenceEqual(rows.OrderBy(row => row.CardId).ThenBy(row => row.ArtId))) return null;
+		// Restore just the selected rows; never restore the entire shared table.
+		current.RemoveAll(row => selected.Contains(row.CardId));
+		current.AddRange(rows);
+		return (gate, ModRecoveryService.EncodeMappings(current));
 	}
 
 	public bool HasBackup(string gameRoot)

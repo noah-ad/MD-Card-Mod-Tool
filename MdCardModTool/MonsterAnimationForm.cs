@@ -151,6 +151,8 @@ public sealed class MonsterAnimationForm : Form
 
 	private MonsterAnimationSet? _set;
 
+	private Button? _resourceDiagnostics;
+
 	private MonsterAnimationSet? _previewSet;
 
 	private int _previewFramesPerSecond = 15;
@@ -401,7 +403,11 @@ public sealed class MonsterAnimationForm : Form
 		tableLayoutPanel2.Controls.Add(_chooseMedia, 0, 0);
 		tableLayoutPanel2.Controls.Add(_chooseDonor, 1, 0);
 		tableLayoutPanel2.Controls.Add(_play, 0, 1);
-		tableLayoutPanel2.SetColumnSpan(_play, 2);
+		_resourceDiagnostics = Bind(UiTheme.Button("", delegate { ShowResourceDiagnostics(); }), "animation.action.diagnostics");
+		_resourceDiagnostics.Dock = DockStyle.Fill;
+		_resourceDiagnostics.Margin = new Padding(3);
+		_resourceDiagnostics.Enabled = false;
+		tableLayoutPanel2.Controls.Add(_resourceDiagnostics, 1, 1);
 		tableLayoutPanel2.Controls.Add(_apply, 0, 2);
 		tableLayoutPanel2.Controls.Add(_restore, 1, 2);
 		TableLayoutPanel tableLayoutPanel3 = new TableLayoutPanel
@@ -796,11 +802,12 @@ public sealed class MonsterAnimationForm : Form
 			_set = await Task.Run(() => MonsterAnimationIndexService.Find(_gameRoot, cardId));
 			_previewSet = _set;
 			_legacyCreation = await Task.Run(() => _service.HasCreationTransaction(_gameRoot, cardId));
-			if (!_set.IsComplete && (card?.IsMonster ?? false))
+			if (!_set.IsComplete && _set.Availability != MonsterAnimationAvailability.NativeTimeline && (card?.IsMonster ?? false))
 			{
 				_previewSet = (await Task.Run(() => MonsterAnimationIndexService.FindEquivalentPreview(_gameRoot, card, _catalog))) ?? _set;
 			}
 			bool isComplete = _set.IsComplete;
+			bool animationCandidate = card == null || card.IsMonster || _set.HasOfficialPrefab || _set.Assets.Count > 0;
 			bool equivalentPreview = _previewSet.IsComplete && !string.Equals(_previewSet.CardId, _set.CardId, StringComparison.Ordinal);
 			Func<string> cardSuffix = () => (!(card == null)) ? $" · {card.Name(Localizer.Language)} · 卡号 {card.CardId}" : "";
 			if (!_previewSet.IsComplete)
@@ -808,7 +815,9 @@ public sealed class MonsterAnimationForm : Form
 				_locatedResourceStatusFactory = (_legacyCreation ? ((Func<string>)(() => Localizer.F("animation.status.located.legacy", cardSuffix()))) : ((Func<string>)delegate
 				{
 					CardCatalogEntry cardCatalogEntry = card;
-					return Localizer.F(((object)cardCatalogEntry != null && cardCatalogEntry.IsMonster) ? "animation.status.located.unsupported" : "animation.status.located.none", cardSuffix());
+					return _set.Availability == MonsterAnimationAvailability.NativeTimeline
+						? Localizer.F("animation.status.located.native", _set.ResourceBundles.Count, cardSuffix())
+						: Localizer.F(animationCandidate ? "animation.status.located.unsupported" : "animation.status.located.none", cardSuffix());
 				}));
 				SetResourceStatus(_locatedResourceStatusFactory);
 			}
@@ -843,8 +852,9 @@ public sealed class MonsterAnimationForm : Form
 			else if (_media == null)
 			{
 				DisposeMedia();
-				SetSourceStatus((card?.IsMonster ?? false) ? "animation.source.unsupported" : "animation.source.notapplicable");
-				SetPreviewStatus((card?.IsMonster ?? false) ? "animation.preview.unsupported" : "animation.preview.notapplicable");
+				bool native = _set.Availability == MonsterAnimationAvailability.NativeTimeline;
+				SetSourceStatus(native ? "animation.source.native" : animationCandidate ? "animation.source.unsupported" : "animation.source.notapplicable");
+				SetPreviewStatus(native ? "animation.preview.native" : animationCandidate ? "animation.preview.unsupported" : "animation.preview.notapplicable");
 			}
 		}
 		catch (Exception ex)
@@ -1395,7 +1405,7 @@ public sealed class MonsterAnimationForm : Form
 		try
 		{
 			SetBusy(true, null);
-			IReadOnlyList<string> source = await Task.Run(() => MonsterAnimationIndexService.FindInstalledCardIds(_gameRoot));
+			IReadOnlyList<string> source = await Task.Run(() => MonsterAnimationIndexService.FindInstalledCardIds(_gameRoot, spineOnly: true));
 			using AnimationDonorPicker picker = new AnimationDonorPicker(_gameRoot, source.Where((string x) => x != target.CardId));
 			if (picker.ShowDialog(this) != DialogResult.OK || picker.SelectedCardId == null)
 			{
@@ -1431,6 +1441,7 @@ public sealed class MonsterAnimationForm : Form
 			SetResourceStatus(statusResourceId, statusValues);
 		}
 		_cardId.Enabled = !busy;
+		if (_resourceDiagnostics != null) _resourceDiagnostics.Enabled = !busy && _set != null;
 		bool flag = !busy && (_set?.IsComplete ?? false);
 		_chooseMedia.Enabled = flag;
 		_chooseDonor.Enabled = flag;
@@ -1447,6 +1458,28 @@ public sealed class MonsterAnimationForm : Form
 			enabled = 0;
 		}
 		restore.Enabled = (byte)enabled != 0;
+	}
+
+	private void ShowResourceDiagnostics()
+	{
+		if (_set == null) return;
+		using var dialog = new Form
+		{
+			Text = Localizer.T("animation.action.diagnostics"), StartPosition = FormStartPosition.CenterParent,
+			Size = new Size(920, 620), MinimumSize = new Size(640, 400), AutoScaleMode = AutoScaleMode.Dpi,
+			BackColor = UiTheme.Window
+		};
+		UiTheme.ApplyDarkTitleBar(dialog);
+		var text = new TextBox
+		{
+			Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false,
+			Font = new Font("Consolas", 10f), BackColor = UiTheme.Surface, ForeColor = UiTheme.Text,
+			Text = $"Card {_set.CardId}\r\n{_set.Availability}\r\n{_set.CountSummary}\r\n\r\n"
+				+ string.Join("\r\n\r\n", _set.ResourceBundles.Select(bundle => bundle.BundlePath + "\r\n" + string.Join("\r\n", bundle.Containers)))
+				+ "\r\n\r\n" + string.Join("\r\n", _set.Diagnostics)
+		};
+		dialog.Controls.Add(text);
+		dialog.ShowDialog(this);
 	}
 
 	private bool EnsureGameClosed()

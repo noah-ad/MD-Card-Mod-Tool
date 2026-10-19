@@ -394,7 +394,7 @@ public sealed class MonsterAnimationRawAssetsForm : Form
 			SetBusy(true, "raw.status.locating");
 			_set = await Task.Run(() => MonsterAnimationIndexService.Find(_gameRoot, _cardId));
 			_readOnlyEquivalent = false;
-			if (!_set.IsComplete && int.TryParse(_cardId, out var result))
+			if (!_set.IsComplete && _set.Availability != MonsterAnimationAvailability.NativeTimeline && int.TryParse(_cardId, out var result))
 			{
 				CardCatalogService catalog = CardCatalogService.LoadBestAvailable();
 				CardCatalogEntry card = catalog.Find(result);

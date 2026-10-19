@@ -3105,72 +3105,23 @@ public sealed partial class MainForm : Form
 
 	private async Task RestoreSelectedAsync()
 	{
-		TexRef x = Selected();
-		if (x == null || _gameRoot == null)
-		{
-			return;
-		}
-		string backup = Path.Combine(_gameRoot, "_MD卡图备份", x.SourceKind, x.RelativeBundlePath);
-		if (!File.Exists(backup))
-		{
-			MessageBox.Show(this, "该 Bundle 尚未被本工具备份，无法还原。", Text);
-			return;
-		}
-		ushort cardId = 0;
-		bool isOverFrame = x.Category == "超框卡图" && ushort.TryParse(x.CardKey, out cardId);
-		string text = (isOverFrame ? "确认还原该超框卡？会还原原始卡图、关闭本卡超框登记，并重新归类到卡图列表。" : "确认把该 Bundle 还原为备份版本？");
-		if (MessageBox.Show(this, text, "确认还原", MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation) != DialogResult.OK)
-		{
-			return;
-		}
+		TexRef[] selection = _modsOnly ? SelectedModTextures() : Selected() is TexRef single ? new[] { single } : Array.Empty<TexRef>();
+		if (selection.Length == 0 || _gameRoot == null) return;
+		string gameRoot = _gameRoot;
+		var bundles = selection.DistinctBy(texture => texture.BundlePath, StringComparer.OrdinalIgnoreCase).ToArray();
+		string message = $"确认还原选中的 {bundles.Length} 个图片 Bundle？\n\n会一并恢复所选卡原本的超框登记：普通卡关闭，官方原生超框保留。其他卡的登记不变。共享 Bundle 中的其他贴图也会还原。";
+		if (MessageBox.Show(this, message, "确认还原", MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation) != DialogResult.OK) return;
 		try
 		{
-			if (!IndexWorkspaceGuard.Belongs(_gameRoot, x)) throw new InvalidOperationException("目标账号或目录已切换，请重新选择资源。");
+			if (selection.Any(texture => !IndexWorkspaceGuard.Belongs(gameRoot, texture)))
+				throw new InvalidOperationException("目标账号或目录已切换，请重新选择资源。");
 			Enabled = false;
 			_backgroundRefreshCancellation?.Cancel();
+			_previewCancellation?.Cancel();
 			base.UseWaitCursor = true;
 			if (_backgroundRefreshTask != null) await _backgroundRefreshTask;
-			await Task.Run(delegate
-			{
-				DirectModArchive.EnsureGameClosed();
-				File.Copy(backup, x.BundlePath, overwrite: true);
-				if (isOverFrame)
-				{
-					_overFrames.Disable(_gameRoot, cardId);
-				}
-				_recoveryStore.DeactivateBundle(_gameRoot, x);
-				TexRef texRef = _engine.ScanBundle(x.BundlePath, _assetRoot, x.SourceKind, includeDependencies: false).Textures.FirstOrDefault((TexRef t) => t.PathId == x.PathId && t.AssetFileName == x.AssetFileName);
-				if (texRef != null)
-				{
-					foreach (TexRef item in _textures.Where((TexRef t) => t.BundlePath.Equals(x.BundlePath, StringComparison.OrdinalIgnoreCase) && t.PathId == x.PathId && t.AssetFileName == x.AssetFileName))
-					{
-						item.Width = texRef.Width;
-						item.Height = texRef.Height;
-						item.Category = texRef.Category;
-						IndexService.NormalizeLocalCardCategory(item);
-					}
-				}
-			});
-			await ApplyOverFrameTagsAsync();
-			await RefreshModFlagsAsync();
-			await Task.Run(delegate
-			{
-				IndexService.Save(_gameRoot, _textures);
-			});
-			RefreshCategories();
-			string targetCategory = x.SourceKind + "|" + x.Category;
-			if (isOverFrame)
-			{
-				SetModsOnly(enabled: false);
-			}
-			CategoryFilter categoryFilter = _category.Items.Cast<CategoryFilter>().FirstOrDefault((CategoryFilter filter) => filter.Key == targetCategory);
-			if (categoryFilter != null)
-			{
-				_category.SelectedItem = categoryFilter;
-			}
-			RenderList();
-			SelectTexture(x);
-			_status.Text = (isOverFrame ? "已还原原始卡图并关闭本卡超框登记，已回到卡图列表。" : "已还原游戏本体中的该 Bundle。");
+			await RestoreTextureModsAsync(gameRoot, selection);
+			_status.Text = $"已还原 {bundles.Length} 个图片 Bundle，并恢复所选卡原本的超框登记。";
 		}
 		catch (Exception ex)
 		{
@@ -3180,6 +3131,40 @@ public sealed partial class MainForm : Form
 		{
 			base.UseWaitCursor = false;
 			if (!IsDisposed) Enabled = true;
+		}
+	}
+
+	// Shared production entry for single and multi-selection. No category text is
+	// consulted: it can be stale after imports, updates or manual table changes.
+	internal async Task RestoreTextureModsAsync(string gameRoot, TexRef[] selection)
+	{
+		var restored = await Task.Run(() =>
+		{
+			DirectModArchive.EnsureGameClosed();
+			new TextureModRestoreService(_recoveryStore, _overFrames).Restore(gameRoot, selection);
+			return selection.DistinctBy(texture => texture.BundlePath, StringComparer.OrdinalIgnoreCase).SelectMany(texture =>
+			{
+				string root = texture.SourceKind is "本地卡图" or "视觉资源" ? IndexService.FindLocalRoot(gameRoot)! :
+					texture.SourceKind == "游戏内图片" ? IndexService.StreamingRoot(gameRoot) : gameRoot;
+				return _engine.ScanBundle(texture.BundlePath, root, texture.SourceKind, includeDependencies: false).Textures;
+			}).ToList();
+		});
+		var paths = selection.Select(texture => texture.BundlePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+		_textures.RemoveAll(texture => paths.Contains(texture.BundlePath));
+		foreach (var texture in restored)
+		{
+			IndexService.NormalizeLocalCardCategory(texture);
+			_textures.Add(texture);
+		}
+		await ApplyOverFrameTagsAsync();
+		await RefreshModFlagsAsync();
+		await Task.Run(() => IndexService.Save(gameRoot, _textures));
+		RefreshCategories();
+		RenderList();
+		if (selection.Length == 1)
+		{
+			var selected = restored.FirstOrDefault(texture => texture.CardKey == selection[0].CardKey) ?? restored.FirstOrDefault();
+			if (selected != null) SelectTexture(selected);
 		}
 	}
 
@@ -3318,6 +3303,7 @@ public sealed partial class MainForm : Form
 				string buildId;
 				List<MonsterAnimationAssetRef> assets = MonsterAnimationIndexService.LoadBestAvailable(_gameRoot, out buildId);
 				hashSet.UnionWith(MonsterAnimationIndexService.CompleteCardIds(assets));
+				hashSet.UnionWith(MonsterAnimationIndexService.LoadKnownCardIds(_gameRoot));
 			}
 			catch
 			{
@@ -3471,7 +3457,7 @@ public sealed partial class MainForm : Form
 			{
 				return;
 			}
-			HashSet<string> hashSet = MonsterAnimationIndexService.CompleteCardIds(index2);
+			HashSet<string> hashSet = MonsterAnimationIndexService.KnownCardIds(index2);
 			HashSet<string> hashSet2 = ExpandEquivalentAnimationIds(hashSet);
 			foreach (TexRef texture in _textures)
 			{

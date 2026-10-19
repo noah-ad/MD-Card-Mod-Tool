@@ -103,6 +103,9 @@ internal sealed class ModRecoveryStore
 	}
 
 	internal void DeactivateBundle(string gameRoot, TexRef texture)
+		=> DeactivateBundles(gameRoot, new[] { texture });
+
+	internal void DeactivateBundles(string gameRoot, IReadOnlyList<TexRef> textures)
 	{
 		lock (Gate)
 		{
@@ -112,10 +115,11 @@ internal sealed class ModRecoveryStore
 				var item = manifest.Textures[i];
 				string root = item.StorageKind == "LocalData" ? manifest.LocalDataRoot : item.StorageKind == "StreamingAssets" ? IndexService.StreamingRoot(gameRoot) : gameRoot;
 				DirectModArchive.ValidatePath(item.RelativePath);
-				if (Path.GetFullPath(Path.Combine(root, item.RelativePath)).Equals(Path.GetFullPath(texture.BundlePath), StringComparison.OrdinalIgnoreCase)
-					|| (texture.CardKey.Length > 0 && item.CardKey == texture.CardKey)) manifest.Textures[i] = item with { Active = false };
+				if (textures.Any(texture => Path.GetFullPath(Path.Combine(root, item.RelativePath)).Equals(Path.GetFullPath(texture.BundlePath), StringComparison.OrdinalIgnoreCase)
+					|| (texture.CardKey.Length > 0 && item.CardKey == texture.CardKey))) manifest.Textures[i] = item with { Active = false };
 			}
-			if (ushort.TryParse(texture.CardKey, out ushort card)) manifest.DisabledLegacyCards.Add(card);
+			foreach (var texture in textures)
+				if (ushort.TryParse(texture.CardKey, out ushort card)) manifest.DisabledLegacyCards.Add(card);
 			Save(gameRoot, manifest);
 		}
 	}

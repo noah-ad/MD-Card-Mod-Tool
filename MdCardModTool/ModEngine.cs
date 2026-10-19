@@ -144,9 +144,12 @@ public sealed class ModEngine
 
 	public List<MonsterAnimationAssetRef> ScanAnimationAssetsFast(string bundlePath, string root, string? ownerCardId = null)
 	{
-		List<string> source = ((ownerCardId == null) ? new List<string>() : (from p in ReadAssetBundleContainerPaths(bundlePath)
-			where Regex.IsMatch(p.Replace('\\', '/'), "/monstercutin/(?:tcg|ocg)/p" + Regex.Escape(ownerCardId) + "/", RegexOptions.IgnoreCase)
-			select p).ToList());
+		// Container ownership is authoritative: official aliases, ForUnity names
+		// and nonstandard skeleton names need not contain the destination card ID.
+		var containers = ReadAssetBundleContainerPaths(bundlePath)
+			.Select(path => (Path: path.Replace('\\', '/'), Owner: Regex.Match(path.Replace('\\', '/'),
+				@"/monstercutin/(?:tcg|ocg)/p(?<id>\d+)/", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)))
+			.Where(item => item.Owner.Success && (ownerCardId == null || item.Owner.Groups["id"].Value == ownerCardId)).ToArray();
 		List<MonsterAnimationAssetRef> list = new List<MonsterAnimationAssetRef>();
 		AssetsManager assetsManager = NewManager();
 		try
@@ -173,19 +176,21 @@ public sealed class ModEngine
 							string cardId;
 							MonsterAnimationAssetKind kind;
 							bool flag = TryAnimationName(name, assetClassID, out cardId, out kind);
-							if (ownerCardId != null)
+							var container = containers.FirstOrDefault(item => item.Path.EndsWith("/" + name +
+								(assetClassID == AssetClassID.Texture2D ? ".png" : ".json"), StringComparison.OrdinalIgnoreCase)
+								|| (assetClassID == AssetClassID.TextAsset && item.Path.EndsWith(".atlas.txt", StringComparison.OrdinalIgnoreCase)
+									&& item.Path.EndsWith("/" + name + ".txt", StringComparison.OrdinalIgnoreCase)));
+							if (container.Owner != null)
 							{
-								flag = source.Any((string p) => p.EndsWith("/" + name + ".json", StringComparison.OrdinalIgnoreCase)) && kind == MonsterAnimationAssetKind.Skeleton;
-								string extension = ((assetClassID == AssetClassID.Texture2D) ? ".png" : ".txt");
-								if (source.Any((string p) => p.EndsWith("/" + name + extension, StringComparison.OrdinalIgnoreCase)) && (assetClassID == AssetClassID.Texture2D || name.EndsWith(".atlas", StringComparison.OrdinalIgnoreCase)))
-								{
-									flag = true;
-									kind = ((assetClassID == AssetClassID.Texture2D) ? MonsterAnimationAssetKind.Texture : MonsterAnimationAssetKind.Atlas);
-								}
-								if (flag)
-								{
-									cardId = ownerCardId;
-								}
+								flag = true;
+								cardId = container.Owner.Groups["id"].Value;
+								kind = assetClassID == AssetClassID.Texture2D ? MonsterAnimationAssetKind.Texture
+									: container.Path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+										? MonsterAnimationAssetKind.Skeleton : MonsterAnimationAssetKind.Atlas;
+							}
+							else if (ownerCardId != null || containers.Length > 0)
+							{
+								flag = false;
 							}
 							if (flag)
 							{

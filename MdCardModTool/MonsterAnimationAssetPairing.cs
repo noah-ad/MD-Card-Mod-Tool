@@ -76,6 +76,7 @@ public static class MonsterAnimationAssetPairing
 		}
 		return (from @group in dictionary.Values
 			where @group.Textures.Count > 0 && @group.Atlases.Count > 0 && skeletons.ContainsKey(@group.Region + "|" + @group.Tier)
+			where HasAllPages(@group, engine)
 			select new MonsterAnimationAssetTriplet
 			{
 				Region = @group.Region,
@@ -94,6 +95,26 @@ public static class MonsterAnimationAssetPairing
 	{
 		string page = Encoding.UTF8.GetString(engine.ReadTextAsset(Best(group.Atlases)).Data).TrimStart().Split('\n')[0].Trim();
 		return group.Textures.FirstOrDefault((MonsterAnimationAssetRef t) => (t.Name + ".png").Equals(page, StringComparison.OrdinalIgnoreCase)) ?? throw new InvalidDataException("Atlas 首页面没有对应纹理：" + page);
+	}
+
+	internal static string[] AtlasPages(byte[] data)
+	{
+		string[] lines = Encoding.UTF8.GetString(data).TrimEnd('\0').Replace("\r", "").Split('\n');
+		var pages = new List<string>();
+		for (int i = 0; i + 1 < lines.Length; i++)
+		{
+			string page = lines[i].Trim();
+			if (page.EndsWith(".png", StringComparison.OrdinalIgnoreCase)
+				&& lines[i + 1].TrimStart().StartsWith("size:", StringComparison.OrdinalIgnoreCase)
+				&& !page.Contains('/') && !page.Contains('\\')) pages.Add(page);
+		}
+		return pages.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+	}
+
+	private static bool HasAllPages(ScaleGroup group, ModEngine engine)
+	{
+		string[] pages = AtlasPages(engine.ReadTextAsset(Best(group.Atlases)).Data);
+		return pages.Length > 0 && pages.All(page => group.Textures.Any(texture => (texture.Name + ".png").Equals(page, StringComparison.OrdinalIgnoreCase)));
 	}
 
 	public static MonsterAnimationAssetTriplet SelectPreview(MonsterAnimationSet set)

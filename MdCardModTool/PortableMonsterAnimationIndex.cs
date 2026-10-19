@@ -13,4 +13,10 @@ public sealed class PortableMonsterAnimationIndex
 
 	[JsonPropertyName("a")]
 	public List<MonsterAnimationAssetRef> Assets { get; init; } = new List<MonsterAnimationAssetRef>();
+
+	[JsonPropertyName("o")]
+	public List<string> OfficialCardIds { get; init; } = new List<string>();
+
+	[JsonPropertyName("l")]
+	public int ResolverVersion { get; init; }
 }

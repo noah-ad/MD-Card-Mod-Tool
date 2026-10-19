@@ -23,14 +23,9 @@ internal static class AnimationResourceAudit
 			string id = ids[i];
 			try
 			{
-				List<MonsterAnimationAssetRef> list = MonsterAnimationIndexService.FindPrefabDependencies(gameRoot, id);
-				list.AddRange(MonsterAnimationIndexService.FindCompanionPaths(gameRoot, id, list));
-				list = list.DistinctBy((MonsterAnimationAssetRef a) => Path.GetFullPath(a.BundlePath) + "|" + a.PathId).ToList();
-				IReadOnlyList<MonsterAnimationAssetTriplet> source = MonsterAnimationAssetPairing.FindComplete(new MonsterAnimationSet
-				{
-					CardId = id,
-					Assets = list
-				});
+				var set = MonsterAnimationIndexService.Find(gameRoot, id);
+				List<MonsterAnimationAssetRef> list = set.Assets;
+				IReadOnlyList<MonsterAnimationAssetTriplet> source = MonsterAnimationAssetPairing.FindComplete(set);
 				bool flag = source.Any((MonsterAnimationAssetTriplet p) => p.Tier == "SD") && source.Any((MonsterAnimationAssetTriplet p) => p.Tier == "HighEnd_HD");
 				bool flag2 = source.Any((MonsterAnimationAssetTriplet p) => p.Atlas.Name != "P" + id + ".atlas");
 				ModEngine engine = new ModEngine();
@@ -43,6 +38,10 @@ internal static class AnimationResourceAudit
 				rows[i] = new
 				{
 					CardId = id,
+					Availability = set.Availability.ToString(),
+					OfficialPrefab = set.HasOfficialPrefab,
+					Bundles = set.ResourceBundles.Select(bundle => new { bundle.RelativeBundlePath, bundle.StorageKind, bundle.Containers }).ToArray(),
+					Diagnostics = set.Diagnostics,
 					Complete = flag,
 					Alias = flag2,
 					Pages = num,

@@ -35,6 +35,22 @@ internal static class Program
 	private static void Main(string[] args)
 	{
 		ApplicationConfiguration.Initialize();
+		if (args.Length == 3 && args[0] == "--test-animation-discovery")
+		{
+			WindowsFormsSynchronizationContext.AutoInstall = false;
+			SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+			Control.CheckForIllegalCrossThreadCalls = true;
+			AnimationDiscoveryTests.Run(args[1], args[2]);
+			return;
+		}
+		if (args.Length == 3 && args[0] == "--test-texture-mod-restore")
+		{
+			WindowsFormsSynchronizationContext.AutoInstall = false;
+			SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+			Control.CheckForIllegalCrossThreadCalls = true;
+			TextureModRestoreTests.Run(args[1], args[2]);
+			return;
+		}
 		if (args.Length == 3 && args[0] == "--test-new-card-refresh")
 		{
 			WindowsFormsSynchronizationContext.AutoInstall = false;
@@ -2523,6 +2539,7 @@ internal static class Program
 		{
 			MonsterAnimationSet monsterAnimationSet3 = MonsterAnimationIndexService.Find(args[1], args[2]);
 			Console.WriteLine($"card={monsterAnimationSet3.CardId}; complete={monsterAnimationSet3.IsComplete}; {monsterAnimationSet3.CountSummary}");
+			Console.WriteLine($"availability={monsterAnimationSet3.Availability}; officialPrefab={monsterAnimationSet3.HasOfficialPrefab}; bundles={monsterAnimationSet3.ResourceBundles.Count}; diagnostics={string.Join(" | ", monsterAnimationSet3.Diagnostics)}");
 			{
 				foreach (MonsterAnimationAssetRef asset2 in monsterAnimationSet3.Assets)
 				{
