@@ -34,6 +34,11 @@ internal static class Program
 	[STAThread]
 	private static void Main(string[] args)
 	{
+		if (args.Length == 3 && args[0] == "--test-spell-alternate-animation")
+		{
+			SpellAlternateAnimationTests.Run(args[1], args[2]);
+			return;
+		}
 		ApplicationConfiguration.Initialize();
 		if (args.Length == 3 && args[0] == "--test-animation-discovery")
 		{

@@ -1342,6 +1342,16 @@ public sealed partial class MainForm : Form
 	private void BuildAnimationPage()
 	{
 		_animationPage.Controls.Add(_animationHost);
+		var spell = Bind(Button("", async delegate
+		{
+			if (_gameRoot == null) { MessageBox.Show(this, "请先选择 Master Duel 游戏目录。", Text); return; }
+			if (_backgroundRefreshTask != null && !_backgroundRefreshTask.IsCompleted) await _backgroundRefreshTask;
+			using var form = new SpellAlternateAnimationForm(_gameRoot);
+			form.ShowDialog(this);
+		}), "spell.title");
+		spell.Dock = DockStyle.Top;
+		spell.Height = 42;
+		_animationPage.Controls.Add(spell);
 	}
 
 	private void BuildResourceContextBar(Button exportMods, Button importMods)

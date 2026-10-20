@@ -1,8 +1,8 @@
-# MD Card Mod Tool 2.0.29
+# MD Card Mod Tool 2.0.30
 
-面向《游戏王 Master Duel》的 Windows x64 资源查看与 Mod 制作工具，支持四语卡名搜索、卡图与超框编辑、视觉资源替换、官方怪兽动画替换及 Mod 管理。
+面向《游戏王 Master Duel》的 Windows x64 资源查看与 Mod 制作工具，支持四语卡名搜索、卡图与超框编辑、视觉资源替换、官方怪兽动画替换、魔法卡异画动画及 Mod 管理。
 
-2.0.29 修复动画依赖与多页图集漏找，并在还原图片 Mod 时同步恢复该卡原始超框登记。14741「原始生命态 尼比鲁」等能正确识别为官方原生 Timeline，但本版仍不支持其播放／替换；不再误报没有动画。详见 [2.0.29 说明](docs/releases/RELEASE-NOTES-v2.0.29.md)和[验证记录](docs/testing/TEST-REPORT-v2.0.29.md)。历史资料统一放在[文档目录](docs/README.md)。
+2.0.30 新增实验性魔法卡异画发动动画替换，支持按当前卡表和官方演出登记动态发现同名魔法卡组合，不限于《增援》。目前已通过本机资源镜像验证，游戏内播放尚未验收。详见 [2.0.30 说明](docs/releases/RELEASE-NOTES-v2.0.30.md)和[验证记录](docs/testing/TEST-REPORT-v2.0.30.md)。历史资料统一放在[文档目录](docs/README.md)。
 
 ## 下载
 

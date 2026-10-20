@@ -10,9 +10,9 @@ internal sealed class AnimationWriteLease : IDisposable
 {
 	public Dictionary<string, FileStream> Streams { get; } = new Dictionary<string, FileStream>(StringComparer.OrdinalIgnoreCase);
 
-	public static AnimationWriteLease Acquire(IEnumerable<string> paths)
+	public static AnimationWriteLease Acquire(IEnumerable<string> paths, bool checkGameClosed = true)
 	{
-		DirectModArchive.EnsureGameClosed();
+		if (checkGameClosed) DirectModArchive.EnsureGameClosed();
 		AnimationWriteLease animationWriteLease = new AnimationWriteLease();
 		string text = "";
 		try
