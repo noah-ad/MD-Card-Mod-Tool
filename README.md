@@ -6,7 +6,7 @@
 
 ## 下载
 
-下载 [最新发行版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/latest)（当前为 [2.0.29](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.29)，[完整 ZIP](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/download/v2.0.29/MD-Card-Mod-Tool-v2.0.29-win-x64.zip)），或使用 [2.0.28 回退版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.28)。建议解压到独立目录，根目录只有 `MD卡图查看替换器.exe` 与 `data` 文件夹，直接运行 EXE 即可。不要删除游戏目录中的 `_MD卡图备份`。若文件带有 Windows 下载标记，可先运行 `data\首次启动-解除下载封锁.bat`。包的 SHA-256 见 [校验文件](docs/checksums/SHA256SUMS-v2.0.29.txt)；已上传的 ZIP 保留原文件名和字节，不破坏已有下载链接。随包说明保留测试时的快照，最新发布状态以本页和 GitHub Release 为准。
+下载 [2.0.30 最新发行版](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/latest)（[完整 ZIP](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/download/v2.0.30/MD-Card-Mod-Tool-v2.0.30-win-x64.zip)）。此为 noxargenta fork；[上游 2.0.29 回退版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.29)保持独立。解压到独立目录后运行 EXE，保留 data 文件夹和游戏中的首次备份。SHA-256 见[校验文件](docs/checksums/SHA256SUMS-v2.0.30.txt)。
 
 以后版本更新默认同步源码、README 和 GitHub 普通发行版，并标记为 Latest，不再堆叠预发行测试版。发行列表只保留最新版与一个回退版；旧发行版清理前在维护电脑归档安装包和说明，Git 标签与源码历史保留。本地程序、用户 Mod、恢复库及游戏备份不属于发行版清理范围。
 
