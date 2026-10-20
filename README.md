@@ -1,12 +1,12 @@
-# MD Card Mod Tool 2.0.29
+# MD Card Mod Tool 2.0.30
 
-面向《游戏王 Master Duel》的 Windows x64 资源查看与 Mod 制作工具，支持四语卡名搜索、卡图与超框编辑、视觉资源替换、官方怪兽动画替换及 Mod 管理。
+面向《游戏王 Master Duel》的 Windows x64 资源查看与 Mod 制作工具，支持四语卡名搜索、卡图与超框编辑、视觉资源替换、官方怪兽动画替换、魔法卡异画动画及 Mod 管理。
 
-2.0.29 修复动画依赖与多页图集漏找，并在还原图片 Mod 时同步恢复该卡原始超框登记。14741「原始生命态 尼比鲁」等能正确识别为官方原生 Timeline，但本版仍不支持其播放／替换；不再误报没有动画。详见 [2.0.29 说明](docs/releases/RELEASE-NOTES-v2.0.29.md)和[验证记录](docs/testing/TEST-REPORT-v2.0.29.md)。历史资料统一放在[文档目录](docs/README.md)。
+2.0.30 新增实验性魔法卡异画发动动画替换，支持按当前卡表和官方演出登记动态发现同名魔法卡组合，不限于《增援》。目前已通过本机资源镜像验证，游戏内播放尚未验收。详见 [2.0.30 说明](docs/releases/RELEASE-NOTES-v2.0.30.md)和[验证记录](docs/testing/TEST-REPORT-v2.0.30.md)。历史资料统一放在[文档目录](docs/README.md)。
 
 ## 下载
 
-下载 [最新发行版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/latest)（当前为 [2.0.29](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.29)，[完整 ZIP](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/download/v2.0.29/MD-Card-Mod-Tool-v2.0.29-win-x64.zip)），或使用 [2.0.28 回退版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.28)。建议解压到独立目录，根目录只有 `MD卡图查看替换器.exe` 与 `data` 文件夹，直接运行 EXE 即可。不要删除游戏目录中的 `_MD卡图备份`。若文件带有 Windows 下载标记，可先运行 `data\首次启动-解除下载封锁.bat`。包的 SHA-256 见 [校验文件](docs/checksums/SHA256SUMS-v2.0.29.txt)；已上传的 ZIP 保留原文件名和字节，不破坏已有下载链接。随包说明保留测试时的快照，最新发布状态以本页和 GitHub Release 为准。
+下载 [2.0.30 最新发行版](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/latest)（[完整 ZIP](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/download/v2.0.30/MD-Card-Mod-Tool-v2.0.30-win-x64.zip)）。此为 noxargenta fork；[上游 2.0.29 回退版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.29)保持独立。解压到独立目录后运行 EXE，保留 data 文件夹和游戏中的首次备份。SHA-256 见[校验文件](docs/checksums/SHA256SUMS-v2.0.30.txt)。
 
 以后版本更新默认同步源码、README 和 GitHub 普通发行版，并标记为 Latest，不再堆叠预发行测试版。发行列表只保留最新版与一个回退版；旧发行版清理前在维护电脑归档安装包和说明，Git 标签与源码历史保留。本地程序、用户 Mod、恢复库及游戏备份不属于发行版清理范围。
 
