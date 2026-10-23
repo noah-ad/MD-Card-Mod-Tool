@@ -1,12 +1,14 @@
-# MD Card Mod Tool 2.0.31
+# MD Card Mod Tool 2.0.32
 
 面向《游戏王 Master Duel》的 Windows x64 资源查看与 Mod 制作工具，支持四语卡名搜索、卡图与超框编辑、视觉资源替换、官方怪兽动画替换、魔法卡异画动画及 Mod 管理。
+
+2.0.32 修复音乐试听中途停止时弹出空路径异常；支持重复停止、再次试听和播放时关闭窗口。详见 [修复说明](docs/releases/RELEASE-NOTES-v2.0.32.md)与[验证记录](docs/testing/TEST-REPORT-v2.0.32.md)。
 
 2.0.31 新增场地中文搜索、官方缩略图识别、完整近端／远端模型替换及音乐互换／音频文件导入、试听、还原。场地和音乐替换为实验功能，临时游戏镜像验证已通过，游戏内效果尚未验收。详见 [2.0.31 说明](docs/releases/RELEASE-NOTES-v2.0.31.md)和[验证记录](docs/testing/TEST-REPORT-v2.0.31.md)。2.0.30 的魔法卡异画动画功能继续保留。历史资料统一放在[文档目录](docs/README.md)。
 
 ## 下载
 
-下载 [2.0.31 最新发行版](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/latest)（[完整 ZIP](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/download/v2.0.31/MD-Card-Mod-Tool-v2.0.31-win-x64.zip)）。此为 noxargenta fork，保留 [2.0.30 回退版](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/tag/v2.0.30)；上游仓库保持独立。解压到独立目录后运行 EXE，保留 data 文件夹和游戏中的首次备份。SHA-256 见[校验文件](docs/checksums/SHA256SUMS-v2.0.31.txt)。
+下载 [2.0.32 最新发行版](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/latest)（[完整 ZIP](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/download/v2.0.32/MD-Card-Mod-Tool-v2.0.32-win-x64.zip)）。此为 noxargenta fork，保留 [2.0.31 回退版](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/tag/v2.0.31)；上游仓库保持独立。解压到独立目录后运行 EXE，保留 data 文件夹和游戏中的首次备份。SHA-256 见[校验文件](docs/checksums/SHA256SUMS-v2.0.32.txt)。
 
 以后版本更新默认同步源码、README 和 GitHub 普通发行版，并标记为 Latest，不再堆叠预发行测试版。发行列表只保留最新版与一个回退版；旧发行版清理前在维护电脑归档安装包和说明，Git 标签与源码历史保留。本地程序、用户 Mod、恢复库及游戏备份不属于发行版清理范围。
 
@@ -91,7 +93,7 @@ dotnet build '.\MdCardModTool\MdCardModTool.csproj' -c Release -p:Platform=x64
 
 dotnet publish '.\MdCardModTool\MdCardModTool.csproj' `
   -c Release -r win-x64 -p:Platform=x64 --self-contained true `
-  -o '.\发布\MD-Card-Mod-Tool-v2.0.31-win-x64'
+  -o '.\发布\MD-Card-Mod-Tool-v2.0.32-win-x64'
 ```
 
 发布包根目录只允许包含 EXE 与 `data`。`data` 内必须包含 `classdata.tpk`、预绑定卡图／动画索引、Astellar 超框模板、Floowan 卡框、`tools/texconv.exe`、`tools/ffmpeg.exe`、说明与第三方许可文件。

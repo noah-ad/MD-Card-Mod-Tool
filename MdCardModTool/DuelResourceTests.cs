@@ -155,7 +155,25 @@ internal static class DuelResourceTests
 			using var screenshot = new System.Drawing.Bitmap(form.Width, form.Height);
 			form.DrawToBitmap(screenshot, new System.Drawing.Rectangle(0, 0, form.Width, form.Height));
 			screenshot.Save(Path.Combine(output, "duel-ui.png"));
+			var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+			var mode = (ComboBox)typeof(DuelResourceForm).GetField("_mode", flags)!.GetValue(form)!;
+			var player = (System.Media.SoundPlayer)typeof(DuelResourceForm).GetField("_player", flags)!.GetValue(form)!;
+			var stop = (Button)typeof(DuelResourceForm).GetField("_stop", flags)!.GetValue(form)!;
+			mode.SelectedIndex = 1;
+			stop.PerformClick(); stop.PerformClick();
+			Require(player.SoundLocation == "", "stop before playback is repeatable");
+			for (int attempt = 0; attempt < 2; attempt++)
+			{
+				player.SoundLocation = wav; player.Load(); player.Play();
+				System.Threading.Thread.Sleep(100);
+				stop.PerformClick(); stop.PerformClick();
+				Require(player.SoundLocation == wav, "stop during playback / restart " + attempt);
+			}
+			player.Play(); mode.SelectedIndex = 0;
+			Require(player.SoundLocation == wav, "mode switch stops loaded playback safely");
+			mode.SelectedIndex = 1; player.Play();
 			form.Close();
+			Require(!form.Visible, "close during playback succeeds");
 		}
 		Require(hashes.All(x => DuelResourceService.Hash(x.Key) == x.Value), "real game files unchanged");
 		File.WriteAllText(Path.Combine(output, "summary.txt"), "Chinese names / thumbnails / model variants / donor audio / PCM FSB5 / exact restores / precommit failure / incomplete donor / four-language forms: PASS. gameWrites=False");

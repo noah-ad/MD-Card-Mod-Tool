@@ -212,7 +212,7 @@ internal sealed class DuelResourceForm : Form
 		catch (Exception ex) { _details.Text = Localizer.T("duel.listenFailed") + ex.Message; }
 		finally { SetBusy(false); }
 	}
-	private void Stop() { _player.Stop(); _player.SoundLocation = ""; }
+	private void Stop() { _player.Stop(); }
 	protected override void Dispose(bool disposing)
 	{
 		if (disposing)
