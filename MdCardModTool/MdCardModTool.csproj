@@ -15,7 +15,7 @@
 	<DebugType>None</DebugType>
 	<DebugSymbols>false</DebugSymbols>
     <Nullable>enable</Nullable>
-    <Version>2.0.32</Version>
+    <Version>2.0.33</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationIcon>Resources\app-icon.ico</ApplicationIcon>
 	<Win32Icon>Resources\app-icon.ico</Win32Icon>
@@ -26,8 +26,9 @@
   </PropertyGroup>
   <PropertyGroup />
   <ItemGroup>
-    <None Include="..\docs\releases\RELEASE-NOTES-v2.0.32.md" Link="data\RELEASE-NOTES-v2.0.32.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="..\docs\testing\TEST-REPORT-v2.0.32.md" Link="data\TEST-REPORT-v2.0.32.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Resources\bgm-fields-v1.tsv" Link="data\bgm-fields-v1.tsv" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\docs\releases\RELEASE-NOTES-v2.0.33.md" Link="data\RELEASE-NOTES-v2.0.33.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\docs\testing\TEST-REPORT-v2.0.33.md" Link="data\TEST-REPORT-v2.0.33.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Compile Remove="ApplicationConfiguration.cs" />
     <Compile Remove="Spine42CompatibilityResult.cs" />
     <Compile Remove="--z__ReadOnlySingleElementList.cs" />
@@ -70,6 +71,7 @@
 	<None Include="..\docs\licenses\FLOOWAN-NOTICE.txt" Link="data\licenses\FLOOWAN-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\docs\licenses\ASTELLAR-NOTICE.txt" Link="data\licenses\ASTELLAR-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\docs\licenses\VGMSTREAM-NOTICE.md" Link="data\licenses\VGMSTREAM-NOTICE.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\docs\licenses\YGOMASTER-NOTICE.md" Link="data\licenses\YGOMASTER-NOTICE.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\docs\testing\TEST-REPORT.md" Link="data\TEST-REPORT.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 	<None Include="..\LICENSE" Link="data\LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 	<None Update="使用说明-v2.0.txt" Link="data\使用说明-v2.0.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

@@ -24,6 +24,7 @@ internal sealed class DuelResourceForm : Form
 	private readonly Label _sourceLabel = new() { AutoSize = true };
 	private readonly TextBox _details = new() { Dock = DockStyle.Fill, ReadOnly = true, Multiline = true, ScrollBars = ScrollBars.Vertical };
 	private readonly Button _replace = UiTheme.Button("", (_, _) => { }, ButtonTone.Gold);
+	private readonly Button _replaceGroup = UiTheme.Button("", (_, _) => { }, ButtonTone.Primary);
 	private readonly Button _import = UiTheme.Button("", (_, _) => { }, ButtonTone.Primary);
 	private readonly Button _restore = UiTheme.Button("", (_, _) => { });
 	private readonly Button _playTarget = UiTheme.Button("", (_, _) => { });
@@ -58,7 +59,7 @@ internal sealed class DuelResourceForm : Form
 		columns.Controls.Add(Column(_targetLabel, _targetSearch, _targets, _targetPreview), 0, 0);
 		columns.Controls.Add(Column(_sourceLabel, _sourceSearch, _sources, _sourcePreview), 1, 0);
 		var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = true, AutoScroll = true };
-		actions.Controls.AddRange(new Control[] { _replace, _import, _restore, _playTarget, _playSource, _stop });
+		actions.Controls.AddRange(new Control[] { _replace, _replaceGroup, _import, _restore, _playTarget, _playSource, _stop });
 		layout.Controls.Add(header, 0, 0); layout.Controls.Add(columns, 0, 1); layout.Controls.Add(actions, 0, 2); layout.Controls.Add(_details, 0, 3);
 		foreach (Control c in new Control[] { _targets, _sources, _targetSearch, _sourceSearch, _details, _mode }) { c.BackColor = UiTheme.Surface; c.ForeColor = UiTheme.Text; }
 		Controls.Add(layout);
@@ -69,6 +70,7 @@ internal sealed class DuelResourceForm : Form
 		_mode.SelectedIndexChanged += (_, _) => { Stop(); Filter(true); Filter(false); UpdateActions(); };
 		_refresh.Click += async (_, _) => await LoadCatalog();
 		_replace.Click += async (_, _) => await Write(false, null);
+		_replaceGroup.Click += async (_, _) => await ReplaceGroup();
 		_restore.Click += async (_, _) => await Write(true, null);
 		_import.Click += async (_, _) =>
 		{
@@ -99,6 +101,7 @@ internal sealed class DuelResourceForm : Form
 		_targetLabel.Text = Localizer.T("duel.target"); _sourceLabel.Text = Localizer.T("duel.source");
 		_targetSearch.PlaceholderText = _sourceSearch.PlaceholderText = Localizer.T("duel.search");
 		_replace.Text = Localizer.T("duel.replace"); _import.Text = Localizer.T("duel.import"); _restore.Text = Localizer.T("duel.restore");
+		_replaceGroup.Text = Localizer.T("duel.replaceGroup");
 		_playTarget.Text = Localizer.T("duel.listenTarget"); _playSource.Text = Localizer.T("duel.listenSource"); _stop.Text = Localizer.T("duel.stop"); _refresh.Text = Localizer.T("duel.refresh");
 		int selected = Math.Max(0, _mode.SelectedIndex);
 		_mode.Items.Clear(); _mode.Items.AddRange(new object[] { Localizer.T("duel.fields"), Localizer.T("duel.music") }); _mode.SelectedIndex = selected;
@@ -124,7 +127,7 @@ internal sealed class DuelResourceForm : Form
 		object? selected = list.SelectedItem;
 		list.BeginUpdate(); list.Items.Clear();
 		list.Items.AddRange(_mode.SelectedIndex == 0 ? _fields.Where(x => x.Matches(query)).Cast<object>().ToArray()
-			: _music.Where(x => x.Name.Contains(query, StringComparison.OrdinalIgnoreCase)).Cast<object>().ToArray());
+			: _music.Where(x => x.Matches(query)).Cast<object>().ToArray());
 		if (selected != null && list.Items.Contains(selected)) list.SelectedItem = selected;
 		else if (list.Items.Count > 0) list.SelectedIndex = 0;
 		list.EndUpdate();
@@ -141,6 +144,7 @@ internal sealed class DuelResourceForm : Form
 			IEnumerable<DuelBundleSlot> slots = selected is DuelField f ? f.Models : new[] { ((DuelMusic)selected).Slot };
 			_details.Text = (target ? _targetLabel.Text : _sourceLabel.Text) + " · " + selected + Environment.NewLine
 				+ string.Join(Environment.NewLine, slots.Select(x => x.LogicalPath + " · " + Localizer.T("duel.state." + DuelResourceService.State(_root, x))))
+				+ (selected is DuelMusic ? Environment.NewLine + Localizer.T("duel.musicNotes") : "")
 				+ Environment.NewLine + Localizer.T("duel.boundary");
 		}
 		if (selected is not DuelField field || field.Preview == null) return;
@@ -161,6 +165,8 @@ internal sealed class DuelResourceForm : Form
 	{
 		bool music = _mode.SelectedIndex == 1;
 		_import.Visible = _playTarget.Visible = _playSource.Visible = _stop.Visible = music;
+		_replaceGroup.Visible = music;
+		_replaceGroup.Enabled = !_busy && music && _targets.SelectedItem is DuelMusic && _sources.SelectedItem is DuelMusic;
 		_replace.Enabled = !_busy && (_targets.SelectedItem is DuelField t && _sources.SelectedItem is DuelField s && t.Id != s.Id && t.Models.Count > 0 && t.Models.All(x => s.Models.Any(y => x.Key == y.Key))
 			|| _targets.SelectedItem is DuelMusic tm && _sources.SelectedItem is DuelMusic sm && tm != sm);
 		_import.Enabled = !_busy && _targets.SelectedItem is DuelMusic;
@@ -168,6 +174,21 @@ internal sealed class DuelResourceForm : Form
 		_playTarget.Enabled = !_busy && _targets.SelectedItem is DuelMusic;
 		_playSource.Enabled = !_busy && _sources.SelectedItem is DuelMusic;
 		_stop.Enabled = !_busy;
+	}
+	private async Task ReplaceGroup()
+	{
+		if (_busy || _targets.SelectedItem is not DuelMusic target || _sources.SelectedItem is not DuelMusic source) return;
+		try
+		{
+			var pairs = DuelMusicMetadata.PlanGroup(_music, target, source);
+			string selection = string.Join(Environment.NewLine, pairs.Select(x => x.Target + Environment.NewLine + "← " + x.Source));
+			if (MessageBox.Show(this, selection + Environment.NewLine + Localizer.T("duel.groupConfirm"), Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
+			Stop(); SetBusy(true); _details.Text = Localizer.T("duel.working");
+			await Task.Run(() => _service.ReplaceMusicGroup(_root, _music, target, source));
+			_details.Text = Localizer.T("duel.done") + Environment.NewLine + selection;
+		}
+		catch (Exception ex) { _details.Text = ex.Message; }
+		finally { SetBusy(false); }
 	}
 	private async Task Write(bool restore, string? input)
 	{
@@ -207,7 +228,7 @@ internal sealed class DuelResourceForm : Form
 				DuelMusicAudio.Convert(bank, wave, false);
 			});
 			_player.SoundLocation = wave; _player.Load(); _player.Play();
-			_details.Text = music.Name;
+			_details.Text = music.ToString();
 		}
 		catch (Exception ex) { _details.Text = Localizer.T("duel.listenFailed") + ex.Message; }
 		finally { SetBusy(false); }

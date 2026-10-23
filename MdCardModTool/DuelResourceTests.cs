@@ -31,18 +31,27 @@ internal static class DuelResourceTests
 			Directory.CreateDirectory(Path.GetDirectoryName(dest)!); File.Copy(original, dest, true);
 		}
 		foreach (string language in new[] { "zh-CN", "zh-TW", "ja-JP", "en-US" }) CopyLogical("Texts/" + language + "/IDS_ITEM");
-		foreach (int id in new[] { 1, 4 })
+		CopyLogical("Duel/ScriptableObject/Bg/BgMatModelSetting");
+		foreach (int id in new[] { 1, 2, 4 })
 		{
 			foreach (string side in new[] { "near", "far" }) CopyLogical($"Duel/BG/Mat/Mat_{id:000}/SD/Mat_{id:000}_{side}");
-			foreach (string quality in new[] { "HighEnd_HD", "SD" }) CopyLogical($"Images/Field/{quality}/FieldIcon{1090000 + id}");
+			foreach (string quality in new[] { "HighEnd_HD", "SD" }) CopyLogical($"Images/Field/{quality}/FieldIcon{(id == 2 ? 1090001 : id == 1 ? 1090003 : 1090004)}");
 		}
-		foreach (string name in new[] { "BGM_DUEL_NORMAL_01", "BGM_DUEL_NORMAL_09" }) CopyLogical("Sound/AudioClip/BGM/" + name);
+		foreach (string phase in new[] { "NORMAL", "KEYCARD", "CLIMAX" })
+		foreach (int id in new[] { 1, 9 }) CopyLogical($"Sound/AudioClip/BGM/BGM_DUEL_{phase}_{id:00}");
 		var fields = DuelResourceCatalog.Fields(mirror);
 		var target = fields.Single(x => x.Id == 1); var source = fields.Single(x => x.Id == 4);
-		Require(target.Matches("森林") && target.Matches("1090001") && target.Preview != null, "Chinese names, ID, thumbnail");
+		string targetName = target.Names.Split(" / ")[0];
+		Require(fields.Single(x => x.Id == 2).Matches("森林") && target.Matches("1090003") && target.Preview != null, "Chinese names, ID, thumbnail");
 		Require(new ModEngine().DecodePng(target.Preview!).Length > 100, "thumbnail decodes");
 		var music = DuelResourceCatalog.Music(mirror);
-		Require(music.Count == 2, "music discovery");
+		Require(music.Count == 6, "music discovery");
+		Require(target.ItemId == 1090003 && target.Models.Count > 0 && target.Models.All(x => x.LogicalPath.Contains("Mat_001")), "field item to model mapping");
+		Console.WriteLine("ANNOTATION " + music.Single(x => x.Name == "BGM_DUEL_NORMAL_01"));
+		Console.WriteLine("ANNOTATION " + music.Single(x => x.Name == "BGM_DUEL_NORMAL_09"));
+		Require(music.Single(x => x.Name == "BGM_DUEL_NORMAL_01").ToString().Contains("（森林") && music.Count(x => x.Matches("森林")) == 3, "Chinese field annotations and music search");
+		Require(music.Single(x => x.Name == "BGM_DUEL_NORMAL_01").Annotation.Contains("共用曲目"), "shared music annotation");
+		Require(DuelMusicMetadata.Describe("BGM_DUEL_F02_PHASE_A", music[0].Slot, new Dictionary<int, string>()).Annotation.Contains("未确认"), "unknown field binding is not guessed");
 		var originalHashes = target.Models.ToDictionary(x => x.BundlePath, x => DuelResourceService.Hash(x.BundlePath));
 		var service = new DuelResourceService(mirror);
 		service.ReplaceField(mirror, target, source);
@@ -60,13 +69,13 @@ internal static class DuelResourceTests
 		using (var main = new MainForm(_ => { }))
 		{
 			var matches = typeof(MainForm).GetMethod("MatchesSearch", BindingFlags.Static | BindingFlags.NonPublic)!;
-			Require((bool)matches.Invoke(null, new object?[] { target.Preview!, "森林", null })!, "main visual Chinese search");
-			Require((bool)matches.Invoke(null, new object?[] { target.Preview!, "001", null })!, "main visual numeric field search");
+			Require((bool)matches.Invoke(null, new object?[] { target.Preview!, targetName, null })!, "main visual Chinese search");
+			Require((bool)matches.Invoke(null, new object?[] { target.Preview!, "003", null })!, "main visual numeric field search");
 			var flags = BindingFlags.Instance | BindingFlags.NonPublic;
 			typeof(MainForm).GetField("_currentPage", flags)!.SetValue(main, WorkspacePage.Visuals);
 			var textures = (List<TexRef>)typeof(MainForm).GetField("_textures", flags)!.GetValue(main)!;
 			textures.Clear(); textures.Add(target.Preview!); textures.Add(source.Preview!);
-			((TextBox)typeof(MainForm).GetField("_search", flags)!.GetValue(main)!).Text = "森林";
+			((TextBox)typeof(MainForm).GetField("_search", flags)!.GetValue(main)!).Text = targetName;
 			typeof(MainForm).GetMethod("RenderList", flags)!.Invoke(main, null);
 			var visible = (List<TexRef>)typeof(MainForm).GetField("_visibleTextures", flags)!.GetValue(main)!;
 			Require(visible.Count == 1 && visible[0] == target.Preview, "main visual rendered search results");
@@ -99,7 +108,28 @@ internal static class DuelResourceTests
 		rejected = false; try { service.Restore(mirror, target.Models); } catch (InvalidDataException) { rejected = true; }
 		Require(rejected && originalHashes.All(x => DuelResourceService.Hash(x.Key) == x.Value), "corrupt backup rejected");
 		File.WriteAllBytes(backup, savedBackup);
-		var audioTarget = music[0]; var audioSource = music[1];
+		var audioTarget = music.Single(x => x.Name == "BGM_DUEL_NORMAL_01"); var audioSource = music.Single(x => x.Name == "BGM_DUEL_NORMAL_09");
+		var groupPlan = DuelMusicMetadata.PlanGroup(music, audioTarget, audioSource);
+		Require(groupPlan.Length == 3 && groupPlan.All(x => x.Target.Phase == x.Source.Phase), "group phase pairing");
+		var groupHashes = groupPlan.ToDictionary(x => x.Target.Slot.BundlePath, x => DuelResourceService.Hash(x.Target.Slot.BundlePath));
+		service.ReplaceMusicGroup(mirror, music, audioTarget, audioSource);
+		foreach (var pair in groupPlan)
+		{
+			using var actual = new DuelBundleDocument(pair.Target.Slot.BundlePath);
+			using var donor = new DuelBundleDocument(pair.Source.Slot.BundlePath);
+			Require(actual.AudioBytes().SequenceEqual(donor.AudioBytes()), "group donor audio " + pair.Target.Phase);
+		}
+		service.Restore(mirror, groupPlan.Select(x => x.Target.Slot).ToArray());
+		Require(groupHashes.All(x => DuelResourceService.Hash(x.Key) == x.Value), "music group restore byte exact");
+		rejected = false;
+		try { service.ReplaceMusicGroup(mirror, music.Where(x => x != audioSource).ToArray(), audioTarget, audioSource); } catch (InvalidOperationException) { rejected = true; }
+		Require(rejected && groupHashes.All(x => DuelResourceService.Hash(x.Key) == x.Value), "missing group phase rejects atomically");
+		rejected = false;
+		try { service.ReplaceMusicGroup(mirror, music.Select(x => x == audioSource ? x with { Phase = "PHASE_A" } : x).ToArray(), audioTarget, audioSource); } catch (InvalidOperationException) { rejected = true; }
+		Require(rejected && groupHashes.All(x => DuelResourceService.Hash(x.Key) == x.Value), "incompatible group phases reject atomically");
+		rejected = false;
+		try { new DuelResourceService(mirror, _ => throw new IOException("injected group failure")).ReplaceMusicGroup(mirror, music, audioTarget, audioSource); } catch (AggregateException) { rejected = true; }
+		Require(rejected && groupHashes.All(x => DuelResourceService.Hash(x.Key) == x.Value), "music group partial commit rollback");
 		string audioHash = DuelResourceService.Hash(audioTarget.Slot.BundlePath);
 		service.ReplaceMusic(mirror, audioTarget, audioSource);
 		using (var actual = new DuelBundleDocument(audioTarget.Slot.BundlePath, audioTarget.Slot.Container))
@@ -144,7 +174,7 @@ internal static class DuelResourceTests
 			Require(!(bool)busy.GetValue(form)!, "UI catalog load finishes");
 			var search = (TextBox)typeof(DuelResourceForm).GetField("_targetSearch", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(form)!;
 			var list = (ListBox)typeof(DuelResourceForm).GetField("_targets", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(form)!;
-			search.Text = "森林"; Application.DoEvents(); Require(list.Items.Count == 1, "UI Chinese search");
+			search.Text = targetName; Application.DoEvents(); Require(list.Items.Count == 1, "UI Chinese search");
 			search.Text = ""; Application.DoEvents();
 			var sources = (ListBox)typeof(DuelResourceForm).GetField("_sources", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(form)!;
 			sources.SelectedIndex = 1;
@@ -160,6 +190,14 @@ internal static class DuelResourceTests
 			var player = (System.Media.SoundPlayer)typeof(DuelResourceForm).GetField("_player", flags)!.GetValue(form)!;
 			var stop = (Button)typeof(DuelResourceForm).GetField("_stop", flags)!.GetValue(form)!;
 			mode.SelectedIndex = 1;
+			search.Text = "森林"; Application.DoEvents();
+			Require(list.Items.Count == 3 && list.Items.Cast<DuelMusic>().All(x => x.Group == "DUEL_01"), "UI music Chinese field filter");
+			using (var musicScreenshot = new System.Drawing.Bitmap(form.Width, form.Height))
+			{
+				form.DrawToBitmap(musicScreenshot, new System.Drawing.Rectangle(0, 0, form.Width, form.Height));
+				musicScreenshot.Save(Path.Combine(output, "duel-music-ui.png"));
+			}
+			search.Text = "";
 			stop.PerformClick(); stop.PerformClick();
 			Require(player.SoundLocation == "", "stop before playback is repeatable");
 			for (int attempt = 0; attempt < 2; attempt++)

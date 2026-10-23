@@ -126,10 +126,15 @@ internal sealed class DuelResourceService
 		}, false, beforeCommit);
 	}
 	internal void ReplaceMusic(string root, DuelMusic target, DuelMusic source)
+		=> ReplaceMusicPairs(root, new[] { (Target: target, Source: source) });
+	internal void ReplaceMusicGroup(string root, IReadOnlyList<DuelMusic> music, DuelMusic target, DuelMusic source)
+		=> ReplaceMusicPairs(root, DuelMusicMetadata.PlanGroup(music, target, source));
+	private void ReplaceMusicPairs(string root, (DuelMusic Target, DuelMusic Source)[] pairs)
 	{
-		if (source.Slot.BundlePath == target.Slot.BundlePath) throw new InvalidOperationException("来源与目标相同。");
-		Change(root, new[] { target.Slot }, (slot, output) =>
+		if (pairs.Any(x => pairs.Any(y => x.Source.Slot.BundlePath == y.Target.Slot.BundlePath))) throw new InvalidOperationException("来源与目标重叠。");
+		Change(root, pairs.Select(x => x.Target.Slot).ToArray(), (slot, output) =>
 		{
+			var source = pairs.Single(x => x.Target.Slot == slot).Source;
 			ValidateDependencies(root, source.Slot);
 			string hash = Hash(source.Slot.BundlePath);
 			using (var donor = new DuelBundleDocument(source.Slot.BundlePath, source.Slot.Container))

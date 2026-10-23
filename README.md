@@ -1,6 +1,8 @@
-# MD Card Mod Tool 2.0.32
+# MD Card Mod Tool 2.0.33
 
 面向《游戏王 Master Duel》的 Windows x64 资源查看与 Mod 制作工具，支持四语卡名搜索、卡图与超框编辑、视觉资源替换、官方怪兽动画替换、魔法卡异画动画及 Mod 管理。
+
+2.0.33 新增音乐中文括号注释（场地、阶段、共用曲目）、按场地名搜索和完整同阶段音乐组一键替换；修正场地物品与模型编号不一致造成的名称／预览错配。详见[版本说明](docs/releases/RELEASE-NOTES-v2.0.33.md)和[测试记录](docs/testing/TEST-REPORT-v2.0.33.md)。
 
 2.0.32 修复音乐试听中途停止时弹出空路径异常；支持重复停止、再次试听和播放时关闭窗口。详见 [修复说明](docs/releases/RELEASE-NOTES-v2.0.32.md)与[验证记录](docs/testing/TEST-REPORT-v2.0.32.md)。
 
@@ -8,7 +10,7 @@
 
 ## 下载
 
-下载 [2.0.32 最新发行版](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/latest)（[完整 ZIP](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/download/v2.0.32/MD-Card-Mod-Tool-v2.0.32-win-x64.zip)）。此为 noxargenta fork，保留 [2.0.31 回退版](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/tag/v2.0.31)；上游仓库保持独立。解压到独立目录后运行 EXE，保留 data 文件夹和游戏中的首次备份。SHA-256 见[校验文件](docs/checksums/SHA256SUMS-v2.0.32.txt)。
+下载 [2.0.33 最新发行版](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/latest)（[完整 ZIP](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/download/v2.0.33/MD-Card-Mod-Tool-v2.0.33-win-x64.zip)）。此为 noxargenta fork，保留 [2.0.32 回退版](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/tag/v2.0.32)；上游仓库保持独立。解压到独立目录后运行 EXE，保留 data 文件夹和游戏中的首次备份。SHA-256 见[校验文件](docs/checksums/SHA256SUMS-v2.0.33.txt)。
 
 以后版本更新默认同步源码、README 和 GitHub 普通发行版，并标记为 Latest，不再堆叠预发行测试版。发行列表只保留最新版与一个回退版；旧发行版清理前在维护电脑归档安装包和说明，Git 标签与源码历史保留。本地程序、用户 Mod、恢复库及游戏备份不属于发行版清理范围。
 
@@ -18,7 +20,9 @@
 
 “使用来源替换目标”会一并替换目标已下载的近端／远端模型，来源缺少对应变体或依赖则整次拒绝。预览图是官方缩略图，非实时 3D；模型替换不自动更改缩略图、场地音效或音乐绑定。
 
-切换到“背景音乐”，可选择官方 BGM 互换，或“导入音乐文件”选择 WAV、MP3、OGG、FLAC 等。支持目标与来源试听、单曲还原。自定义音频转换为 48 kHz 双声道 PCM FSB5，整曲循环，限 10 分钟；文件可能比原版压缩音乐大。决斗普通／关键卡／高潮阶段使用不同曲目，需分别替换。
+切换到“背景音乐”，可选择官方 BGM 互换，或“导入音乐文件”选择 WAV、MP3、OGG、FLAC 等。音乐名以中文括号显示参考绑定场地、通常／关键卡／高潮或 A／B 阶段；支持直接搜索中文场地名。共用曲目会标记，未确认关联不推测。注释采用 YgoMaster 社区资料（见第三方许可），不代表当前游戏绑定的实机验收。
+
+左右选定曲目后可点“替换整组音乐”，一次替换完整且阶段一致的音乐组。缺曲目或阶段不匹配时整组拒绝，可继续单曲替换。替换共用曲目会影响所有使用该曲目的场地；保留首次备份，可按单曲还原。支持目标与来源试听、单曲还原。自定义音频转换为 48 kHz 双声道 PCM FSB5，整曲循环，限 10 分钟；文件可能比原版压缩音乐大。决斗普通／关键卡／高潮阶段使用不同曲目，可分别替换，或使用完整同阶段组替换。
 
 操作前先完全退出游戏。首次备份和校验记录保存在 `<游戏目录>/_MD卡图备份/场地与音乐`，使用“还原目标原版”恢复。该窗口的模型／音乐备份独立于旧图片 Mod 恢复库，目前不提供新的场地／音乐导出包入口。游戏内加载、播放和循环效果尚未验收，详见[功能边界](docs/releases/RELEASE-NOTES-v2.0.31.md)。
 
@@ -93,7 +97,7 @@ dotnet build '.\MdCardModTool\MdCardModTool.csproj' -c Release -p:Platform=x64
 
 dotnet publish '.\MdCardModTool\MdCardModTool.csproj' `
   -c Release -r win-x64 -p:Platform=x64 --self-contained true `
-  -o '.\发布\MD-Card-Mod-Tool-v2.0.32-win-x64'
+  -o '.\发布\MD-Card-Mod-Tool-v2.0.33-win-x64'
 ```
 
 发布包根目录只允许包含 EXE 与 `data`。`data` 内必须包含 `classdata.tpk`、预绑定卡图／动画索引、Astellar 超框模板、Floowan 卡框、`tools/texconv.exe`、`tools/ffmpeg.exe`、说明与第三方许可文件。

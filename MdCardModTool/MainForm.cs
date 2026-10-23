@@ -2479,8 +2479,7 @@ public sealed partial class MainForm : Form
 		{
 			if (texture.Category is "决斗场地" or "场地预览")
 			{
-				int id = DuelResourceCatalog.FieldId(texture.Name);
-				return id >= 0 && int.TryParse(query, out int number) && (number == id || number == 1090000 + id);
+				return int.TryParse(query, out int number) && DuelResourceCatalog.MatchesFieldId(texture, number);
 			}
 			if (!(texture.CardKey == query))
 			{

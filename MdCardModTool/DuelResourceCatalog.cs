@@ -13,20 +13,22 @@ internal sealed record DuelBundleSlot(string Key, string LogicalPath, string Bun
 	internal string Container => "assets/resourcesassetbundle/" + LogicalPath.ToLowerInvariant() + (Key == "music" ? ".wav" : ".prefab");
 }
 
-internal sealed record DuelField(int Id, string Names, IReadOnlyList<DuelBundleSlot> Models, TexRef? Preview)
+internal sealed record DuelField(int Id, string Names, IReadOnlyList<DuelBundleSlot> Models, TexRef? Preview, int ItemId = 0)
 {
 	public override string ToString() => $"{Id:000} · {Names} · {Models.Count} " + Localizer.T("duel.variants");
-	internal bool Matches(string query) => $"{Id:000} {1090000 + Id} {Names} Mat_{Id:000}".Contains(query.Trim(), StringComparison.OrdinalIgnoreCase);
+	internal bool Matches(string query) => $"{Id:000} {ItemId} {Names} Mat_{Id:000}".Contains(query.Trim(), StringComparison.OrdinalIgnoreCase);
 }
 
-internal sealed record DuelMusic(string Name, DuelBundleSlot Slot)
+internal sealed record DuelMusic(string Name, DuelBundleSlot Slot, string Annotation = "", string Group = "", string Phase = "")
 {
-	public override string ToString() => Name;
+	public override string ToString() => string.IsNullOrEmpty(Annotation) ? Name : $"{Name}（{Annotation}）";
+	internal bool Matches(string query) => ToString().Contains(query.Trim(), StringComparison.OrdinalIgnoreCase);
 }
 
 internal static class DuelResourceCatalog
 {
 	private static IReadOnlyDictionary<int, string> _fieldNames = new Dictionary<int, string>();
+	private static IReadOnlyDictionary<int, int> _modelItems = new Dictionary<int, int>();
 	internal static string? Locate(string gameRoot, string logical)
 	{
 		string relative = IndexService.ResourceBundleRelativePath(logical);
@@ -38,8 +40,20 @@ internal static class DuelResourceCatalog
 		var match = Regex.Match(name, @"^(?:Mat_(?<id>\d{3})(?:_|$)|FieldIcon109(?<id>\d{4})$)", RegexOptions.IgnoreCase);
 		return match.Success && int.TryParse(match.Groups["id"].Value, out int id) ? id : -1;
 	}
-	internal static string SearchNames(TexRef texture) => texture.Category is "决斗场地" or "场地预览"
-		&& _fieldNames.TryGetValue(FieldId(texture.Name), out var value) ? value : "";
+	internal static string SearchNames(TexRef texture)
+	{
+		int id = FieldId(texture.Name);
+		if (texture.Category == "决斗场地") id = _modelItems.TryGetValue(id, out int item) ? item - 1090000 : -1;
+		return texture.Category is "决斗场地" or "场地预览" && _fieldNames.TryGetValue(id, out var value) ? value : "";
+	}
+	internal static bool MatchesFieldId(TexRef texture, int number)
+	{
+		int id = FieldId(texture.Name);
+		if (id < 0) return false;
+		int item = texture.Category == "场地预览" ? 1090000 + id
+			: _modelItems.TryGetValue(id, out int mapped) ? mapped : 0;
+		return number >= 1090000 ? number == item : number == id || item != 0 && number == item - 1090000;
+	}
 
 	internal static void LoadNames(string gameRoot)
 	{
@@ -51,7 +65,7 @@ internal static class DuelResourceCatalog
 			try
 			{
 				var dictionary = ReadStringMap(GameCardCatalogUpdater.ReadDictionary(bundle, "IDS_ITEM"));
-				for (int id = 1; id <= 999; id++)
+				for (int id = 1; id <= 5999; id++)
 				{
 					string key = Path.GetFileName(IndexService.ResourceBundleRelativePath("ID" + (1090000 + id)));
 					if (!dictionary.TryGetValue(key, out string? value) || string.IsNullOrWhiteSpace(value)) continue;
@@ -62,6 +76,15 @@ internal static class DuelResourceCatalog
 			catch (Exception ex) when (ex is IOException or InvalidDataException or ArgumentException) { }
 		}
 		_fieldNames = names.ToDictionary(x => x.Key, x => string.Join(" / ", x.Value));
+		var models = new Dictionary<int, int>();
+		if (Locate(gameRoot, "Duel/ScriptableObject/Bg/BgMatModelSetting") is { } setting)
+		{
+			using var document = new DuelBundleDocument(setting);
+			var root = document.Field(document.Assets.file.GetAssetInfo(document.RootId));
+			foreach (var row in root["infoList"]["Array"].Children)
+				if (int.TryParse(row["modelName"].AsString, out int model)) models.Add(model, row["id"].AsInt);
+		}
+		_modelItems = models;
 	}
 
 	// The game's item dictionary is a MessagePack map of UTF-8 strings.
@@ -104,24 +127,27 @@ internal static class DuelResourceCatalog
 				if (Locate(gameRoot, logical) is { } path) models.Add(new(quality + "/" + side, logical, path));
 			}
 			TexRef? preview = null;
+			int itemId = _modelItems.TryGetValue(id, out int mappedItem) ? mappedItem : 0;
 			foreach (string quality in new[] { "HighEnd_HD", "SD" })
 			{
-				string logical = $"Images/Field/{quality}/FieldIcon{1090000 + id}";
+				if (itemId == 0) break;
+				string logical = $"Images/Field/{quality}/FieldIcon{itemId}";
 				if (Locate(gameRoot, logical) is not { } path) continue;
 				string? local = IndexService.FindLocalRoot(gameRoot);
 				bool isLocal = local != null && StandaloneResourceService.IsInside(path, local);
 				preview = new ModEngine().ScanBundle(path, isLocal ? local! : gameRoot, isLocal ? "视觉资源" : "基础视觉资源", false).Textures
-					.FirstOrDefault(x => x.Name.Equals("FieldIcon" + (1090000 + id), StringComparison.OrdinalIgnoreCase));
+					.FirstOrDefault(x => x.Name.Equals("FieldIcon" + itemId, StringComparison.OrdinalIgnoreCase));
 				if (preview != null) { preview.Category = "场地预览"; break; }
 			}
 			if (models.Count > 0 || preview != null) result.Add(new(id,
-				_fieldNames.TryGetValue(id, out string? name) ? name : $"Mat_{id:000}", models, preview));
+				_fieldNames.TryGetValue(itemId - 1090000, out string? name) ? name : $"Mat_{id:000}", models, preview, itemId));
 		}
 		return result;
 	}
 
 	internal static List<DuelMusic> Music(string gameRoot)
 	{
+		LoadNames(gameRoot);
 		var names = new HashSet<string>(StringComparer.Ordinal);
 		foreach (string name in File.ReadAllLines(AppPaths.ResolveFile("bgm-catalog-v1.txt")))
 			if (Regex.IsMatch(name, @"\ABGM_[A-Z0-9_]+\z")) names.Add(name);
@@ -137,6 +163,6 @@ internal static class DuelResourceCatalog
 		}
 		return names.OrderBy(x => x).Select(name => (Name: name, Logical: "Sound/AudioClip/BGM/" + name))
 			.Select(x => (x.Name, x.Logical, Path: Locate(gameRoot, x.Logical))).Where(x => x.Path != null)
-			.Select(x => new DuelMusic(x.Name, new("music", x.Logical, x.Path!))).ToList();
+			.Select(x => DuelMusicMetadata.Describe(x.Name, new("music", x.Logical, x.Path!), _fieldNames)).ToList();
 	}
 }

@@ -25,6 +25,10 @@ Native dependency notices: licenses/SkiaSharp-THIRD-PARTY-NOTICES.txt
 
 Other bundled dependencies and tools
 ------------------------------------
+YgoMaster community field-to-music metadata (MIT, copyright 2022 pixeltris)
+is adapted in bgm-fields-v1.tsv. Full source attribution and license:
+licenses/YGOMASTER-NOTICE.md.
+
 vgmstream r2117 is included as a separate command-line decoder for FSB5 music.
 Full attribution and dependency notices: licenses/VGMSTREAM-NOTICE.md and
 tools/vgmstream/COPYING with the adjacent library COPYING/LICENSE files.
