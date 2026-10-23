@@ -11,6 +11,9 @@ internal static class ModPackageTests
 {
 	public static void Run(string gameRoot, string output)
 	{
+		IndexService.SetPreferredLocalRoot(gameRoot, Directory.GetDirectories(Path.Combine(gameRoot, "LocalData"))
+			.Select(x => Path.Combine(x, "0000")).Where(Directory.Exists)
+			.OrderByDescending(x => Directory.EnumerateFiles(x, "*", SearchOption.AllDirectories).Count()).First());
 		Directory.CreateDirectory(output);
 		MonsterAnimationAssetRef[] array = MonsterAnimationIndexService.Find(gameRoot, "10001").Assets.DistinctBy((MonsterAnimationAssetRef x) => x.BundlePath).Take(2).ToArray();
 		if (array.Length != 2)

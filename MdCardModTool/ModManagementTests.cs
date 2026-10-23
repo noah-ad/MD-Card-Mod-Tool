@@ -15,6 +15,9 @@ internal static class ModManagementTests
 {
 	internal static void Run(string gameRoot, string output)
 	{
+		IndexService.SetPreferredLocalRoot(gameRoot, Directory.GetDirectories(Path.Combine(gameRoot, "LocalData"))
+			.Select(x => Path.Combine(x, "0000")).Where(Directory.Exists)
+			.OrderByDescending(x => Directory.EnumerateFiles(x, "*", SearchOption.AllDirectories).Count()).First());
 		Directory.CreateDirectory(output);
 		ModEngine engine = new();
 		MonsterAnimationAssetRef[] animation = MonsterAnimationIndexService.Find(gameRoot, "10001").Assets

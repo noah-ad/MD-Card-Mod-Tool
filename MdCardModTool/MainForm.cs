@@ -1913,6 +1913,8 @@ public sealed partial class MainForm : Form
 
 	private void ApplyInstallation(GameInstallation installation)
 	{
+		_duelModRows.Clear();
+		_duelPreviewOnlyRows.Clear();
 		_backgroundRefreshCancellation?.Cancel();
 		_gameRoot = installation.GameRoot;
 		_gameFolder.Text = installation.GameRoot;
@@ -2294,11 +2296,11 @@ public sealed partial class MainForm : Form
 			_category.Items.Add(categoryFilter);
 			_groups.BeginUpdate();
 			_groups.Nodes.Clear();
-			int num = _textures.Count((TexRef x) => x.IsModded);
+			int num = ManagedModRows().Count(x => x.IsModded);
 			TreeNode treeNode = _groups.Nodes.Add($"{Localizer.T("nav.mods")}（{num}）");
 			treeNode.Tag = "__mods__";
 			treeNode.ForeColor = UiTheme.Gold;
-			foreach (IGrouping<string, TexRef> item in from x in _textures.Where(PageMatches)
+			foreach (IGrouping<string, TexRef> item in from x in (_modsOnly ? ManagedModRows() : _textures.Where(PageMatches))
 				group x by x.SourceKind into x
 				orderby x.Key
 				select x)
@@ -2371,7 +2373,7 @@ public sealed partial class MainForm : Form
 			bool globalSearch = q.Length > 0 && _currentPage == WorkspacePage.Cards;
 			HashSet<int> matchedCardIds = (globalSearch ? (from x in _cardCatalog.Search(q, 250)
 				select x.CardId).ToHashSet() : null);
-			IEnumerable<TexRef> enumerable = _textures.Where((TexRef texRef) =>
+			IEnumerable<TexRef> enumerable = (_modsOnly ? ManagedModRows() : _textures).Where((TexRef texRef) =>
 				(_modsOnly ? texRef.IsModded && CategoryMatches(texRef, filter) : globalSearch || (PageMatches(texRef) && VisualShortcutMatches(texRef) && CategoryMatches(texRef, filter)))
 				&& MatchesSearch(texRef, q, matchedCardIds));
 			if (_modsOnly)
@@ -2389,7 +2391,7 @@ public sealed partial class MainForm : Form
 			{
 				if (selectedTextures.Contains(_visibleTextures[i])) _list.SelectedIndices.Add(i);
 			}
-			int num = (_modsOnly ? _textures.Count(x => x.IsModded) : globalSearch ? _textures.Count : _textures.Count(x => PageMatches(x) && VisualShortcutMatches(x)));
+			int num = (_modsOnly ? ManagedModRows().Count(x => x.IsModded) : globalSearch ? _textures.Count : _textures.Count(x => PageMatches(x) && VisualShortcutMatches(x)));
 			_resultCount.Text = Localizer.F(globalSearch && !_modsOnly ? "list.global_count" : "list.count", _visibleTextures.Count, num);
 		}
 		finally
@@ -2408,7 +2410,7 @@ public sealed partial class MainForm : Form
 		{
 			DisplayResourceName(texture),
 			$"{ResourceLabel(texture.SourceKind)} / {ResourceLabel(texture.Category)}{(texture.HasMonsterAnimation ? ("  · " + ResourceLabel("动画")) : "")}{(texture.IsModded ? "  · MOD" : "")}",
-			$"{texture.Width}×{texture.Height}"
+			texture.ManagedDuel is { } managed ? $"{managed.Slots.Count} Bundle" : $"{texture.Width}×{texture.Height}"
 		};
 		if (_modsOnly) cells.Add(texture.ModModifiedAtUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—");
 		cells.Add(texture.RelativeBundlePath);
@@ -2791,6 +2793,7 @@ public sealed partial class MainForm : Form
 			// Hiding a focused Mod toolbar can move focus into the category
 			// tree and cause AfterSelect. That is not a new navigation request.
 			_modsOnly = enabled;
+			RefreshCategories();
 			UpdateModColumns();
 			UpdateModsOnlyButtonText();
 			UpdateModSummary();
@@ -2842,7 +2845,7 @@ public sealed partial class MainForm : Form
 
 	private void UpdateModSummary()
 	{
-		TexRef[] array = _textures.Where((TexRef x) => x.IsModded).ToArray();
+		TexRef[] array = ManagedModRows().Where(x => x.IsModded).ToArray();
 		_modSummary.Text = _changedModBundleCount == 0 ? Localizer.T("mods.summary.empty") :
 			Localizer.F("mods.summary", array.Length, _changedModBundleCount, _changedAnimationBundleCount);
 		_modPageSummary.Text = _modSummary.Text;
@@ -2856,13 +2859,14 @@ public sealed partial class MainForm : Form
 		var textures = _textures.ToList();
 		if (root != null)
 		{
-			ModChangeSummary modChangeSummary = await Task.Run(delegate
+			var state = await Task.Run(delegate
 			{
-				return _mods.RefreshState(root, textures);
+				return (Summary: _mods.RefreshState(root, textures), Duel: DuelModInventory.Read(root));
 			});
 			if (IsDisposed || generation != _scanGeneration || root != _gameRoot || local != _assetRoot) return;
-			_changedModBundleCount = modChangeSummary.BundleCount;
-			_changedAnimationBundleCount = modChangeSummary.AnimationBundleCount;
+			ApplyDuelModRows(root, state.Duel);
+			_changedModBundleCount = state.Summary.BundleCount;
+			_changedAnimationBundleCount = state.Summary.AnimationBundleCount;
 			UpdateModSummary();
 		}
 	}
@@ -2903,6 +2907,7 @@ public sealed partial class MainForm : Form
 		}
 		try
 		{
+			if (ShowDuelModSelection(x)) return;
 			byte[] data = await DecodeWithReferenceRepairAsync(x, cancellationToken);
 			cancellationToken.ThrowIfCancellationRequested();
 			GameTextureDisplayMapping displayMapping = DisplayMappingFor(x);
@@ -3032,6 +3037,7 @@ public sealed partial class MainForm : Form
 	private async Task ReplaceSelectedAsync(string? image = null)
 	{
 		TexRef x = Selected();
+		if (x?.ManagedDuel != null) { MessageBox.Show(this, "场地模型与音乐请通过“场地与音乐”替换。", Text); return; }
 		if (x == null || _gameRoot == null)
 		{
 			MessageBox.Show(this, "先选择一张图片。", Text);
@@ -3137,9 +3143,10 @@ public sealed partial class MainForm : Form
 	{
 		TexRef[] selection = _modsOnly ? SelectedModTextures() : Selected() is TexRef single ? new[] { single } : Array.Empty<TexRef>();
 		if (selection.Length == 0 || _gameRoot == null) return;
+		selection = ResolveManagedSelection(selection);
 		string gameRoot = _gameRoot;
 		var bundles = selection.DistinctBy(texture => texture.BundlePath, StringComparer.OrdinalIgnoreCase).ToArray();
-		string message = $"确认还原选中的 {bundles.Length} 个图片 Bundle？\n\n会一并恢复所选卡原本的超框登记：普通卡关闭，官方原生超框保留。其他卡的登记不变。共享 Bundle 中的其他贴图也会还原。";
+		string message = $"确认还原选中的 {selection.Length} 项 MOD（图片／场地模型／音乐）？\n\n场地恢复所选项中全部已修改的模型变体；音乐恢复所选曲目。会恢复所选卡原本的超框登记。共享资源的其他使用者也会受影响。首次备份保留。";
 		if (MessageBox.Show(this, message, "确认还原", MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation) != DialogResult.OK) return;
 		try
 		{
@@ -3151,7 +3158,7 @@ public sealed partial class MainForm : Form
 			base.UseWaitCursor = true;
 			if (_backgroundRefreshTask != null) await _backgroundRefreshTask;
 			await RestoreTextureModsAsync(gameRoot, selection);
-			_status.Text = $"已还原 {bundles.Length} 个图片 Bundle，并恢复所选卡原本的超框登记。";
+			_status.Text = $"已还原 {selection.Length} 项 MOD，并恢复所选卡原本的超框登记。";
 		}
 		catch (Exception ex)
 		{
@@ -3172,14 +3179,15 @@ public sealed partial class MainForm : Form
 		{
 			DirectModArchive.EnsureGameClosed();
 			new TextureModRestoreService(_recoveryStore, _overFrames).Restore(gameRoot, selection);
-			return selection.DistinctBy(texture => texture.BundlePath, StringComparer.OrdinalIgnoreCase).SelectMany(texture =>
+			return selection.Where(texture => texture.ManagedDuel == null).DistinctBy(texture => texture.BundlePath, StringComparer.OrdinalIgnoreCase).SelectMany(texture =>
 			{
 				string root = texture.SourceKind is "本地卡图" or "视觉资源" ? IndexService.FindLocalRoot(gameRoot)! :
 					texture.SourceKind == "游戏内图片" ? IndexService.StreamingRoot(gameRoot) : gameRoot;
 				return _engine.ScanBundle(texture.BundlePath, root, texture.SourceKind, includeDependencies: false).Textures;
 			}).ToList();
 		});
-		var paths = selection.Select(texture => texture.BundlePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+		await ReloadChangedBundlesAsync(selection.Where(x => x.ManagedDuel != null).SelectMany(x => x.ManagedDuel!.Slots).Select(x => x.BundlePath).ToArray());
+		var paths = selection.Where(x => x.ManagedDuel == null).Select(texture => texture.BundlePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
 		_textures.RemoveAll(texture => paths.Contains(texture.BundlePath));
 		foreach (var texture in restored)
 		{
@@ -3201,6 +3209,7 @@ public sealed partial class MainForm : Form
 	private async Task ExportSelectedAsync()
 	{
 		TexRef texRef = Selected();
+		if (texRef?.ManagedDuel != null) { MessageBox.Show(this, "请使用 MOD 管理的“导出选中”备份完整资源。", Text); return; }
 		if (texRef == null)
 		{
 			return;
@@ -3241,6 +3250,7 @@ public sealed partial class MainForm : Form
 		{
 			return;
 		}
+		if (texRef.ManagedDuel != null) return;
 		try
 		{
 			string path = Path.Combine(Path.GetTempPath(), "MDCardModTool", Safe(texRef.Name) + "_" + texRef.PathId + ".png");

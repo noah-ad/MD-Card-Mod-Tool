@@ -17,6 +17,9 @@ internal static class TextureModRestoreTests
 {
     internal static void Run(string gameRoot, string output)
     {
+		IndexService.SetPreferredLocalRoot(gameRoot, Directory.GetDirectories(Path.Combine(gameRoot, "LocalData"))
+			.Select(x => Path.Combine(x, "0000")).Where(Directory.Exists)
+			.OrderByDescending(x => Directory.EnumerateFiles(x, "*", SearchOption.AllDirectories).Count()).First());
         if (ModRecoveryStore.IsUnder(output, gameRoot)) throw new ArgumentException("Tests must not write to real game resources.");
         Directory.CreateDirectory(output);
         var engine = new ModEngine();

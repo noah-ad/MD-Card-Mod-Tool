@@ -15,7 +15,7 @@
 	<DebugType>None</DebugType>
 	<DebugSymbols>false</DebugSymbols>
     <Nullable>enable</Nullable>
-    <Version>2.0.33</Version>
+    <Version>2.0.34</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationIcon>Resources\app-icon.ico</ApplicationIcon>
 	<Win32Icon>Resources\app-icon.ico</Win32Icon>
@@ -27,8 +27,8 @@
   <PropertyGroup />
   <ItemGroup>
     <Content Include="Resources\bgm-fields-v1.tsv" Link="data\bgm-fields-v1.tsv" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="..\docs\releases\RELEASE-NOTES-v2.0.33.md" Link="data\RELEASE-NOTES-v2.0.33.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="..\docs\testing\TEST-REPORT-v2.0.33.md" Link="data\TEST-REPORT-v2.0.33.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\docs\releases\RELEASE-NOTES-v2.0.34.md" Link="data\RELEASE-NOTES-v2.0.34.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\docs\testing\TEST-REPORT-v2.0.34.md" Link="data\TEST-REPORT-v2.0.34.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Compile Remove="ApplicationConfiguration.cs" />
     <Compile Remove="Spine42CompatibilityResult.cs" />
     <Compile Remove="--z__ReadOnlySingleElementList.cs" />

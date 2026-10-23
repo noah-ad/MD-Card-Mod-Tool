@@ -23,6 +23,13 @@ internal static class DuelResourceTests
 		string local = Path.Combine(mirror, "LocalData", "test", "0000"); Directory.CreateDirectory(local);
 		var hashes = new Dictionary<string, string>();
 		void Require(bool condition, string label) { if (!condition) throw new Exception(label); Console.WriteLine("PASS " + label); }
+		void Finish(System.Threading.Tasks.Task task)
+		{
+			DateTime deadline = DateTime.UtcNow.AddSeconds(60);
+			while (!task.IsCompleted && DateTime.UtcNow < deadline) { Application.DoEvents(); System.Threading.Thread.Sleep(10); }
+			if (!task.IsCompleted) throw new TimeoutException("UI test task timed out");
+			task.GetAwaiter().GetResult();
+		}
 		void CopyLogical(string logical)
 		{
 			string? original = DuelResourceCatalog.Locate(realRoot, logical); if (original == null) return;
@@ -157,6 +164,108 @@ internal static class DuelResourceTests
 		}
 		service.Restore(mirror, new[] { audioTarget.Slot });
 		Require(DuelResourceService.Hash(audioTarget.Slot.BundlePath) == audioHash, "import restore / immutable first backup");
+		service.ReplaceField(mirror, target, source);
+		service.ReplaceMusicGroup(mirror, music, audioTarget, audioSource);
+		var managed = DuelModInventory.Read(mirror);
+		Require(managed.Count == 4 && managed.Single(x => x.Kind == "场地模型").Slots.Count == 2 && managed.All(x => x.Verified), "existing field and music records unified into MOD inventory");
+		var rows = managed.Select(x => x.Row(mirror)).ToArray();
+		var packageService = new ModPackageService();
+		string managedPackage = Path.Combine(output, "duel-mod-backup.zip");
+		Require(packageService.ExportSelected(mirror, Array.Empty<TexRef>(), rows, managedPackage).BundleCount == 5, "selected MOD backup includes both field variants and all music");
+		var modifiedHashes = managed.SelectMany(x => x.Slots).ToDictionary(x => x.BundlePath, x => DuelResourceService.Hash(x.BundlePath));
+		var originalBackupHashes = managed.SelectMany(x => x.Slots).ToDictionary(x => DuelResourceService.BackupPath(mirror, x), x => DuelResourceService.Hash(DuelResourceService.BackupPath(mirror, x)));
+		using (var main = new MainForm(_ => { }, backgroundRefresh: false))
+		{
+			var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+			typeof(MainForm).GetField("_gameRoot", flags)!.SetValue(main, mirror);
+			typeof(MainForm).GetField("_assetRoot", flags)!.SetValue(main, local);
+			var mainTextures = (List<TexRef>)typeof(MainForm).GetField("_textures", flags)!.GetValue(main)!;
+			mainTextures.Clear(); mainTextures.Add(target.Preview!);
+			Finish((System.Threading.Tasks.Task)typeof(MainForm).GetMethod("RefreshModFlagsAsync", flags)!.Invoke(main, null)!);
+			typeof(MainForm).GetMethod("SetModsOnly", flags)!.Invoke(main, new object[] { true });
+			typeof(MainForm).GetMethod("RenderList", flags)!.Invoke(main, null);
+			var visible = (List<TexRef>)typeof(MainForm).GetField("_visibleTextures", flags)!.GetValue(main)!;
+			Require(visible.Count == 4 && visible.All(x => x.IsModded && x.ManagedDuel != null), "MOD management shows one field row and music rows without duplicate preview");
+			Require(target.Preview!.IsModded, "field preview receives yellow MOD flag");
+			string previewBackup = Path.Combine(mirror, "_MD卡图备份", target.Preview!.SourceKind, target.Preview.RelativeBundlePath);
+			Directory.CreateDirectory(Path.GetDirectoryName(previewBackup)!); File.Copy(target.Preview.BundlePath, previewBackup);
+			File.Copy(source.Preview!.BundlePath, target.Preview.BundlePath, true);
+			Finish((System.Threading.Tasks.Task)typeof(MainForm).GetMethod("RefreshModFlagsAsync", flags)!.Invoke(main, null)!);
+			typeof(MainForm).GetMethod("RenderList", flags)!.Invoke(main, null);
+			Require(visible.Count == 5 && visible.Contains(target.Preview!), "independent modified field preview remains in MOD management");
+			var resolved = (TexRef[])typeof(MainForm).GetMethod("ResolveManagedSelection", flags)!.Invoke(main, new object[] { new[] { target.Preview! } })!;
+			Require(resolved.Single().ManagedDuel == null, "independent field preview restores as an image");
+			new TextureModRestoreService().Restore(mirror, resolved);
+			Finish((System.Threading.Tasks.Task)typeof(MainForm).GetMethod("RefreshModFlagsAsync", flags)!.Invoke(main, null)!);
+			typeof(MainForm).GetMethod("RenderList", flags)!.Invoke(main, null);
+			main.Show(); Application.DoEvents();
+			using var capture = new System.Drawing.Bitmap(main.Width, main.Height);
+			main.DrawToBitmap(capture, new System.Drawing.Rectangle(0, 0, main.Width, main.Height));
+			capture.Save(Path.Combine(output, "mod-manager-ui.png"));
+		}
+		using (var form = new DuelResourceForm(mirror))
+		{
+			var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+			Finish((System.Threading.Tasks.Task)typeof(DuelResourceForm).GetMethod("RefreshModColors", flags)!.Invoke(form, null)!);
+			Require(form.ItemColor(target) == UiTheme.Gold && form.ItemColor(audioTarget) == UiTheme.Gold && form.ItemColor(audioSource) == UiTheme.Text, "modified field and music text yellow; original remains normal");
+		}
+		string imagePath = Path.Combine(local, "ab", "abcd1234");
+		string imageBackup = Path.Combine(mirror, "_MD卡图备份", "视觉资源", "ab", "abcd1234");
+		Directory.CreateDirectory(Path.GetDirectoryName(imagePath)!); Directory.CreateDirectory(Path.GetDirectoryName(imageBackup)!);
+		File.Copy(DuelResourceService.BackupPath(mirror, target.Models[0]), imageBackup);
+		File.Copy(source.Models[0].BundlePath, imagePath);
+		var imageRow = new ModEngine().ScanBundle(imagePath, local, "视觉资源", false).Textures.First();
+		var mixedRows = rows.Append(imageRow).ToArray();
+		modifiedHashes[imagePath] = DuelResourceService.Hash(imagePath);
+		var restoreService = new TextureModRestoreService();
+		rejected = false;
+		try { restoreService.Restore(mirror, mixedRows, _ => throw new IOException("batch restore failure")); } catch (IOException) { rejected = true; }
+		Require(rejected && modifiedHashes.All(x => DuelResourceService.Hash(x.Key) == x.Value), "batch restore rollback preserves all modified resources");
+		restoreService.Restore(mirror, mixedRows);
+		Require(DuelResourceService.Hash(imagePath) == DuelResourceService.Hash(imageBackup), "mixed image field music batch restore");
+		modifiedHashes.Remove(imagePath);
+		Require(DuelModInventory.Read(mirror).Count == 0 && originalHashes.All(x => DuelResourceService.Hash(x.Key) == x.Value) && groupHashes.All(x => DuelResourceService.Hash(x.Key) == x.Value), "MOD batch restore returns all originals and clears inventory");
+		rejected = false;
+		try { packageService.Import(mirror, managedPackage, afterCommit: _ => throw new IOException("import failure")); } catch (IOException) { rejected = true; }
+		Require(rejected && DuelModInventory.Read(mirror).Count == 0, "MOD backup import partial failure rolls back");
+		Require(packageService.Import(mirror, managedPackage).BundleCount == 5 && modifiedHashes.All(x => DuelResourceService.Hash(x.Key) == x.Value), "MOD backup import reapplies field and music with managed records");
+		Require(originalBackupHashes.All(x => DuelResourceService.Hash(x.Key) == x.Value), "MOD backup import keeps immutable first originals");
+		byte[] acceptedMusic = File.ReadAllBytes(audioTarget.Slot.BundlePath);
+		using (var edit = new FileStream(audioTarget.Slot.BundlePath, FileMode.Append)) edit.WriteByte(42);
+		var unknown = DuelModInventory.Read(mirror).Single(x => x.Slots.Any(s => s.BundlePath == audioTarget.Slot.BundlePath));
+		Require(!unknown.Verified && unknown.Row(mirror).IsModded, "unknown external edit remains visible and flagged");
+		rejected = false; try { restoreService.Restore(mirror, new[] { unknown.Row(mirror) }); } catch (IOException) { rejected = true; }
+		Require(rejected && File.ReadAllBytes(audioTarget.Slot.BundlePath).Last() == 42, "unknown external edit protected from restore");
+		rejected = false; try { packageService.ExportSelected(mirror, Array.Empty<TexRef>(), new[] { unknown.Row(mirror) }, Path.Combine(output, "unknown.zip")); } catch (IOException) { rejected = true; }
+		Require(rejected, "unknown external edit protected from export");
+		File.WriteAllBytes(audioTarget.Slot.BundlePath, acceptedMusic);
+		restoreService.Restore(mirror, DuelModInventory.Read(mirror).Select(x => x.Row(mirror)).ToArray());
+		string badPackage = Path.Combine(output, "wrong-build.zip"); File.Copy(managedPackage, badPackage);
+		using (var zip = System.IO.Compression.ZipFile.Open(badPackage, System.IO.Compression.ZipArchiveMode.Update))
+		{
+			var entry = zip.GetEntry("manifest.json")!;
+			System.Text.Json.Nodes.JsonNode manifest;
+			using (var stream = entry.Open()) manifest = System.Text.Json.Nodes.JsonNode.Parse(stream)!;
+			foreach (var item in manifest["Entries"]!.AsArray()) item!["GameBuild"] = "incompatible-test-build";
+			entry.Delete(); using var writer = new StreamWriter(zip.CreateEntry("manifest.json").Open()); writer.Write(manifest.ToJsonString());
+		}
+		rejected = false; try { packageService.Import(mirror, badPackage); } catch (InvalidDataException) { rejected = true; }
+		Require(rejected && DuelModInventory.Read(mirror).Count == 0, "different game build rejected without writes");
+		string otherRoot = Path.Combine(output, "other-account"), otherLocal = Path.Combine(otherRoot, "LocalData", "different-user", "0000");
+		foreach (string file in Directory.EnumerateFiles(local, "*", SearchOption.AllDirectories))
+		{
+			string destination = Path.Combine(otherLocal, Path.GetRelativePath(local, file));
+			Directory.CreateDirectory(Path.GetDirectoryName(destination)!); File.Copy(file, destination);
+		}
+		IndexService.SetPreferredLocalRoot(otherRoot, otherLocal);
+		Require(packageService.Import(otherRoot, managedPackage).BundleCount == 5 && DuelModInventory.Read(otherRoot).Count == 4, "MOD backup maps to current different account");
+		restoreService.Restore(otherRoot, DuelModInventory.Read(otherRoot).Select(x => x.Row(otherRoot)).ToArray());
+		Require(DuelModInventory.Read(otherRoot).Count == 0, "imported account has usable original backups");
+		using (var form = new DuelResourceForm(mirror))
+		{
+			Finish((System.Threading.Tasks.Task)typeof(DuelResourceForm).GetMethod("RefreshModColors", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, null)!);
+			Require(form.ItemColor(target) == UiTheme.Text && form.ItemColor(audioTarget) == UiTheme.Text, "restored field and music return to normal text");
+		}
 		foreach (var language in Enum.GetValues<AppLanguage>())
 		{
 			Localizer.SetLanguage(language);

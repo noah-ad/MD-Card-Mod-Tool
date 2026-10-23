@@ -62,6 +62,56 @@ internal sealed class DuelResourceService
 			throw new InvalidDataException("备份版本、目标或校验不符，请勿覆盖旧备份。");
 		return record;
 	}
+	internal static DuelBundleSlot ManagedSlot(string root, string container)
+	{
+		var music = Regex.Match(container, @"\Aassets/resourcesassetbundle/sound/audioclip/bgm/(bgm_[a-z0-9_]+)\.wav\z", RegexOptions.IgnoreCase);
+		string key, logical;
+		if (music.Success) { key = "music"; logical = "Sound/AudioClip/BGM/" + music.Groups[1].Value.ToUpperInvariant(); }
+		else
+		{
+			var model = Regex.Match(container, @"\Aassets/resourcesassetbundle/duel/bg/mat/mat_(\d{3})/(sd|hd|highend_hd)/mat_\1_(near|far)\.prefab\z", RegexOptions.IgnoreCase);
+			if (!model.Success) throw new InvalidDataException("不支持的场地／音乐管理记录。");
+			string quality = model.Groups[2].Value.ToLowerInvariant() switch { "sd" => "SD", "hd" => "HD", _ => "HighEnd_HD" };
+			string side = model.Groups[3].Value.ToLowerInvariant(), id = model.Groups[1].Value;
+			key = quality + "/" + side; logical = $"Duel/BG/Mat/Mat_{id}/{quality}/Mat_{id}_{side}";
+		}
+		return new(key, logical, DuelResourceCatalog.Locate(root, logical) ?? throw new FileNotFoundException("当前账号尚未下载：" + logical));
+	}
+	internal static string ValidatedOriginal(string root, DuelBundleSlot slot)
+	{
+		ValidateSlot(root, slot);
+		var record = ReadRecord(root, slot) ?? throw new IOException("该资源没有首次备份。");
+		string hash = Hash(slot.BundlePath);
+		if (hash != record.Original && !record.Accepted.Contains(hash)) throw new IOException("目标存在未知修改，拒绝还原：" + slot.LogicalPath);
+		return BackupPath(root, slot);
+	}
+	internal void PreparePackageImport(string root, DuelBundleSlot slot, string staged)
+	{
+		lock (Gate)
+		{
+			EnsureClosed(root); ValidateSlot(root, slot);
+			using (var check = new DuelBundleDocument(staged, slot.Container))
+			{
+				if (slot.Key == "music") _ = check.AudioBytes();
+				foreach (string dep in check.Dependencies)
+				{
+					if (!Regex.IsMatch(dep.Replace('\\', '/'), @"\A[0-9a-f]{2}/[0-9a-f]{8}\z")
+						|| !new[] { IndexService.FindLocalRoot(root), IndexService.StreamingRoot(root) }.Where(x => x != null).Any(x => File.Exists(Path.Combine(x!, dep))))
+						throw new IOException("Mod 包场地依赖缺失或无效：" + dep);
+				}
+			}
+			string current = Hash(slot.BundlePath), backup = BackupPath(root, slot);
+			var record = ReadRecord(root, slot);
+			if (record != null && current != record.Original && !record.Accepted.Contains(current)) throw new IOException("目标存在未知修改：" + slot.LogicalPath);
+			record ??= new() { Build = PortableIndexService.GetGameBuildId(root), Target = Path.GetFullPath(slot.BundlePath), Container = slot.Container, Original = current };
+			Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
+			if (!File.Exists(backup)) File.Copy(slot.BundlePath, backup, false);
+			if (Hash(backup) != record.Original || Hash(slot.BundlePath) != current) throw new IOException("首次备份或目标校验失败。");
+			string next = Hash(staged);
+			if (!record.Accepted.Contains(next)) record.Accepted.Add(next);
+			SaveRecord(backup + ".json", record);
+		}
+	}
 	internal static string State(string root, DuelBundleSlot slot)
 	{
 		try

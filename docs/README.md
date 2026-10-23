@@ -1,6 +1,6 @@
 # 项目文档
 
-当前 fork：[2.0.33 下载](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/latest)、[版本说明](releases/RELEASE-NOTES-v2.0.33.md)、[测试记录](testing/TEST-REPORT-v2.0.33.md)、[SHA-256](checksums/SHA256SUMS-v2.0.33.txt)。下方旧版条目为上游历史资料。
+当前 fork：[2.0.34 下载](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/latest)、[版本说明](releases/RELEASE-NOTES-v2.0.34.md)、[测试记录](testing/TEST-REPORT-v2.0.34.md)、[SHA-256](checksums/SHA256SUMS-v2.0.34.txt)。下方旧版条目为上游历史资料。
 
 软件下载请前往 [GitHub 发行版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/latest)，使用说明与主要功能见[仓库首页](../README.md)。本目录收纳版本、测试、恢复及许可资料，避免历史文件堆在首页。
 

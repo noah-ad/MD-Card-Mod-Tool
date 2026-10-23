@@ -15,4 +15,7 @@ public sealed class ModPackageEntry
 	public string Sha256 { get; init; } = "";
 
 	public long Size { get; init; }
+
+	public string DuelContainer { get; init; } = "";
+	public string GameBuild { get; init; } = "";
 }

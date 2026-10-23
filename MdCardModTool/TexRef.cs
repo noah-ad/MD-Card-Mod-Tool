@@ -31,6 +31,9 @@ public sealed class TexRef
 	public DateTime? ModModifiedAtUtc { get; set; }
 
 	[JsonIgnore]
+	internal DuelManagedMod? ManagedDuel { get; set; }
+
+	[JsonIgnore]
 	public bool HasMonsterAnimation { get; set; }
 
 	public string SourceKind { get; init; } = "";

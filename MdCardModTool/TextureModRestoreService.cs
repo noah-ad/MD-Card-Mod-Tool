@@ -25,7 +25,10 @@ internal sealed class TextureModRestoreService
         if (selection.Count == 0) throw new ArgumentException("请先选择要还原的 Mod。");
         if (selection.Any(texture => !IndexWorkspaceGuard.Belongs(gameRoot, texture)))
             throw new InvalidOperationException("目标账号或目录已切换，请重新选择资源。");
-        var selected = selection.DistinctBy(texture => Path.GetFullPath(texture.BundlePath), StringComparer.OrdinalIgnoreCase).ToArray();
+        var managedPaths = selection.Where(x => x.ManagedDuel != null).SelectMany(x => x.ManagedDuel!.Slots)
+            .Select(x => Path.GetFullPath(x.BundlePath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var selected = selection.Where(x => x.ManagedDuel != null || !managedPaths.Contains(Path.GetFullPath(x.BundlePath)))
+            .DistinctBy(texture => Path.GetFullPath(texture.BundlePath), StringComparer.OrdinalIgnoreCase).ToArray();
         var cards = selection.Where(CardTextureRules.HasCardIdentity).Select(texture => ushort.Parse(texture.CardKey)).Distinct().ToArray();
         var registration = _frames.PrepareRegistrationRestore(gameRoot, cards);
         var pending = new List<Pending>();
@@ -36,6 +39,18 @@ internal sealed class TextureModRestoreService
         {
             foreach (var texture in selected)
             {
+                if (texture.ManagedDuel is { } duel)
+                {
+                    foreach (var slot in duel.Slots)
+                    {
+                        string original = DuelResourceService.ValidatedOriginal(gameRoot, slot);
+                        var resource = Stage(slot.BundlePath);
+                        File.Copy(original, resource.Stage, true);
+                        using var check = new DuelBundleDocument(resource.Stage, slot.Container);
+                        if (slot.Key == "music") _ = check.AudioBytes();
+                    }
+                    continue;
+                }
                 string backup = Path.Combine(gameRoot, "_MD卡图备份", texture.SourceKind, texture.RelativeBundlePath);
                 if (!File.Exists(backup)) throw new FileNotFoundException("该 Bundle 尚未备份，未开始还原。", backup);
                 DirectModArchive.EnsureNoLinks(backup);
@@ -72,7 +87,7 @@ internal sealed class TextureModRestoreService
                     committed.Add(write);
                     afterCommit?.Invoke(committed.Count);
                 }
-                _store.DeactivateBundles(gameRoot, selection);
+                _store.DeactivateBundles(gameRoot, selection.Where(x => x.ManagedDuel == null).ToArray());
             }
             catch (Exception error)
             {
@@ -84,13 +99,15 @@ internal sealed class TextureModRestoreService
                     keep = true;
                     throw new AggregateException("还原回滚未完成，请保留事务目录：" + staging, failures.Prepend(error));
                 }
-                throw new IOException("还原失败；贴图与超框开关已一起回滚。", error);
+                throw new IOException("还原失败；所选资源已一起回滚。", error);
             }
         }
         finally { if (!keep && Directory.Exists(staging)) Directory.Delete(staging, true); }
 
         Pending Stage(string target)
         {
+            var existing = pending.FirstOrDefault(x => x.Target.Equals(target, StringComparison.OrdinalIgnoreCase));
+            if (existing != null) return existing;
             DirectModArchive.EnsureNoLinks(target);
             string name = pending.Count.ToString("D5");
             string original = Path.Combine(staging, name + ".original");

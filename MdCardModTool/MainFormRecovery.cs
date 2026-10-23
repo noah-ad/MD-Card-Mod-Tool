@@ -40,14 +40,23 @@ public sealed partial class MainForm
 	{
 		if (_recoveringMods || _gameRoot == null) return;
 		string root = _gameRoot;
-		TexRef[] textures = _textures.Where(x => x.IsModded && !BuiltInCardFrameCatalog.IsPackagedFrame(x)).ToArray();
-		if (textures.Length == 0) { MessageBox.Show(this, Localizer.T("mods.recovery.snapshotEmpty"), Text); return; }
-		if (MessageBox.Show(this, Localizer.F("mods.recovery.snapshotConfirm", textures.Length), Localizer.T("mods.recovery.title"), MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
+		TexRef[] textures = ManagedModRows().Where(x => x.ManagedDuel == null && x.IsModded && !BuiltInCardFrameCatalog.IsPackagedFrame(x)).ToArray();
+		TexRef[] duel = _duelModRows.ToArray();
+		if (textures.Length == 0 && duel.Length == 0) { MessageBox.Show(this, Localizer.T("mods.recovery.snapshotEmpty"), Text); return; }
+		if (MessageBox.Show(this, Localizer.F("mods.recovery.snapshotConfirm", textures.Length + duel.Length)
+			+ (duel.Length > 0 ? "\n\n场地／音乐将另存为完整 Mod 备份包，可用“导入 Mod 包”恢复同游戏版本的修改。" : ""), Localizer.T("mods.recovery.title"), MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
 		await RunRecoveryWorkAsync(async progress =>
 		{
 			var errors = new System.Collections.Generic.List<string>();
+			string? duelBackup = null;
 			int saved = await Task.Run(() =>
 			{
+				if (duel.Length > 0)
+				{
+					progress.Token.ThrowIfCancellationRequested();
+					duelBackup = Path.Combine(_recoveryStore.Folder(root), "场地与音乐备份", "Duel-Mods-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".zip");
+					_mods.ExportSelected(root, textures, duel, duelBackup);
+				}
 				var mappings = _overFrames.ReadCached(root).GroupBy(x => x.CardId).ToDictionary(x => x.Key, x => x.Last().ArtId);
 				var changedPaths = _mods.ChangedTextureBundlePaths(root, textures);
 				var imageMods = textures.Where(x => changedPaths.Contains(Path.GetFullPath(x.BundlePath))).ToArray();
@@ -65,9 +74,9 @@ public sealed partial class MainForm
 					catch (Exception ex) { errors.Add(texture.Name + ": " + ex.Message); }
 					progress.Report(done + errors.Count, imageMods.Length, texture.Name);
 				}
-				return done;
+				return done + duel.Length;
 			}, progress.Token);
-			MessageBox.Show(this, Localizer.F("mods.recovery.snapshotDone", saved) + (errors.Count > 0 ? "\n\n" + string.Join("\n", errors.Take(12)) : ""),
+			MessageBox.Show(this, Localizer.F("mods.recovery.snapshotDone", saved) + (duelBackup != null ? "\n\n场地／音乐备份包：\n" + duelBackup + "\n使用“导入 Mod 包”恢复，不支持跨游戏版本覆盖。" : "") + (errors.Count > 0 ? "\n\n" + string.Join("\n", errors.Take(12)) : ""),
 				Localizer.T("mods.recovery.title"), MessageBoxButtons.OK, errors.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
 		});
 	}

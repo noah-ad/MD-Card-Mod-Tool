@@ -36,6 +36,7 @@ internal sealed class DuelResourceForm : Form
 	private List<DuelField> _fields = new();
 	private List<DuelMusic> _music = new();
 	private bool _busy;
+	private HashSet<string> _changedPaths = new(StringComparer.OrdinalIgnoreCase);
 	private int _targetGeneration, _sourceGeneration;
 	internal DuelResourceForm(string gameRoot)
 	{
@@ -46,6 +47,18 @@ internal sealed class DuelResourceForm : Form
 		Font = new Font("Microsoft YaHei UI", 9.5f);
 		UiTheme.ApplyDarkTitleBar(this);
 		UiTheme.StyleComboBox(_mode);
+		foreach (var list in new[] { _targets, _sources })
+		{
+			list.DrawMode = DrawMode.OwnerDrawFixed; list.ItemHeight = Font.Height + 5;
+			list.DrawItem += (_, e) =>
+			{
+				if (e.Index < 0) return;
+				e.DrawBackground();
+				object item = list.Items[e.Index];
+				TextRenderer.DrawText(e.Graphics, item.ToString(), list.Font, e.Bounds, ItemColor(item), TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+				e.DrawFocusRectangle();
+			};
+		}
 		UiTheme.StyleTextBox(_targetSearch); UiTheme.StyleTextBox(_sourceSearch);
 		var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 1, RowCount = 4 };
 		layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
@@ -112,8 +125,9 @@ internal sealed class DuelResourceForm : Form
 		SetBusy(true); _details.Text = Localizer.T("duel.loading");
 		try
 		{
-			var data = await Task.Run(() => (Fields: DuelResourceCatalog.Fields(_root), Music: DuelResourceCatalog.Music(_root)));
+			var data = await Task.Run(() => (Fields: DuelResourceCatalog.Fields(_root), Music: DuelResourceCatalog.Music(_root), Mods: DuelModInventory.Read(_root)));
 			_fields = data.Fields; _music = data.Music;
+			_changedPaths = data.Mods.SelectMany(x => x.Slots).Select(x => x.BundlePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
 			Filter(true); Filter(false);
 			_details.Text = Localizer.F("duel.loaded", _fields.Count, _music.Count) + Environment.NewLine + Localizer.T("duel.boundary");
 		}
@@ -131,6 +145,19 @@ internal sealed class DuelResourceForm : Form
 		if (selected != null && list.Items.Contains(selected)) list.SelectedItem = selected;
 		else if (list.Items.Count > 0) list.SelectedIndex = 0;
 		list.EndUpdate();
+		list.HorizontalExtent = list.Items.Cast<object>().Select(x => TextRenderer.MeasureText(x.ToString(), list.Font).Width).DefaultIfEmpty(0).Max() + 12;
+	}
+	internal Color ItemColor(object item) => (item is DuelMusic music && _changedPaths.Contains(music.Slot.BundlePath)
+		|| item is DuelField field && field.Models.Any(x => _changedPaths.Contains(x.BundlePath))) ? UiTheme.Gold : UiTheme.Text;
+	private async Task RefreshModColors()
+	{
+		try
+		{
+			var mods = await Task.Run(() => DuelModInventory.Read(_root));
+			_changedPaths = mods.SelectMany(x => x.Slots).Select(x => x.BundlePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+			_targets.Invalidate(); _sources.Invalidate();
+		}
+		catch (Exception ex) { _details.AppendText(Environment.NewLine + ex.Message); }
 	}
 	private async Task Selected(bool target)
 	{
@@ -188,7 +215,7 @@ internal sealed class DuelResourceForm : Form
 			_details.Text = Localizer.T("duel.done") + Environment.NewLine + selection;
 		}
 		catch (Exception ex) { _details.Text = ex.Message; }
-		finally { SetBusy(false); }
+		finally { await RefreshModColors(); SetBusy(false); }
 	}
 	private async Task Write(bool restore, string? input)
 	{
@@ -210,7 +237,7 @@ internal sealed class DuelResourceForm : Form
 			_details.Text = Localizer.T("duel.done") + Environment.NewLine + selection + Environment.NewLine + Localizer.T("duel.boundary");
 		}
 		catch (Exception ex) { _details.Text = ex.ToString(); }
-		finally { SetBusy(false); }
+		finally { await RefreshModColors(); SetBusy(false); }
 	}
 	private async Task Listen(bool target)
 	{

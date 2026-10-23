@@ -29,6 +29,9 @@ internal static class DuelResourceCatalog
 {
 	private static IReadOnlyDictionary<int, string> _fieldNames = new Dictionary<int, string>();
 	private static IReadOnlyDictionary<int, int> _modelItems = new Dictionary<int, int>();
+	internal static int ModelItemId(int model) => _modelItems.GetValueOrDefault(model);
+	internal static string ModelName(int model) => _fieldNames.TryGetValue(ModelItemId(model) - 1090000, out string? name) ? name : $"Mat_{model:000}";
+	internal static DuelMusic DescribeMusic(DuelBundleSlot slot) => DuelMusicMetadata.Describe(Path.GetFileName(slot.LogicalPath), slot, _fieldNames);
 	internal static string? Locate(string gameRoot, string logical)
 	{
 		string relative = IndexService.ResourceBundleRelativePath(logical);

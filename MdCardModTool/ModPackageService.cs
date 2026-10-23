@@ -10,9 +10,9 @@ namespace MdCardModTool;
 
 public sealed class ModPackageService
 {
-	private sealed record ChangedBundle(string LivePath, string RelativePath, string TargetKind, string SourceKind, string DisplayName, DateTime ModifiedAtUtc, IReadOnlyList<string> CardKeys);
+	private sealed record ChangedBundle(string LivePath, string RelativePath, string TargetKind, string SourceKind, string DisplayName, DateTime ModifiedAtUtc, IReadOnlyList<string> CardKeys, DuelBundleSlot? DuelSlot = null);
 
-	private sealed record ImportPlan(string Target, string Staged, string Backup, string Rollback);
+	private sealed record ImportPlan(string Target, string Staged, string Backup, string Rollback, string BeforeHash, DuelBundleSlot? DuelSlot = null);
 
 	private const string ManifestName = "manifest.json";
 
@@ -76,7 +76,7 @@ public sealed class ModPackageService
 		// Card rows can also be flagged by a related animation/gate-only edit.
 		// Do not snapshot their unchanged original pictures as desired image Mods.
 		return EnumerateChangedBundles(gameRoot, textures)
-			.Where(x => x.SourceKind != "超框开关" && !x.SourceKind.StartsWith("召唤动画", StringComparison.Ordinal))
+			.Where(x => x.DuelSlot == null && x.SourceKind != "超框开关" && !x.SourceKind.StartsWith("召唤动画", StringComparison.Ordinal))
 			.Select(x => Path.GetFullPath(x.LivePath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 	}
 
@@ -93,7 +93,7 @@ public sealed class ModPackageService
 		{
 			throw new InvalidOperationException(Localizer.T("mods.export.noSelection"));
 		}
-		HashSet<string> selectedPaths = selected.Select(x => Path.GetFullPath(x.BundlePath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+		HashSet<string> selectedPaths = selected.SelectMany(x => x.ManagedDuel is { } duel ? duel.Slots.Select(s => Path.GetFullPath(s.BundlePath)) : new[] { Path.GetFullPath(x.BundlePath) }).ToHashSet(StringComparer.OrdinalIgnoreCase);
 		HashSet<string> selectedCards = selected.Where(CardTextureRules.IsCardArt).Select(x => x.CardKey)
 			.Where(x => x.Length > 0).ToHashSet(StringComparer.Ordinal);
 		List<ChangedBundle> list = EnumerateChangedBundles(gameRoot, textures.ToList())
@@ -104,12 +104,14 @@ public sealed class ModPackageService
 
 	private static ModPackageInfo ExportBundles(string gameRoot, List<ChangedBundle> list, string outputPath, bool directReplacement)
 	{
+		foreach (var change in list.Where(x => x.DuelSlot != null)) _ = DuelResourceService.ValidatedOriginal(gameRoot, change.DuelSlot!);
 		if (list.Count == 0)
 		{
 			throw new InvalidOperationException(Localizer.T("mods.export.noChanges"));
 		}
 		ModPackageManifest modPackageManifest = new ModPackageManifest
 		{
+			FormatVersion = list.Any(x => x.DuelSlot != null) ? 2 : 1,
 			Platform = (ResourceSource.IsMobile(gameRoot) ? "Mobile" : "PC"),
 			Name = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(outputPath)),
 			Entries = list.Select((ChangedBundle x, int num2) => new ModPackageEntry
@@ -120,7 +122,9 @@ public sealed class ModPackageService
 				SourceKind = x.SourceKind,
 				DisplayName = x.DisplayName,
 				Sha256 = HashFile(x.LivePath),
-				Size = new FileInfo(x.LivePath).Length
+				Size = new FileInfo(x.LivePath).Length,
+				DuelContainer = x.DuelSlot?.Container ?? "",
+				GameBuild = x.DuelSlot != null ? PortableIndexService.GetGameBuildId(gameRoot) : ""
 			}).ToList()
 		};
 		string fullPath = Path.GetFullPath(outputPath);
@@ -209,6 +213,15 @@ public sealed class ModPackageService
 					throw new InvalidDataException("资源类型与目标目录不匹配：" + entry.DisplayName);
 				}
 				string target = ResolveInside(TargetRoot(gameRoot, localRoot, entry.TargetKind), entry.RelativePath);
+				DuelBundleSlot? duel = null;
+				if (entry.DuelContainer.Length > 0)
+				{
+					if (modPackageManifest.FormatVersion != 2 || entry.GameBuild != PortableIndexService.GetGameBuildId(gameRoot))
+						throw new InvalidDataException("场地／音乐备份的游戏版本不匹配，请勿跨版本覆盖。");
+					duel = DuelResourceService.ManagedSlot(gameRoot, entry.DuelContainer);
+					if (!Path.GetFullPath(duel.BundlePath).Equals(Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("场地／音乐目标与容器不匹配。");
+					using var check = new DuelBundleDocument(target, duel.Container);
+				}
 				DirectModArchive.EnsureNoLinks(target);
 				if (!File.Exists(target))
 				{
@@ -236,9 +249,9 @@ public sealed class ModPackageService
 						text4 = ((entry.TargetKind == "LocalData") ? "召唤动画" : "召唤动画-游戏内");
 					}
 				}
-				string text5 = ResolveInside(Path.Combine(gameRoot, "_MD卡图备份", text4), entry.RelativePath);
+				string text5 = duel != null ? DuelResourceService.BackupPath(gameRoot, duel) : ResolveInside(Path.Combine(gameRoot, "_MD卡图备份", text4), entry.RelativePath);
 				DirectModArchive.EnsureNoLinks(text5);
-				list.Add(new ImportPlan(target, text3, text5, Path.Combine(text, $"rollback_{i:D4}.bundle")));
+				list.Add(new ImportPlan(target, text3, text5, Path.Combine(text, $"rollback_{i:D4}.bundle"), HashFile(target), duel));
 			}
 			if (list.Select((ImportPlan x) => x.Target).Distinct<string>(StringComparer.OrdinalIgnoreCase).Count() != list.Count)
 			{
@@ -246,23 +259,29 @@ public sealed class ModPackageService
 			}
 			List<ImportPlan> list2 = new List<ImportPlan>();
 			DirectModArchive.EnsureGameClosed();
+			foreach (var plan in list.Where(x => x.DuelSlot != null)) new DuelResourceService().PreparePackageImport(gameRoot, plan.DuelSlot!, plan.Staged);
+			using var writeLease = AnimationWriteLease.Acquire(list.Select(x => x.Target));
 			try
 			{
 				foreach (ImportPlan item2 in list)
 				{
 					DirectModArchive.EnsureNoLinks(item2.Target);
 					DirectModArchive.EnsureNoLinks(item2.Backup);
-					File.Copy(item2.Target, item2.Rollback, overwrite: true);
+					var lockedTarget = writeLease.Streams[item2.Target];
+					lockedTarget.Position = 0;
+					if (Convert.ToHexString(SHA256.HashData(lockedTarget)) != item2.BeforeHash) throw new IOException("目标在导入准备期间已改变，拒绝覆盖。");
+					lockedTarget.Position = 0;
+					using (var rollback = File.Create(item2.Rollback)) lockedTarget.CopyTo(rollback);
 					Directory.CreateDirectory(Path.GetDirectoryName(item2.Backup));
 					if (!File.Exists(item2.Backup))
 					{
-						File.Copy(item2.Target, item2.Backup);
+						File.Copy(item2.Rollback, item2.Backup);
 					}
 					string text6 = item2.Target + ".mdcardmod.import.tmp";
 					try
 					{
 						File.Copy(item2.Staged, text6, overwrite: true);
-						File.Move(text6, item2.Target, overwrite: true);
+						File.Replace(text6, item2.Target, null);
 					}
 					finally
 					{
@@ -282,7 +301,7 @@ public sealed class ModPackageService
 				{
 					try
 					{
-						File.Copy(item3.Rollback, item3.Target, overwrite: true);
+						File.Replace(item3.Rollback, item3.Target, null);
 					}
 					catch (Exception item)
 					{
@@ -321,6 +340,15 @@ public sealed class ModPackageService
 			yield break;
 		}
 		string backupRoot = Path.Combine(gameRoot, "_MD卡图备份");
+		var duelMods = DuelModInventory.Read(gameRoot);
+		var duelPaths = duelMods.SelectMany(x => x.Slots).Select(x => Path.GetFullPath(x.BundlePath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+		foreach (var mod in duelMods)
+		foreach (var slot in mod.Slots)
+		{
+			bool local = StandaloneResourceService.IsInside(slot.BundlePath, localRoot);
+			yield return new ChangedBundle(slot.BundlePath, Path.GetRelativePath(local ? localRoot : gameRoot, slot.BundlePath), local ? "LocalData" : "GameRoot",
+				local ? "视觉资源" : "基础视觉资源", mod.Name, File.GetLastWriteTimeUtc(slot.BundlePath), Array.Empty<string>(), slot);
+		}
 		Dictionary<string, TexRef[]> texturesByBundle = textures.GroupBy(x => Path.GetFullPath(x.BundlePath), StringComparer.OrdinalIgnoreCase)
 			.ToDictionary(x => x.Key, x => x.ToArray(), StringComparer.OrdinalIgnoreCase);
 		Dictionary<string, string[]>? animationCards = null;
@@ -340,7 +368,7 @@ public sealed class ModPackageService
 			{
 				string relativePath = Path.GetRelativePath(sourceBackup, item);
 				string live = ResolveInside(targetRoot, relativePath);
-				if (File.Exists(live) && !FilesEqual(item, live))
+				if (File.Exists(live) && !duelPaths.Contains(Path.GetFullPath(live)) && !FilesEqual(item, live))
 				{
 					TexRef[] bundleTextures = texturesByBundle.GetValueOrDefault(Path.GetFullPath(live), Array.Empty<TexRef>());
 					string[] array2 = (from x in bundleTextures
@@ -388,7 +416,7 @@ public sealed class ModPackageService
 		}
 		using Stream stream = entry?.Open();
 		ModPackageManifest modPackageManifest = ((stream == null) ? DirectModArchive.Read(archive) : (JsonSerializer.Deserialize<ModPackageManifest>(stream) ?? throw new InvalidDataException("Mod 包清单无法读取。")));
-		if (modPackageManifest.FormatVersion != 1)
+		if (modPackageManifest.FormatVersion is not (1 or 2))
 		{
 			throw new InvalidDataException($"暂不支持 Mod 包格式版本 {modPackageManifest.FormatVersion}。");
 		}
