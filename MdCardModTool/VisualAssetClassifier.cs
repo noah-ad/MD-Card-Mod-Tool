@@ -13,6 +13,7 @@ public static class VisualAssetClassifier
 			return null;
 		}
 		string text = name.ToLowerInvariant();
+		if (System.Text.RegularExpressions.Regex.IsMatch(text, @"^fieldicon\d+$")) return "场地预览";
 		if (text == "cardattributeset") return "属性图标";
 		if (text is "levelstar01_64" or "tex_iconlv" or "tex_iconrank") return "星级图标";
 		if (text.StartsWith("sactx-", StringComparison.Ordinal) && text.Contains("-cardspriteatlas-", StringComparison.Ordinal))

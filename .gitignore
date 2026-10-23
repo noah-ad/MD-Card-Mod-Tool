@@ -7,6 +7,8 @@ index-build.log
 index-build.log.err
 *.tmp
 tmp/
+MdCardModTool/Assets/tools/ffmpeg.exe
+MdCardModTool/Assets/tools/vgmstream/
 
 # Shareable build artifacts are published as GitHub Release assets.
 发布/

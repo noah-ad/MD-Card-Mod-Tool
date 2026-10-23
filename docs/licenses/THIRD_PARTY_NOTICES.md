@@ -25,6 +25,10 @@ Native dependency notices: licenses/SkiaSharp-THIRD-PARTY-NOTICES.txt
 
 Other bundled dependencies and tools
 ------------------------------------
+vgmstream r2117 is included as a separate command-line decoder for FSB5 music.
+Full attribution and dependency notices: licenses/VGMSTREAM-NOTICE.md and
+tools/vgmstream/COPYING with the adjacent library COPYING/LICENSE files.
+
 DirectXTex/texconv and FFmpeg notices are distributed as DIRECTXTEX-NOTICE.txt,
 FFMPEG-NOTICE.txt, and tools/FFMPEG-LICENSE.txt. Existing dependency notices
 from the original recovered distribution remain included unchanged.

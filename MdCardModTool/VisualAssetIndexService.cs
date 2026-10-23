@@ -37,12 +37,19 @@ public static class VisualAssetIndexService
 			};
 		}
 		string localRoot = IndexService.FindLocalRoot(gameRoot) ?? throw new DirectoryNotFoundException("未找到 LocalData\\<用户哈希>\\0000。");
+		var fields = DuelResourceCatalog.Fields(gameRoot, cancellationToken);
+		var fieldPreviews = fields.Where(x => x.Preview != null).Select(x => x.Preview!).ToArray();
 		List<CatalogEntry> list = ReadCatalog();
+		var fieldModels = fields.SelectMany(x => x.Models).Select(x => x.BundlePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+		foreach (string model in fieldModels)
+			if (!list.Any(x => x.Hash.Equals(Path.GetFileName(model), StringComparison.OrdinalIgnoreCase)))
+				list.Add(new CatalogEntry(Path.GetFileName(model), "", "决斗场地"));
 		IGrouping<string, CatalogEntry>[] array = list.GroupBy<CatalogEntry, string>((CatalogEntry x) => x.Hash, StringComparer.OrdinalIgnoreCase).ToArray();
 		int total = array.Length + 1;
 		int done = 0;
 		int installed = 0;
 		ConcurrentBag<TexRef> found = new ConcurrentBag<TexRef>();
+		foreach (var preview in fieldPreviews) found.Add(preview);
 		Parallel.ForEach(array, new ParallelOptions
 		{
 			MaxDegreeOfParallelism = Math.Max(2, Math.Min(8, Environment.ProcessorCount)),
@@ -59,7 +66,8 @@ public static class VisualAssetIndexService
 					{
 						foreach (TexRef texture in new ModEngine().ScanBundle(text3, localRoot, "视觉资源", includeDependencies: false).Textures)
 						{
-							if (dictionary.TryGetValue(texture.Name, out var value))
+							string? value;
+							if (dictionary.TryGetValue(texture.Name, out value) || (fieldModels.Contains(text3) && (value = VisualAssetClassifier.CategoryFor(texture.Name)) == "决斗场地"))
 							{
 								texture.Category = value;
 								found.Add(texture);

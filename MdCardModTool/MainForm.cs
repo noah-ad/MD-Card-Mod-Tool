@@ -213,7 +213,7 @@ public sealed partial class MainForm : Form
 	private readonly TableLayoutPanel _visualShortcutBar = new TableLayoutPanel
 	{
 		Dock = DockStyle.Fill,
-		ColumnCount = 8,
+		ColumnCount = 9,
 		RowCount = 1,
 		BackColor = UiTheme.SurfaceAlt,
 		Padding = new Padding(12, 7, 12, 7),
@@ -1115,6 +1115,7 @@ public sealed partial class MainForm : Form
 
 	private void ShowSearchSuggestions()
 	{
+		if (_currentPage != WorkspacePage.Cards) { HideSearchSuggestions(); return; }
 		if (!_search.IsHandleCreated || !_search.Focused)
 		{
 			return;
@@ -1212,13 +1213,13 @@ public sealed partial class MainForm : Form
 	private void BuildVisualShortcutBar()
 	{
 		_visualShortcutBar.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-		float[] array = new float[8] { 1f, 1.05f, 1.18f, 1.12f, 1f, 0.82f, 1.12f, 1.24f };
+		float[] array = { 1f, 1.05f, 1.18f, 1.12f, 1f, 0.82f, 1.12f, 1.6f, 1.24f };
 		foreach (float width in array)
 		{
 			_visualShortcutBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, width));
 		}
 		AddShortcut("all", "visual.all", Array.Empty<string>());
-		AddShortcut("fields", "visual.fields", new string[1] { "决斗场地" });
+		AddShortcut("fields", "visual.fields", new[] { "决斗场地", "场地预览" });
 		AddShortcut("wallpaper", "visual.wallpaper", new string[2] { "大厅壁纸", "大厅背景" });
 		AddShortcut("sleeves", "visual.sleeves", new string[1] { "卡套" });
 		AddShortcut("deckcase", "visual.deckcase", new string[1] { "卡盒" });
@@ -1228,7 +1229,18 @@ public sealed partial class MainForm : Form
 		_visualAssetsButton.Dock = DockStyle.Fill;
 		_visualAssetsButton.MinimumSize = Size.Empty;
 		_visualAssetsButton.Margin = new Padding(3, 4, 3, 4);
-		_visualShortcutBar.Controls.Add(_visualAssetsButton, 7, 0);
+		var duel = Bind(Button("", async delegate
+		{
+			if (_gameRoot == null) { MessageBox.Show(this, "请先选择游戏目录。", Text); return; }
+			_backgroundRefreshCancellation?.Cancel();
+			if (_backgroundRefreshTask != null && !_backgroundRefreshTask.IsCompleted) await _backgroundRefreshTask;
+			using var form = new DuelResourceForm(_gameRoot);
+			form.ShowDialog(this);
+			await LoadVisualAssetsAsync();
+		}, ButtonTone.Gold), "duel.open");
+		duel.Dock = DockStyle.Fill; duel.AutoSize = false; duel.MinimumSize = Size.Empty; duel.Margin = new Padding(3, 4, 3, 4);
+		_visualShortcutBar.Controls.Add(duel, 7, 0);
+		_visualShortcutBar.Controls.Add(_visualAssetsButton, 8, 0);
 	}
 
 	private void AddShortcut(string key, string resourceId, string[] categories)
@@ -1538,7 +1550,7 @@ public sealed partial class MainForm : Form
 		bool flag3 = page == WorkspacePage.Cards;
 		if (_cardSearchField != null)
 		{
-			_cardSearchField.Visible = flag3;
+			_cardSearchField.Visible = flag3 || page == WorkspacePage.Visuals;
 		}
 		if (!flag3)
 		{
@@ -1759,7 +1771,9 @@ public sealed partial class MainForm : Form
 
 	private async Task EnsureVisualAssetsAsync()
 	{
+		if (_gameRoot != null) await Task.Run(() => DuelResourceCatalog.LoadNames(_gameRoot));
 		if (_index != null && (!_textures.Any(IsVisualAsset)
+			|| !_textures.Any(x => x.Category == "场地预览")
 			|| (_gameRoot != null && File.Exists(Path.Combine(_gameRoot, "masterduel_Data", "data.unity3d")) && !_textures.Any(x => x.Category == "属性图标"))))
 		{
 			await LoadVisualAssetsAsync();
@@ -2343,7 +2357,7 @@ public sealed partial class MainForm : Form
 
 	private void RenderList()
 	{
-		string q = ((_currentPage == WorkspacePage.Cards) ? _search.Text.Trim() : "");
+		string q = (_currentPage is WorkspacePage.Cards or WorkspacePage.Visuals) ? _search.Text.Trim() : "";
 		CategoryFilter filter = (_category.SelectedItem as CategoryFilter) ?? new CategoryFilter(CategoryFilterKind.All, "", Localizer.T("filter.all"));
 		_resultCount.Text = Localizer.T("list.updating");
 		_resultCount.Update();
@@ -2354,7 +2368,7 @@ public sealed partial class MainForm : Form
 		{
 			_list.VirtualListSize = 0;
 			_visibleTextures.Clear();
-			bool globalSearch = q.Length > 0;
+			bool globalSearch = q.Length > 0 && _currentPage == WorkspacePage.Cards;
 			HashSet<int> matchedCardIds = (globalSearch ? (from x in _cardCatalog.Search(q, 250)
 				select x.CardId).ToHashSet() : null);
 			IEnumerable<TexRef> enumerable = _textures.Where((TexRef texRef) =>
@@ -2463,6 +2477,11 @@ public sealed partial class MainForm : Form
 		}
 		if (query.All(char.IsAsciiDigit))
 		{
+			if (texture.Category is "决斗场地" or "场地预览")
+			{
+				int id = DuelResourceCatalog.FieldId(texture.Name);
+				return id >= 0 && int.TryParse(query, out int number) && (number == id || number == 1090000 + id);
+			}
 			if (!(texture.CardKey == query))
 			{
 				return texture.Name == query;
@@ -2474,7 +2493,7 @@ public sealed partial class MainForm : Form
 			return true;
 		}
 		string value = (texture.HasMonsterAnimation ? "有怪兽动画 召唤动画" : "");
-		return $"{texture.Name} {texture.CardKey} {texture.SourceKind} {texture.Category} {value} {texture.RelativeBundlePath}".Contains(query, StringComparison.OrdinalIgnoreCase);
+		return $"{texture.Name} {texture.CardKey} {texture.SourceKind} {texture.Category} {value} {texture.RelativeBundlePath} {DuelResourceCatalog.SearchNames(texture)}".Contains(query, StringComparison.OrdinalIgnoreCase);
 	}
 
 	private async Task ScanMissingCardAsync(CardCatalogEntry? preferred = null)
@@ -2621,6 +2640,8 @@ public sealed partial class MainForm : Form
 
 	private string DisplayResourceName(TexRef texture)
 	{
+		string fieldName = DuelResourceCatalog.SearchNames(texture);
+		if (fieldName.Length > 0) return fieldName + " · " + texture.Name;
 		if (BuiltInCardFrameCatalog.IsPackagedFrame(texture))
 		{
 			return $"{texture.Name} · {CardFrameCatalog.FriendlyName(texture.Name)} · {ResourceLabel(texture.Category)}";

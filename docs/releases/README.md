@@ -4,6 +4,8 @@
 
 ## 按版本查看
 
+- [2.0.31：场地与音乐](RELEASE-NOTES-v2.0.31.md)
+- [2.0.30：魔法卡异画动画](RELEASE-NOTES-v2.0.30.md)
 - [2.0.29](RELEASE-NOTES-v2.0.29.md)
 - [2.0.28](RELEASE-NOTES-v2.0.28.md)
 - [2.0.27](RELEASE-NOTES-v2.0.27.md)

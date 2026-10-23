@@ -40,6 +40,11 @@ internal static class Program
 			return;
 		}
 		ApplicationConfiguration.Initialize();
+		if (args.Length == 3 && args[0] == "--test-duel-resources")
+		{
+			DuelResourceTests.Run(args[1], args[2]);
+			return;
+		}
 		if (args.Length == 3 && args[0] == "--test-animation-discovery")
 		{
 			WindowsFormsSynchronizationContext.AutoInstall = false;

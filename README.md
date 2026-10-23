@@ -1,14 +1,24 @@
-# MD Card Mod Tool 2.0.30
+# MD Card Mod Tool 2.0.31
 
 面向《游戏王 Master Duel》的 Windows x64 资源查看与 Mod 制作工具，支持四语卡名搜索、卡图与超框编辑、视觉资源替换、官方怪兽动画替换、魔法卡异画动画及 Mod 管理。
 
-2.0.30 新增实验性魔法卡异画发动动画替换，支持按当前卡表和官方演出登记动态发现同名魔法卡组合，不限于《增援》。目前已通过本机资源镜像验证，游戏内播放尚未验收。详见 [2.0.30 说明](docs/releases/RELEASE-NOTES-v2.0.30.md)和[验证记录](docs/testing/TEST-REPORT-v2.0.30.md)。历史资料统一放在[文档目录](docs/README.md)。
+2.0.31 新增场地中文搜索、官方缩略图识别、完整近端／远端模型替换及音乐互换／音频文件导入、试听、还原。场地和音乐替换为实验功能，临时游戏镜像验证已通过，游戏内效果尚未验收。详见 [2.0.31 说明](docs/releases/RELEASE-NOTES-v2.0.31.md)和[验证记录](docs/testing/TEST-REPORT-v2.0.31.md)。2.0.30 的魔法卡异画动画功能继续保留。历史资料统一放在[文档目录](docs/README.md)。
 
 ## 下载
 
-下载 [2.0.30 最新发行版](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/latest)（[完整 ZIP](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/download/v2.0.30/MD-Card-Mod-Tool-v2.0.30-win-x64.zip)）。此为 noxargenta fork；[上游 2.0.29 回退版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.29)保持独立。解压到独立目录后运行 EXE，保留 data 文件夹和游戏中的首次备份。SHA-256 见[校验文件](docs/checksums/SHA256SUMS-v2.0.30.txt)。
+下载 [2.0.31 最新发行版](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/latest)（[完整 ZIP](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/download/v2.0.31/MD-Card-Mod-Tool-v2.0.31-win-x64.zip)）。此为 noxargenta fork，保留 [2.0.30 回退版](https://github.com/noxargenta/MD-Card-Mod-Tool/releases/tag/v2.0.30)；上游仓库保持独立。解压到独立目录后运行 EXE，保留 data 文件夹和游戏中的首次备份。SHA-256 见[校验文件](docs/checksums/SHA256SUMS-v2.0.31.txt)。
 
 以后版本更新默认同步源码、README 和 GitHub 普通发行版，并标记为 Latest，不再堆叠预发行测试版。发行列表只保留最新版与一个回退版；旧发行版清理前在维护电脑归档安装包和说明，Git 标签与源码历史保留。本地程序、用户 Mod、恢复库及游戏备份不属于发行版清理范围。
+
+## 场地与音乐（2.0.31，实验）
+
+进入“视觉资源 → 场地与音乐”，左侧选择要修改的目标，右侧选择来源。场地可按“森林”等中文名、已下载的其他语言名称、`001` 或 `1090001` 搜索。名称读取游戏内物品字典；没有名称时显示实际编号。视觉资源页也可直接搜索中文场地名，并查看官方场地缩略图和贴图。
+
+“使用来源替换目标”会一并替换目标已下载的近端／远端模型，来源缺少对应变体或依赖则整次拒绝。预览图是官方缩略图，非实时 3D；模型替换不自动更改缩略图、场地音效或音乐绑定。
+
+切换到“背景音乐”，可选择官方 BGM 互换，或“导入音乐文件”选择 WAV、MP3、OGG、FLAC 等。支持目标与来源试听、单曲还原。自定义音频转换为 48 kHz 双声道 PCM FSB5，整曲循环，限 10 分钟；文件可能比原版压缩音乐大。决斗普通／关键卡／高潮阶段使用不同曲目，需分别替换。
+
+操作前先完全退出游戏。首次备份和校验记录保存在 `<游戏目录>/_MD卡图备份/场地与音乐`，使用“还原目标原版”恢复。该窗口的模型／音乐备份独立于旧图片 Mod 恢复库，目前不提供新的场地／音乐导出包入口。游戏内加载、播放和循环效果尚未验收，详见[功能边界](docs/releases/RELEASE-NOTES-v2.0.31.md)。
 
 ## Mod 导出与导入（2.0.6／2.0.24／2.0.27）
 
@@ -81,10 +91,12 @@ dotnet build '.\MdCardModTool\MdCardModTool.csproj' -c Release -p:Platform=x64
 
 dotnet publish '.\MdCardModTool\MdCardModTool.csproj' `
   -c Release -r win-x64 -p:Platform=x64 --self-contained true `
-  -o '.\发布\MD-Card-Mod-Tool-v2.0.29-win-x64'
+  -o '.\发布\MD-Card-Mod-Tool-v2.0.31-win-x64'
 ```
 
 发布包根目录只允许包含 EXE 与 `data`。`data` 内必须包含 `classdata.tpk`、预绑定卡图／动画索引、Astellar 超框模板、Floowan 卡框、`tools/texconv.exe`、`tools/ffmpeg.exe`、说明与第三方许可文件。
+
+2.0.31 正式打包还须包含 `data/bgm-catalog-v1.txt` 和 `data/tools/vgmstream/`。源码构建前可运行 `powershell -File tools/GetDuelAudioTools.ps1` 下载并校验固定版本音频解码依赖；FFmpeg 仍按现有构建要求另行放入 `MdCardModTool/Assets/tools/ffmpeg.exe`。第三方工具不提交到源码，完整 ZIP 自带所需文件。
 
 ## 安全与数据边界
 
