@@ -1,12 +1,12 @@
-# MD Card Mod Tool 2.0.29
+# MD Card Mod Tool 2.0.30
 
 面向《游戏王 Master Duel》的 Windows x64 资源查看与 Mod 制作工具，支持四语卡名搜索、卡图与超框编辑、视觉资源替换、官方怪兽动画替换及 Mod 管理。
 
-2.0.29 修复动画依赖与多页图集漏找，并在还原图片 Mod 时同步恢复该卡原始超框登记。14741「原始生命态 尼比鲁」等能正确识别为官方原生 Timeline，但本版仍不支持其播放／替换；不再误报没有动画。详见 [2.0.29 说明](docs/releases/RELEASE-NOTES-v2.0.29.md)和[验证记录](docs/testing/TEST-REPORT-v2.0.29.md)。历史资料统一放在[文档目录](docs/README.md)。
+2.0.30 修复导入视频／GIF 时 FFmpeg 报 `Unrecognized option 'vsync'` 的参数兼容问题，保留帧率、画质、起始秒与帧数限制，并在导入结束后恢复界面状态。无需为此重建游戏索引。详见 [2.0.30 说明](docs/releases/RELEASE-NOTES-v2.0.30.md)和[验证记录](docs/testing/TEST-REPORT-v2.0.30.md)。历史资料统一放在[文档目录](docs/README.md)。
 
 ## 下载
 
-下载 [最新发行版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/latest)（当前为 [2.0.29](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.29)，[完整 ZIP](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/download/v2.0.29/MD-Card-Mod-Tool-v2.0.29-win-x64.zip)），或使用 [2.0.28 回退版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.28)。建议解压到独立目录，根目录只有 `MD卡图查看替换器.exe` 与 `data` 文件夹，直接运行 EXE 即可。不要删除游戏目录中的 `_MD卡图备份`。若文件带有 Windows 下载标记，可先运行 `data\首次启动-解除下载封锁.bat`。包的 SHA-256 见 [校验文件](docs/checksums/SHA256SUMS-v2.0.29.txt)；已上传的 ZIP 保留原文件名和字节，不破坏已有下载链接。随包说明保留测试时的快照，最新发布状态以本页和 GitHub Release 为准。
+下载 [最新发行版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/latest)（当前为 [2.0.30](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.30)，[完整 ZIP](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/download/v2.0.30/MD-Card-Mod-Tool-v2.0.30-win-x64.zip)），或使用 [2.0.29 回退版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.29)。建议解压到独立目录，根目录只有 `MD卡图查看替换器.exe` 与 `data` 文件夹，直接运行 EXE 即可。不要删除游戏目录中的 `_MD卡图备份`。若文件带有 Windows 下载标记，可先运行 `data\首次启动-解除下载封锁.bat`。包的 SHA-256 见 [校验文件](docs/checksums/SHA256SUMS-v2.0.30.txt)；已上传的 ZIP 保留原文件名和字节，不破坏已有下载链接。随包说明保留测试时的快照，最新发布状态以本页和 GitHub Release 为准。
 
 以后版本更新默认同步源码、README 和 GitHub 普通发行版，并标记为 Latest，不再堆叠预发行测试版。发行列表只保留最新版与一个回退版；旧发行版清理前在维护电脑归档安装包和说明，Git 标签与源码历史保留。本地程序、用户 Mod、恢复库及游戏备份不属于发行版清理范围。
 
@@ -60,6 +60,8 @@
 
 ## 怪兽动画
 
+视频／GIF 导入使用新版 FFmpeg 帧同步参数；旧版本不支持时仅做一次兼容回退，不再发送废弃的 `-vsync`。已定位的动画不会因媒体读取错误而被判定为没有官方演出，原预览也不会被错误素材清空。发布包附带 FFmpeg，通常无需自行替换该程序。
+
 工具可读取尚未替换的原版六 Bundle，在本机预览 Spine 4.2 动画。渲染器是独立的只读实现，不捆绑官方 Spine Runtime。2.0.5 修复 90°／180°／270° 图集 UV、旋转区域宽高与 mesh 裁边偏移。复杂约束、物理时间线等仍需逐资源核对，不能把“能渲染非空帧”视为与游戏逐帧一致的证明。
 
 官方演出与 Spine 替换资格分开识别：原生 Timeline 卡（本机为 14741、23487、23488）会显示已找到官方演出并提供资源诊断，但当前不能播放／替换。其他未下载或缺页的资源显示未定位／不完整，不断言没有官方演出。后续图集页按 Atlas 中的真实页名补找；旧缓存同 Build 下也会升级查找规则。
@@ -81,7 +83,7 @@ dotnet build '.\MdCardModTool\MdCardModTool.csproj' -c Release -p:Platform=x64
 
 dotnet publish '.\MdCardModTool\MdCardModTool.csproj' `
   -c Release -r win-x64 -p:Platform=x64 --self-contained true `
-  -o '.\发布\MD-Card-Mod-Tool-v2.0.29-win-x64'
+  -o '.\发布\MD-Card-Mod-Tool-v2.0.30-win-x64'
 ```
 
 发布包根目录只允许包含 EXE 与 `data`。`data` 内必须包含 `classdata.tpk`、预绑定卡图／动画索引、Astellar 超框模板、Floowan 卡框、`tools/texconv.exe`、`tools/ffmpeg.exe`、说明与第三方许可文件。

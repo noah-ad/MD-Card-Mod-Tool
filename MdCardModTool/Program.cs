@@ -35,6 +35,14 @@ internal static class Program
 	private static void Main(string[] args)
 	{
 		ApplicationConfiguration.Initialize();
+		if (args.Length == 2 && args[0] == "--test-ffmpeg-media")
+		{
+			WindowsFormsSynchronizationContext.AutoInstall = false;
+			SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+			Control.CheckForIllegalCrossThreadCalls = true;
+			FfmpegMediaTests.Run(args[1]);
+			return;
+		}
 		if (args.Length == 3 && args[0] == "--test-animation-discovery")
 		{
 			WindowsFormsSynchronizationContext.AutoInstall = false;
@@ -1556,6 +1564,9 @@ internal static class Program
 				form4.Show();
 				Application.DoEvents();
 				form4.PerformLayout();
+				Label appVersionLabel = Descendants(form4).OfType<Label>().Single(label => label.Name == "AppVersionLabel");
+				if (!appVersionLabel.Text.StartsWith("v" + Application.ProductVersion.Split('+')[0] + "  ·", StringComparison.Ordinal))
+					throw new InvalidDataException("Sidebar version does not match the running application.");
 				Button button5 = (Button)(typeof(MainForm).GetField("_visualAssetsButton", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form4) ?? throw new MissingFieldException("_visualAssetsButton"));
 				ComboBox comboBox = (ComboBox)(typeof(MainForm).GetField("_profileSelector", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form4) ?? throw new MissingFieldException("_profileSelector"));
 				ComboBox comboBox2 = (ComboBox)(typeof(MainForm).GetField("_languageSelector", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form4) ?? throw new MissingFieldException("_languageSelector"));

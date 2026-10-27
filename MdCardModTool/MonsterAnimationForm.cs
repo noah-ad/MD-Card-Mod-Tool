@@ -933,6 +933,8 @@ public sealed class MonsterAnimationForm : Form
 
 	private async Task LoadMediaAsync(IReadOnlyList<string> paths)
 	{
+		string previousResourceText = _resourceStatus.Text;
+		Func<string> previousResourceStatus = _resourceStatusFactory ?? (() => previousResourceText);
 		ExtractedAnimation loadedMedia = null;
 		List<Bitmap> loadedFrames = null;
 		bool resetToFullGameCanvas = _media == null;
@@ -1019,6 +1021,7 @@ public sealed class MonsterAnimationForm : Form
 		finally
 		{
 			SetBusy(false, null);
+			SetResourceStatus(previousResourceStatus);
 		}
 	}
 

@@ -949,13 +949,14 @@ public sealed partial class MainForm : Form
 		tableLayoutPanel7.Controls.Add(tableLayoutPanel6, 1, 0);
 		Label control6 = new Label
 		{
+			Name = "AppVersionLabel",
 			Dock = DockStyle.Fill,
 			Padding = new Padding(18, 10, 14, 10),
 			ForeColor = UiTheme.Muted,
 			BackColor = UiTheme.Surface,
 			Font = new Font("Segoe UI", 8f),
 			TextAlign = ContentAlignment.MiddleLeft,
-			Text = $"v2.0.27  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
+			Text = $"v{Application.ProductVersion.Split('+')[0]}  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
 		};
 		TableLayoutPanel tableLayoutPanel8 = new TableLayoutPanel
 		{

@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using SixLabors.ImageSharp;
@@ -14,6 +15,8 @@ namespace MdCardModTool;
 
 public static class MonsterAnimationMedia
 {
+	internal sealed record FfmpegResult(int ExitCode, string Error);
+
 	private sealed class NaturalFileNameComparer : IComparer<string>
 	{
 		public static readonly NaturalFileNameComparer Instance = new NaturalFileNameComparer();
@@ -109,8 +112,14 @@ public static class MonsterAnimationMedia
 		return null;
 	}
 
-	public static async Task<ExtractedAnimation> ExtractAsync(string sourcePath, int framesPerSecond, int maxFrames, int maxFrameEdge, double startSeconds = 0.0, bool removeGreenScreen = false, CancellationToken cancellationToken = default(CancellationToken))
+	public static Task<ExtractedAnimation> ExtractAsync(string sourcePath, int framesPerSecond, int maxFrames, int maxFrameEdge, double startSeconds = 0.0, bool removeGreenScreen = false, CancellationToken cancellationToken = default(CancellationToken))
+		=> ExtractWithFfmpegAsync(sourcePath, framesPerSecond, maxFrames, maxFrameEdge, startSeconds, removeGreenScreen, cancellationToken);
+
+	internal static async Task<ExtractedAnimation> ExtractWithFfmpegAsync(string sourcePath, int framesPerSecond, int maxFrames, int maxFrameEdge,
+		double startSeconds, bool removeGreenScreen, CancellationToken cancellationToken,
+		Func<ProcessStartInfo, CancellationToken, Task<FfmpegResult>>? runner = null)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (!File.Exists(sourcePath))
 		{
 			throw new FileNotFoundException("找不到动画源文件。", sourcePath);
@@ -127,7 +136,7 @@ public static class MonsterAnimationMedia
 		{
 			throw new ArgumentOutOfRangeException("maxFrameEdge");
 		}
-		if ((startSeconds < 0.0 || startSeconds > 86400.0) ? true : false)
+		if (!double.IsFinite(startSeconds) || startSeconds < 0.0 || startSeconds > 86400.0)
 		{
 			throw new ArgumentOutOfRangeException("startSeconds");
 		}
@@ -170,8 +179,8 @@ public static class MonsterAnimationMedia
 			text2,
 			"-frames:v",
 			maxFrames.ToString(CultureInfo.InvariantCulture),
-			"-vsync",
-			"0",
+			"-fps_mode",
+			"passthrough",
 			text
 		};
 		foreach (string item2 in array)
@@ -180,33 +189,23 @@ public static class MonsterAnimationMedia
 		}
 		try
 		{
-			using Process process = Process.Start(processStartInfo) ?? throw new InvalidOperationException("无法启动 FFmpeg。");
-			Task<string> errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
-			Task<string> outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-			try
+			runner ??= RunFfmpegAsync;
+			FfmpegResult result = await runner(processStartInfo, cancellationToken).ConfigureAwait(false);
+			if (result.ExitCode != 0 && IsUnsupportedFpsMode(result.Error))
 			{
-				await process.WaitForExitAsync(cancellationToken);
+				// FFmpeg < 5.1 may lack fps_mode; recent builds may remove vsync.
+				// Never switch back to the removed flag. The fps filter already
+				// supplies constant-rate timestamps for the image sequence.
+				cancellationToken.ThrowIfCancellationRequested();
+				foreach (string partial in Directory.EnumerateFiles(directory, "frame_*.png")) File.Delete(partial);
+				int option = processStartInfo.ArgumentList.IndexOf("-fps_mode");
+				processStartInfo.ArgumentList.RemoveAt(option + 1);
+				processStartInfo.ArgumentList.RemoveAt(option);
+				result = await runner(processStartInfo, cancellationToken).ConfigureAwait(false);
 			}
-			catch
-			{
-				try
-				{
-					if (!process.HasExited)
-					{
-						process.Kill(entireProcessTree: true);
-					}
-				}
-				catch
-				{
-				}
-				throw;
-			}
-			string error = await errorTask;
-			await outputTask;
-			if (process.ExitCode != 0)
-			{
-				throw new InvalidDataException("FFmpeg 无法读取该文件：" + error.Trim());
-			}
+			cancellationToken.ThrowIfCancellationRequested();
+			if (result.ExitCode != 0)
+				throw new InvalidDataException("FFmpeg 无法读取该文件：" + result.Error.Trim() + "\nFFmpeg：" + fileName);
 			List<string> list2 = Directory.EnumerateFiles(directory, "frame_*.png").OrderBy<string, string>((string x) => x, StringComparer.OrdinalIgnoreCase).ToList();
 			if (list2.Count == 0)
 			{
@@ -232,6 +231,31 @@ public static class MonsterAnimationMedia
 			}
 			throw;
 		}
+	}
+
+	private static bool IsUnsupportedFpsMode(string error) => Regex.IsMatch(error,
+		@"^\s*(?:(?:Unrecognized|Unknown) option\s+['""\-]*fps_mode(?:['""\s.:]|$)|Option\s+['""\-]*fps_mode['""]?\s+not found)",
+		RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.CultureInvariant);
+
+	internal static async Task<FfmpegResult> RunFfmpegAsync(ProcessStartInfo start, CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		using Process process = Process.Start(start) ?? throw new InvalidOperationException("无法启动 FFmpeg。");
+		// Drain both pipes even on cancellation, then wait for the child to exit
+		// before its working directory is removed.
+		Task<string> error = process.StandardError.ReadToEndAsync();
+		Task<string> output = process.StandardOutput.ReadToEndAsync();
+		try { await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false); }
+		catch
+		{
+			try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+			catch (InvalidOperationException) { }
+			await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+			await Task.WhenAll(error, output).ConfigureAwait(false);
+			throw;
+		}
+		await output.ConfigureAwait(false);
+		return new FfmpegResult(process.ExitCode, await error.ConfigureAwait(false));
 	}
 
 	public static async Task<ExtractedAnimation> ExtractSequenceAsync(IReadOnlyList<string> sourcePaths, int framesPerSecond, int maxFrames, int maxFrameEdge, bool removeGreenScreen = false, CancellationToken cancellationToken = default(CancellationToken))
