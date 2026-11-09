@@ -806,8 +806,8 @@ public sealed partial class MainForm : Form
 		};
 		previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46f));
 		previewLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-		previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 104f));
-		previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 178f));
+		previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 96f));
+		previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 158f));
 		previewLayout.Controls.Add(SectionHeading("实时预览", "LIVE PREVIEW"), 0, 0);
 		previewLayout.Controls.Add(borderPanel3, 0, 1);
 		previewLayout.Controls.Add(_info, 0, 2);
@@ -867,7 +867,7 @@ public sealed partial class MainForm : Form
 		tableLayoutPanel4.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
 		_resourceContextRow = new RowStyle(SizeType.Absolute, 0f);
 		tableLayoutPanel4.RowStyles.Add(_visualShortcutRow);
-		tableLayoutPanel4.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));
+		tableLayoutPanel4.RowStyles.Add(new RowStyle(SizeType.Absolute, 52f));
 		tableLayoutPanel4.RowStyles.Add(_resourceContextRow);
 		tableLayoutPanel4.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 		tableLayoutPanel4.Controls.Add(_visualShortcutBar, 0, 0);
@@ -891,7 +891,7 @@ public sealed partial class MainForm : Form
 		tableLayoutPanel5.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
 		for (int num3 = 0; num3 < 4; num3++)
 		{
-			tableLayoutPanel5.RowStyles.Add(new RowStyle(SizeType.Absolute, 52f));
+		tableLayoutPanel5.RowStyles.Add(new RowStyle(SizeType.Absolute, 48f));
 		}
 		tableLayoutPanel5.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 		AddNavigation(tableLayoutPanel5, WorkspacePage.Cards, "nav.cards");
@@ -965,9 +965,9 @@ public sealed partial class MainForm : Form
 			RowCount = 3,
 			BackColor = UiTheme.Surface
 		};
-		tableLayoutPanel8.RowStyles.Add(new RowStyle(SizeType.Absolute, 104f));
+		tableLayoutPanel8.RowStyles.Add(new RowStyle(SizeType.Absolute, 94f));
 		tableLayoutPanel8.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-		tableLayoutPanel8.RowStyles.Add(new RowStyle(SizeType.Absolute, 74f));
+		tableLayoutPanel8.RowStyles.Add(new RowStyle(SizeType.Absolute, 64f));
 		tableLayoutPanel8.Controls.Add(tableLayoutPanel7, 0, 0);
 		tableLayoutPanel8.Controls.Add(tableLayoutPanel5, 0, 1);
 		tableLayoutPanel8.Controls.Add(control6, 0, 2);
@@ -994,9 +994,9 @@ public sealed partial class MainForm : Form
 			RowCount = 3,
 			BackColor = UiTheme.Window
 		};
-		tableLayoutPanel10.RowStyles.Add(new RowStyle(SizeType.Absolute, 64f));
+		tableLayoutPanel10.RowStyles.Add(new RowStyle(SizeType.Absolute, 58f));
 		tableLayoutPanel10.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-		tableLayoutPanel10.RowStyles.Add(new RowStyle(SizeType.Absolute, 74f));
+		tableLayoutPanel10.RowStyles.Add(new RowStyle(SizeType.Absolute, 68f));
 		tableLayoutPanel10.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 		tableLayoutPanel10.Controls.Add(tableLayoutPanel2, 0, 0);
 		tableLayoutPanel10.Controls.Add(tableLayoutPanel9, 0, 1);
@@ -1037,7 +1037,7 @@ public sealed partial class MainForm : Form
 		};
 		tableLayoutPanel12.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 		tableLayoutPanel12.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-		tableLayoutPanel12.RowStyles.Add(new RowStyle(SizeType.Absolute, 30f));
+		tableLayoutPanel12.RowStyles.Add(new RowStyle(SizeType.Absolute, 28f));
 		tableLayoutPanel12.Controls.Add(tableLayoutPanel11, 0, 0);
 		tableLayoutPanel12.Controls.Add(statusStrip, 0, 1);
 		_rootLayout = tableLayoutPanel12;

@@ -1,12 +1,12 @@
-# MD Card Mod Tool 2.0.31
+# MD Card Mod Tool 2.0.32
 
 面向《游戏王 Master Duel》的 Windows x64 资源查看与 Mod 制作工具，支持四语卡名搜索、卡图与超框编辑、视觉资源替换、官方怪兽动画替换及 Mod 管理。
 
-2.0.31 修复游戏更新后新卡漏入索引、旧 PathID 导致 Texture2D 无法预览，以及扫描和快速切换资源时的界面闪烁。卡图 Bundle 在 Build 变化时会强制完整校验一次；资源指纹加入内容采样，避免文件时间戳未变时漏检。详见 [2.0.31 说明](docs/releases/RELEASE-NOTES-v2.0.31.md) 和[验证记录](docs/testing/TEST-REPORT-v2.0.31.md)。历史资料统一放在[文档目录](docs/README.md)。
+2.0.32 延续游戏更新后的新卡索引、旧 PathID 修复和低闪烁预览，并收紧顶部工具栏、标题区、侧栏品牌区与状态栏间距，保留 150% DPI 下的按钮点击高度。详见 [2.0.32 说明](docs/releases/RELEASE-NOTES-v2.0.32.md) 和[验证记录](docs/testing/TEST-REPORT-v2.0.32.md)。历史资料统一放在[文档目录](docs/README.md)。
 
 ## 下载
 
-下载 [最新发行版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/latest)（当前为 [2.0.31](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.31)，[完整 ZIP](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/download/v2.0.31/MD-Card-Mod-Tool-v2.0.31-win-x64.zip)），或使用 [2.0.30 回退版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.30)。建议解压到独立目录，根目录只有 `MD卡图查看替换器.exe` 与 `data` 文件夹，直接运行 EXE 即可。不要删除游戏目录中的 `_MD卡图备份`。若文件带有 Windows 下载标记，可先运行 `data\首次启动-解除下载封锁.bat`。包的 SHA-256 见 [校验文件](docs/checksums/SHA256SUMS-v2.0.31.txt)；已上传的 ZIP 保留原文件名和字节，不破坏已有下载链接。随包说明保留测试时的快照，最新发布状态以本页和 GitHub Release 为准。
+下载 [最新发行版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/latest)（当前为 [2.0.32](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.32)，[完整 ZIP](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/download/v2.0.32/MD-Card-Mod-Tool-v2.0.32-win-x64.zip)），或使用 [2.0.31 回退版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.31)。建议解压到独立目录，根目录只有 `MD卡图查看替换器.exe` 与 `data` 文件夹，直接运行 EXE 即可。不要删除游戏目录中的 `_MD卡图备份`。若文件带有 Windows 下载标记，可先运行 `data\首次启动-解除下载封锁.bat`。包的 SHA-256 见 [校验文件](docs/checksums/SHA256SUMS-v2.0.32.txt)；已上传的 ZIP 保留原文件名和字节，不破坏已有下载链接。随包说明保留测试时的快照，最新发布状态以本页和 GitHub Release 为准。
 
 以后版本更新默认同步源码、README 和 GitHub 普通发行版，并标记为 Latest，不再堆叠预发行测试版。发行列表只保留最新版与一个回退版；旧发行版清理前在维护电脑归档安装包和说明，Git 标签与源码历史保留。本地程序、用户 Mod、恢复库及游戏备份不属于发行版清理范围。
 

@@ -2,9 +2,9 @@
 
 软件下载请前往 [GitHub 发行版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/latest)，使用说明与主要功能见[仓库首页](../README.md)。本目录收纳版本、测试、恢复及许可资料，避免历史文件堆在首页。
 
-- [当前 2.0.31 版本说明](releases/RELEASE-NOTES-v2.0.31.md)
-- [当前 2.0.31 验证记录](testing/TEST-REPORT-v2.0.31.md)
-- [2.0.31 安装包 SHA-256](checksums/SHA256SUMS-v2.0.31.txt)
+- [当前 2.0.32 版本说明](releases/RELEASE-NOTES-v2.0.32.md)
+- [当前 2.0.32 验证记录](testing/TEST-REPORT-v2.0.32.md)
+- [2.0.32 安装包 SHA-256](checksums/SHA256SUMS-v2.0.32.txt)
 - [历史版本说明与累计摘要](releases/README.md)
 - [全部测试记录](testing)
 - [源码恢复记录](recovery/RECOVERY-REPORT.md)
