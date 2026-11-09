@@ -219,7 +219,7 @@ public static class IndexService
 		return BuiltInCardFrameCatalog.Load();
 	}
 
-	public static MissingCardScanResult ScanMissingLocalCard(string gameRoot, GameIndex index, string cardKey, Action<int, int, int>? progress = null, CancellationToken cancellationToken = default(CancellationToken))
+	public static MissingCardScanResult ScanMissingLocalCard(string gameRoot, GameIndex index, string cardKey, Action<int, int, int>? progress = null, CancellationToken cancellationToken = default(CancellationToken), bool forceRescan = false)
 	{
 		if (string.IsNullOrWhiteSpace(cardKey) || !cardKey.All(char.IsAsciiDigit))
 		{
@@ -232,9 +232,9 @@ public static class IndexService
 			select Path.GetFullPath(x.BundlePath)).ToHashSet<string>(StringComparer.OrdinalIgnoreCase);
 		// A dictionary cache hit must not hide a card downloaded afterwards, or a
 		// bundle whose old scan stamp survived after its texture was lost.
-		bool NeedsScan(string path) => !knownBundles.Contains(Path.GetFullPath(path))
+		bool NeedsScan(string path) => forceRescan || !knownBundles.Contains(Path.GetFullPath(path))
 			|| !index.CardBundleScanStamps.TryGetValue(Path.GetFullPath(path), out string stamp) || stamp != BundleScanStamp(path);
-		bool NeedsStreamingScan(string path) => CardBundleIdentity.Find(path).Length > 0 ? NeedsScan(path)
+		bool NeedsStreamingScan(string path) => forceRescan || CardBundleIdentity.Find(path).Length > 0 ? NeedsScan(path)
 			: !index.CardBundleScanStamps.TryGetValue(Path.GetFullPath(path), out string stamp) || stamp != BundleScanStamp(path);
 		List<(string Path, string Root)> files = ((cardKey == "0") ? (from path in EnumerateDownloadedCardIllustrationBundles(localRoot, includeIncomplete: true)
 			where NeedsScan(path)
@@ -247,7 +247,7 @@ public static class IndexService
 				? Directory.EnumerateFiles(streamingRoot, "*", SearchOption.AllDirectories).Where(path => IsUnityBundle(path) || CardBundleIdentity.Find(path).Length > 0)
 				: CardIllustrationBundleCandidates(streamingRoot, cardKey);
 			files.AddRange(from path in candidates
-				where cardKey == "0" ? NeedsStreamingScan(path) : !knownBundles.Contains(Path.GetFullPath(path))
+				where cardKey == "0" ? NeedsStreamingScan(path) : forceRescan || !knownBundles.Contains(Path.GetFullPath(path))
 				select (Path: path, Root: streamingRoot));
 		}
 		int found = 0;

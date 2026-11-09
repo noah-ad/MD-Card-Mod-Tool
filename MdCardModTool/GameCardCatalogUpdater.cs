@@ -138,11 +138,36 @@ public static class GameCardCatalogUpdater
 				where file.Name.Length == 8 && file.Name.All(char.IsAsciiHexDigit)
 				select file).OrderBy<FileInfo, string>((FileInfo file) => file.FullName, StringComparer.OrdinalIgnoreCase))
 			{
-				string s = $"{item.FullName.ToUpperInvariant()}\0{item.Length}\0{item.LastWriteTimeUtc.Ticks}\n";
+				// Some launchers replace a Bundle in-place without changing its
+				// length or timestamp. Include a tiny content sample so a new card
+				// dictionary/illustration cannot remain hidden behind an old stamp.
+				string s = $"{item.FullName.ToUpperInvariant()}\0{item.Length}\0{item.LastWriteTimeUtc.Ticks}\0";
 				incrementalHash.AppendData(Encoding.UTF8.GetBytes(s));
+				AppendFileSample(incrementalHash, item);
+				incrementalHash.AppendData("\n"u8);
 			}
 		}
 		return Convert.ToHexString(incrementalHash.GetHashAndReset());
+
+		static void AppendFileSample(IncrementalHash hash, FileInfo file)
+		{
+			try
+			{
+				using FileStream stream = file.OpenRead();
+				byte[] sample = new byte[Math.Min(64, (int)Math.Min(file.Length, 64))];
+				int read = stream.Read(sample, 0, sample.Length);
+				if (read > 0) hash.AppendData(sample.AsSpan(0, read));
+				if (file.Length > 64)
+				{
+					stream.Seek(-64, SeekOrigin.End);
+					byte[] tail = new byte[64];
+					read = stream.Read(tail, 0, tail.Length);
+					if (read > 0) hash.AppendData(tail.AsSpan(0, read));
+				}
+			}
+			catch (IOException) { hash.AppendData("<unreadable>"u8); }
+			catch (UnauthorizedAccessException) { hash.AppendData("<denied>"u8); }
+		}
 	}
 
 	public static IReadOnlyList<CardCatalogEntry> Extract(string gameRoot, Action<int, int, int>? progress = null, CancellationToken cancellationToken = default(CancellationToken))

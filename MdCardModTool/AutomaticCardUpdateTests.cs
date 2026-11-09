@@ -31,6 +31,8 @@ internal static class AutomaticCardUpdateTests
 		var visible = new System.Collections.Generic.List<TexRef>();
 		Check(NewCardDiscovery.Merge(index, visible, missing) == 1, "new card merged once");
 		Check(IndexService.ScanMissingLocalCard(mirror, index, "0").ScannedBundles == 0, "unchanged illustrations are not rescanned");
+		var forcedBuildPass = IndexService.ScanMissingLocalCard(mirror, index, "0", forceRescan: true);
+		Check(forcedBuildPass.ScannedBundles > 0 && forcedBuildPass.Textures.Any(x => x.CardKey == "60000"), "Build change forces a full card Bundle validation");
 		string idsPath = Path.Combine(output, "observed.json.br");
 		NewCardDiscovery.SaveObservedIds(index.Textures, idsPath);
 		var nameless = CardCatalogService.Read(idsPath).Single(x => x.CardId == 60000);

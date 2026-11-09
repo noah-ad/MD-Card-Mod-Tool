@@ -67,7 +67,9 @@ public static class UiTheme
 			{
 				if (!root.IsDisposed && root.IsHandleCreated)
 				{
-					root.PerformLayout();
+					// Layout is coordinated by MainForm's single queued reset. Doing a
+					// full layout from every repaint request made navigation and DPI
+					// changes visibly flash, especially at 125/150% scaling.
 					root.Invalidate(invalidateChildren: true);
 				}
 			});

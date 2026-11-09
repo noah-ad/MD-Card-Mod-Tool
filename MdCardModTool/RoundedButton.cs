@@ -88,7 +88,7 @@ public class RoundedButton : Button
 	public RoundedButton()
 	{
 		SetStyle(ControlStyles.UserPaint | ControlStyles.Opaque | ControlStyles.ResizeRedraw | ControlStyles.Selectable | ControlStyles.AllPaintingInWmPaint, value: true);
-		SetStyle(ControlStyles.OptimizedDoubleBuffer, value: false);
+		SetStyle(ControlStyles.OptimizedDoubleBuffer, value: true);
 		SetStyle(ControlStyles.SupportsTransparentBackColor, value: false);
 		DoubleBuffered = false;
 		base.FlatStyle = FlatStyle.Flat;

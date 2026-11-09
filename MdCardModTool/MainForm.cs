@@ -2139,9 +2139,10 @@ public sealed partial class MainForm : Form
 			return;
 		}
 		base.UseWaitCursor = true;
-		_textures.Clear();
-		_preview.Image = null;
-		_previewHint.Visible = true;
+		// Keep the last stable snapshot visible until the new scan succeeds. The
+		// old eager clear produced a blank flash whenever a Build/account refresh
+		// started and made the workspace feel much heavier than it is.
+		_status.Text = "正在读取游戏资源…";
 		try
 		{
 			string cache = CachePath();
@@ -2216,6 +2217,7 @@ public sealed partial class MainForm : Form
 			}
 			if (!Current()) return;
 			_index = cached;
+			_textures.Clear();
 			_textures.AddRange(cached.Textures);
 			string text = (loadedFromPrebuilt ? PortableIndexService.GetGameBuildId(_gameRoot) : "");
 			string value = ((prebuiltBuildId.Length > 0 && text.Length > 0 && prebuiltBuildId != text) ? $"；预绑定 Build {prebuiltBuildId}，本机 Build {text}，新版卡可用“定位卡图”补充" : "");
@@ -2337,7 +2339,6 @@ public sealed partial class MainForm : Form
 		string q = ((_currentPage == WorkspacePage.Cards) ? _search.Text.Trim() : "");
 		CategoryFilter filter = (_category.SelectedItem as CategoryFilter) ?? new CategoryFilter(CategoryFilterKind.All, "", Localizer.T("filter.all"));
 		_resultCount.Text = Localizer.T("list.updating");
-		_resultCount.Update();
 		_list.BeginUpdate();
 		HashSet<TexRef> selectedTextures = SelectedModTextures(includeUnmodified: true).ToHashSet();
 		_renderingResourceList = true;
@@ -2860,12 +2861,16 @@ public sealed partial class MainForm : Form
 		_previewCancellation = new CancellationTokenSource();
 		CancellationToken cancellationToken = _previewCancellation.Token;
 		TexRef x = Selected();
-		_preview.Image?.Dispose();
-		_preview.Image = null;
+		bool hadPreview = _preview.Image != null;
 		_previewHint.Text = ((x == null) ? "SELECT A RESOURCE\n\n选择一张卡图查看预览" : "LOADING\n\n正在读取当前 Bundle…");
-		_previewHint.Visible = true;
+		// Keep the previous bitmap during asynchronous decoding. This avoids a
+		// white/empty flash when users step through a long resource list; the new
+		// image atomically replaces it after all mapping and cancellation checks.
+		_previewHint.Visible = x == null || !hadPreview;
 		if (x == null)
 		{
+			_preview.Image?.Dispose();
+			_preview.Image = null;
 			int selectedCount = _modsOnly ? SelectedModTextures().Length : 0;
 			if (selectedCount > 1) _previewHint.Text = Localizer.F("mods.selection.preview", selectedCount);
 			_info.Text = selectedCount > 1 ? Localizer.F("mods.selection.summary", selectedCount) : "";
@@ -3406,11 +3411,14 @@ public sealed partial class MainForm : Form
 			string localRoot = IndexService.FindLocalRoot(gameRoot) ?? "";
 			if (!IsSameWorkspace(gameRoot, localRoot, index)) return;
 			string startedSignature = await Task.Run(() => GameResourceSignature(gameRoot, localRoot), cancellationToken);
+			string currentBuildId = PortableIndexService.GetGameBuildId(gameRoot);
+			bool forceBuildRescan = currentBuildId.Length > 0
+				&& !string.Equals(index.LastScannedBuildId, currentBuildId, StringComparison.Ordinal);
 			// Always check illustration metadata first, independently of the name
 			// cache and animation scan. Publish new cards before slower stages.
 			PostBackgroundStatus("正在检测已下载的新卡图与变更资源…");
 			Action<int, int, int> missingCardProgress = CreateThrottledBackgroundProgress(250, (int done, int total, int added) => $"正在合并新卡图：{done:N0}/{total:N0} · 已读取 {added:N0}…");
-			MissingCardScanResult missingCards = await Task.Run(() => IndexService.ScanMissingLocalCard(gameRoot, index, "0", missingCardProgress, cancellationToken), cancellationToken);
+			MissingCardScanResult missingCards = await Task.Run(() => IndexService.ScanMissingLocalCard(gameRoot, index, "0", missingCardProgress, cancellationToken, forceBuildRescan), cancellationToken);
 			cancellationToken.ThrowIfCancellationRequested();
 			if (!IsSameWorkspace(gameRoot, localRoot, index)) return;
 			int newCards = NewCardDiscovery.Merge(index, _textures, missingCards);
@@ -3479,7 +3487,15 @@ public sealed partial class MainForm : Form
 			// a download changes mid-scan, or a page change cancels it, the timer
 			// must retry even when no further file/build metadata changes occur.
 			if (IsSameWorkspace(gameRoot, localRoot, index) && catalogWarning.Length == 0 && missingCards.PendingBundles.Count == 0 && startedSignature == completedSignature)
+			{
 				_lastCheckedResourceSignature = completedSignature;
+				if (currentBuildId.Length > 0) index.LastScannedBuildId = currentBuildId;
+				await Task.Run(() =>
+				{
+					if (_backgroundDataDirectory == AppSettingsStore.AppDataRoot) IndexService.Save(gameRoot, index);
+					else ModRecoveryStore.AtomicWrite(Path.Combine(_backgroundDataDirectory, "index.json"), JsonSerializer.SerializeToUtf8Bytes(index));
+				}, cancellationToken);
+			}
 		}
 		catch (OperationCanceledException)
 		{

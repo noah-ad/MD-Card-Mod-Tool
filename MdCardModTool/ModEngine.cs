@@ -809,6 +809,35 @@ public sealed class ModEngine
 				return texRef;
 			}
 		}
+		// A game update can keep the physical Bundle but change its logical
+		// card path (or leave an old cache row pointing at a stale PathID). The
+		// CRC candidates above are fast, but they do not cover every regional or
+		// legacy illustration path. Use the filename-domain identity as a second
+		// index before falling back to a broad scan.
+		if (texture.CardKey.Length > 0 && texture.CardKey.All(char.IsAsciiDigit))
+		{
+			foreach (string root in new[] { text, text2 }.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase))
+			{
+				try
+				{
+					foreach (string file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+					{
+						if (string.Equals(CardBundleIdentity.Find(file), texture.CardKey, StringComparison.Ordinal))
+						{
+							string bundleRoot = IsInsideRoot(file, root) ? root : (Path.GetDirectoryName(file) ?? root);
+							foreach (TexRef candidate in ScanBundle(file, bundleRoot, texture.SourceKind, includeDependencies: false).Textures)
+							{
+								if (hashSet.Add($"{Path.GetFullPath(candidate.BundlePath)}\0{candidate.AssetFileName}\0{candidate.PathId}")) list2.Add(candidate);
+							}
+						}
+					}
+				}
+				catch (IOException) { }
+				catch (UnauthorizedAccessException) { }
+			}
+			texRef = SelectUnambiguous(list2.Where(x => x.CardKey == texture.CardKey || string.Equals(x.Name, texture.Name, StringComparison.OrdinalIgnoreCase)), texture);
+			if (texRef != null) return texRef;
+		}
 		if (texture.Width > 0 && texture.Height > 0)
 		{
 			texRef = SelectUnambiguous(list2.Where((TexRef x) => x.Width == texture.Width && x.Height == texture.Height), texture);
