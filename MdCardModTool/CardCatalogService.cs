@@ -38,11 +38,14 @@ public sealed class CardCatalogService
 			select x).First());
 		_normalizedNames = _entries.ToDictionary((CardCatalogEntry x) => x.CardId, (CardCatalogEntry x) => new string[4]
 		{
-			Normalize(x.SimplifiedChineseName),
-			Normalize(x.TraditionalChineseName),
-			Normalize(x.JapaneseName),
-			Normalize(x.EnglishName)
+			SearchKeys(x.SimplifiedChineseName).FirstOrDefault() ?? "",
+			SearchKeys(x.TraditionalChineseName).FirstOrDefault() ?? "",
+			SearchKeys(x.JapaneseName).FirstOrDefault() ?? "",
+			SearchKeys(x.EnglishName).FirstOrDefault() ?? ""
 		});
+		// Keep all aliases separately.  The compact map above is retained for
+		// equivalent-card grouping, while search uses SearchKeysForEntry so a
+		// localized synonym can match without changing the displayed game name.
 	}
 
 	public static CardCatalogService LoadBestAvailable() => LoadBestAvailable(AppSettingsStore.AppDataRoot);
@@ -230,8 +233,7 @@ public sealed class CardCatalogService
 		{
 			num = 6000 - text.Length;
 		}
-		string[] array = _normalizedNames[entry.CardId];
-		foreach (string text2 in array)
+		foreach (string text2 in SearchKeysForEntry(entry))
 		{
 			if (text2.Length == 0)
 			{
@@ -254,6 +256,35 @@ public sealed class CardCatalogService
 			}
 		}
 		return num;
+	}
+
+	private IEnumerable<string> SearchKeysForEntry(CardCatalogEntry entry)
+	{
+		return new[] { entry.SimplifiedChineseName, entry.TraditionalChineseName, entry.JapaneseName, entry.EnglishName }
+			.SelectMany(SearchKeys).Where(x => x.Length > 0).Distinct(StringComparer.Ordinal);
+	}
+
+	private static IEnumerable<string> SearchKeys(string value)
+	{
+		string normalized = Normalize(value);
+		if (normalized.Length == 0) yield break;
+		var keys = new HashSet<string>(StringComparer.Ordinal) { normalized };
+		// Common in-game / database localization differences.  These are
+		// deliberately narrow, symmetric transformations: they make searches
+		// such as “黑魔导的幕帘” find the current game name
+		// “黑之魔导的帘布”, while leaving the display text untouched.
+		if (normalized.Contains('之')) keys.Add(normalized.Replace("之", "", StringComparison.Ordinal));
+		if (normalized.Contains("帘布", StringComparison.Ordinal)) keys.Add(normalized.Replace("帘布", "幕帘", StringComparison.Ordinal));
+		if (normalized.Contains("幕帘", StringComparison.Ordinal)) keys.Add(normalized.Replace("幕帘", "帘布", StringComparison.Ordinal));
+		if (normalized.Contains("魔導", StringComparison.Ordinal)) keys.Add(normalized.Replace("魔導", "魔导", StringComparison.Ordinal));
+		if (normalized.Contains("魔导", StringComparison.Ordinal)) keys.Add(normalized.Replace("魔导", "魔導", StringComparison.Ordinal));
+		foreach (string key in keys)
+		{
+			yield return key;
+			if (key.Contains('之')) yield return key.Replace("之", "", StringComparison.Ordinal);
+			if (key.Contains("帘布", StringComparison.Ordinal)) yield return key.Replace("帘布", "幕帘", StringComparison.Ordinal);
+			if (key.Contains("幕帘", StringComparison.Ordinal)) yield return key.Replace("幕帘", "帘布", StringComparison.Ordinal);
+		}
 	}
 
 	private static CardCatalogEntry Merge(CardCatalogEntry? current, CardCatalogEntry incoming)

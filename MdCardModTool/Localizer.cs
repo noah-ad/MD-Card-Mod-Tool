@@ -31,7 +31,7 @@ public static class Localizer
 			"保留原像素，畫布 {0}×{1}，每檔 {2} 頁，HD+SD 約 {3:F0} MiB（處理峰值更高）。\n不縮圖、不用 BC7；仍按所選幀率取樣及預乘 Alpha。僅使用目標已登記頁。遊戲相容性未驗證。繼續？",
 			"元ピクセルを保持：{0}×{1}、各 {2} ページ、HD+SD 約 {3:F0} MiB（処理時はさらに必要）。\nBC7/縮小なし。指定FPSとPMA変換は適用。既存の登録ページのみ使用。ゲーム内未検証。続行？",
 			"Original pixels: {0}×{1}, {2} pages per tier, ~{3:F0} MiB HD+SD (processing peak is higher).\nNo resizing or BC7. Selected FPS and required PMA conversion still apply. Uses existing registered pages only. Not validated in-game. Continue?" },
-		["app.title"] = new string[4] { "MD 卡片 Mod 工具 2.0.35", "MD 卡片 Mod 工具 2.0.35", "MD カード Mod ツール 2.0.35", "MD Card Mod Tool 2.0.35" },
+		["app.title"] = new string[4] { "MD 卡片 Mod 工具 2.0.36", "MD 卡片 Mod 工具 2.0.36", "MD カード Mod ツール 2.0.36", "MD Card Mod Tool 2.0.36" },
 		["search.artPending.short"] = new[] { "卡图待定位", "卡圖待定位", "画像を未検出", "Art unresolved" },
 		["search.artPending.message"] = new[] { "卡名已收录，本机卡图尚未定位。\n可在游戏中查看此卡并完成下载后重试；也请确认顶栏账号。", "卡名已收錄，本機卡圖尚未定位。\n請在遊戲中查看並完成下載後重試，並確認帳號。", "カード名は登録済みですが、画像は未検出です。\nゲーム内で画像をダウンロードし、アカウントをご確認ください。", "The card is catalogued, but its artwork is unresolved.\nDownload its art in-game and verify the selected account." },
 		["search.artPending.loading"] = new[] { "正在从当前账号定位卡图…", "正在定位目前帳號的卡圖…", "現在のアカウントから画像を検索中…", "Locating artwork in this account…" },
