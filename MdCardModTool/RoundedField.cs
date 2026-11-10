@@ -53,6 +53,13 @@ public sealed class RoundedField : Panel
 		old?.Dispose();
 	}
 
+	public override Size GetPreferredSize(Size proposedSize)
+	{
+		Size inner = _control.GetPreferredSize(new Size(Math.Max(1, proposedSize.Width - Padding.Horizontal), 0));
+		return new Size(Math.Max(MinimumSize.Width, inner.Width + Padding.Horizontal + 2),
+			Math.Max(MinimumSize.Height, inner.Height + Padding.Vertical + 2));
+	}
+
 	protected override void OnPaintBackground(PaintEventArgs e)
 	{
 		using SolidBrush brush = new SolidBrush(base.Parent?.BackColor ?? UiTheme.Window);

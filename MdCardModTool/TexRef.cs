@@ -33,7 +33,7 @@ public sealed class TexRef
 	[JsonIgnore]
 	public bool HasMonsterAnimation { get; set; }
 
-	public string SourceKind { get; init; } = "";
+	public string SourceKind { get; set; } = "";
 
 	public string CardKey { get; init; } = "";
 
@@ -42,6 +42,9 @@ public sealed class TexRef
 	public string? OverrideBundlePath { get; set; }
 
 	public string ActiveBundlePath => OverrideBundlePath ?? BundlePath;
+
+	[JsonIgnore]
+	public bool IsCatalogOnly => SourceKind == "卡片目录";
 
 	public override string ToString()
 	{

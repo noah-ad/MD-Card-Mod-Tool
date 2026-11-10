@@ -35,6 +35,26 @@ internal static class Program
 	private static void Main(string[] args)
 	{
 		ApplicationConfiguration.Initialize();
+		if (args.Length == 3 && args[0] == "--audit-md-ui-assets")
+		{
+			GameUiAssetAudit.Run(args[1], args[2]);
+			return;
+		}
+		if (args.Length == 2 && args[0] == "--test-workspace-regression")
+		{
+			WorkspaceRegressionTests.Run(args[1]);
+			return;
+		}
+		if (args.Length == 3 && args[0] == "--test-resource-recovery")
+		{
+			ResourceRecoveryRegressionTests.Run(args[1], args[2]);
+			return;
+		}
+		if (args.Length == 3 && args[0] == "--review-workspace")
+		{
+			WorkspaceRegressionTests.Review(args[1], args[2]);
+			return;
+		}
 		if (args.Length == 2 && args[0] == "--test-ffmpeg-media")
 		{
 			WindowsFormsSynchronizationContext.AutoInstall = false;
@@ -59,12 +79,12 @@ internal static class Program
 			TextureModRestoreTests.Run(args[1], args[2]);
 			return;
 		}
-		if (args.Length == 3 && args[0] == "--test-new-card-refresh")
+		if ((args.Length == 3 || args.Length == 4) && args[0] == "--test-new-card-refresh")
 		{
 			WindowsFormsSynchronizationContext.AutoInstall = false;
 			SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
 			Control.CheckForIllegalCrossThreadCalls = true;
-			NewCardRefreshTests.Run(args[1], args[2]);
+			NewCardRefreshTests.Run(args[1], args[2], args.Length == 4 ? args[3] : null);
 			return;
 		}
 		if (args.Length == 4 && args[0] == "--audit-card-update")

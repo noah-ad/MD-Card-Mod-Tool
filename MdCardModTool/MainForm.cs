@@ -327,6 +327,12 @@ public sealed partial class MainForm : Form
 
 	private SplitContainer? _workspaceSplit;
 
+	// The virtual ListView is retained as the stable selection/mod-management
+	// adapter.  CardResourceGallery is the visible workspace on resource pages.
+	private CardResourceGallery? _resourceGallery;
+
+	private GameUiHeaderPanel? _gameUiBanner;
+
 	private MonsterAnimationForm? _embeddedAnimation;
 
 	private OverFrameForm? _embeddedFrames;
@@ -414,7 +420,7 @@ public sealed partial class MainForm : Form
 		UiTheme.ApplyDarkTitleBar(this);
 		Text = Localizer.T("app.title");
 		base.StartPosition = FormStartPosition.CenterScreen;
-		MinimumSize = new Size(1240, 780);
+		MinimumSize = new Size(1040, 680);
 		base.Size = new Size(1520, 920);
 		BackColor = UiTheme.Window;
 		ForeColor = UiTheme.Text;
@@ -597,6 +603,7 @@ public sealed partial class MainForm : Form
 			_layoutSurfaceReset.Dispose();
 			_brandImage?.Dispose();
 			_windowIcon?.Dispose();
+			_gameUiBanner?.Dispose();
 		};
 		ApplyLanguage();
 		GameInstallation gameInstallation = ((resourceRoot != null) ? SteamGameDiscovery.FromPath(resourceRoot) : (ResourceSource.IsMobile(_settings.LastGameRoot) ? ResourceSource.Mobile(_settings.LastGameRoot) : SteamGameDiscovery.Discover(_settings.LastGameRoot).FirstOrDefault()));
@@ -606,16 +613,6 @@ public sealed partial class MainForm : Form
 		}
 		base.Shown += async delegate
 		{
-			SplitContainer resourceSplit = _resourceSplit;
-			if (resourceSplit != null && resourceSplit.Width > 650)
-			{
-				_resourceSplit.SplitterDistance = 235;
-			}
-			resourceSplit = _workspaceSplit;
-			if (resourceSplit != null && resourceSplit.Width > 1150)
-			{
-				_workspaceSplit.SplitterDistance = Math.Min((int)((double)_workspaceSplit.Width * 0.66), _workspaceSplit.Width - 410);
-			}
 			UiTheme.QueueStableRepaint(this);
 			QueueLayoutSurfaceReset();
 			if (_assetRoot != null)
@@ -686,407 +683,10 @@ public sealed partial class MainForm : Form
 		{
 			await ImportModsAsync();
 		}), "action.mods.import");
-		TableLayoutPanel tableLayoutPanel = new TableLayoutPanel
-		{
-			Dock = DockStyle.Fill,
-			ColumnCount = 8,
-			RowCount = 1,
-			Margin = Padding.Empty
-		};
-		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 194f));
-		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 154f));
-		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-		tableLayoutPanel.Controls.Add(Bind(Caption(""), "top.game"), 0, 0);
-		tableLayoutPanel.Controls.Add(UiTheme.Field(_gameFolder), 1, 0);
-		tableLayoutPanel.Controls.Add(control, 2, 0);
-		tableLayoutPanel.Controls.Add(Bind(Caption(""), "top.account"), 3, 0);
-		tableLayoutPanel.Controls.Add(UiTheme.Field(_profileSelector), 4, 0);
-		tableLayoutPanel.Controls.Add(Bind(Caption(""), "top.language"), 5, 0);
-		tableLayoutPanel.Controls.Add(UiTheme.Field(_languageSelector), 6, 0);
-		tableLayoutPanel.Controls.Add(control2, 7, 0);
-		TableLayoutPanel tableLayoutPanel2 = new TableLayoutPanel
-		{
-			Dock = DockStyle.Fill,
-			Margin = Padding.Empty,
-			Padding = new Padding(16, 10, 16, 10),
-			BackColor = UiTheme.Surface,
-			ColumnCount = 1,
-			RowCount = 1
-		};
-		tableLayoutPanel2.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-		tableLayoutPanel2.Controls.Add(tableLayoutPanel, 0, 0);
-		BorderPanel topBarCard = new BorderPanel
-		{
-			Dock = DockStyle.Fill,
-			Margin = new Padding(12, 7, 12, 5),
-			Padding = new Padding(1),
-			BackColor = UiTheme.Surface,
-			CornerRadius = 10
-		};
-		topBarCard.Controls.Add(tableLayoutPanel2);
-		TableLayoutPanel tableLayoutPanel3 = new TableLayoutPanel
-		{
-			Dock = DockStyle.Fill,
-			Padding = new Padding(14, 7, 14, 7),
-			BackColor = UiTheme.SurfaceAlt,
-			ColumnCount = 2,
-			RowCount = 1
-		};
-		tableLayoutPanel3.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-		tableLayoutPanel3.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 236f));
-		_cardSearchField = UiTheme.Field(_search);
-		tableLayoutPanel3.Controls.Add(_cardSearchField, 0, 0);
-		tableLayoutPanel3.Controls.Add(UiTheme.Field(_category), 1, 0);
-		BorderPanel searchCard = new BorderPanel
-		{
-			Dock = DockStyle.Fill,
-			Margin = new Padding(12, 7, 12, 5),
-			Padding = new Padding(1),
-			BackColor = UiTheme.SurfaceAlt,
-			CornerRadius = 10
-		};
-		searchCard.Controls.Add(tableLayoutPanel3);
-		BuildVisualShortcutBar();
-		BorderPanel borderPanel = new BorderPanel
-		{
-			Dock = DockStyle.Fill,
-			BackColor = UiTheme.Surface,
-			Margin = new Padding(0, 0, 8, 0)
-		};
-		borderPanel.Controls.Add(_groups);
-		borderPanel.Controls.Add(SectionHeading("资源分类", "RESOURCE GROUPS"));
-		BorderPanel borderPanel2 = new BorderPanel
-		{
-			Dock = DockStyle.Fill,
-			BackColor = UiTheme.Surface,
-			Margin = new Padding(8, 0, 0, 0)
-		};
-		Panel panel = SectionHeading("图片资源", "拖入替换 · 拖出导出");
-		panel.Controls.Add(_resultCount);
-		_resultCount.BringToFront();
-		borderPanel2.Controls.Add(_list);
-		borderPanel2.Controls.Add(panel);
-		_resourceSplit = new SplitContainer
-		{
-			Dock = DockStyle.Fill,
-			FixedPanel = FixedPanel.Panel1,
-			SplitterDistance = 235,
-			SplitterWidth = 8,
-			IsSplitterFixed = false,
-			BackColor = UiTheme.Window
-		};
-		_resourceSplit.Panel1.Controls.Add(borderPanel);
-		_resourceSplit.Panel2.Controls.Add(borderPanel2);
-		BorderPanel borderPanel3 = new BorderPanel
-		{
-			Dock = DockStyle.Fill,
-			BackColor = UiTheme.Surface,
-			Padding = new Padding(18)
-		};
-		borderPanel3.Controls.Add(_preview);
-		borderPanel3.Controls.Add(_previewHint);
-		_previewHint.BringToFront();
-		_resourceActionGrid.Dock = DockStyle.Fill;
-		_resourceActionGrid.ColumnCount = 2;
-		_resourceActionGrid.RowCount = 4;
-		_resourceActionGrid.AutoScroll = false;
-		_resourceActionGrid.BackColor = UiTheme.Surface;
-		_resourceActionGrid.Padding = new Padding(5, 4, 5, 4);
-		_resourceActionGrid.Margin = Padding.Empty;
-		_resourceActionGrid.ColumnStyles.Clear();
-		_resourceActionGrid.RowStyles.Clear();
-		_resourceActionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
-		_resourceActionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
-		for (int num = 0; num < 4; num++)
-		{
-			_resourceActionGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 25f));
-		}
-		Button[] array = new Button[8] { button, button2, button4, button3, _scanMissingButton, button5, button6, button7 };
-		for (int num2 = 0; num2 < array.Length; num2++)
-		{
-			Button button8 = array[num2];
-			button8.AutoSize = false;
-			button8.Dock = DockStyle.Fill;
-			button8.MinimumSize = Size.Empty;
-			button8.Margin = new Padding(4, 3, 4, 3);
-			_resourceActionGrid.Controls.Add(button8, num2 % 2, num2 / 2);
-		}
-		TableLayoutPanel previewLayout = new TableLayoutPanel
-		{
-			Dock = DockStyle.Fill,
-			BackColor = UiTheme.Window,
-			RowCount = 4,
-			ColumnCount = 1
-		};
-		previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46f));
-		previewLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-		previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 96f));
-		previewLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 158f));
-		previewLayout.Controls.Add(SectionHeading("实时预览", "LIVE PREVIEW"), 0, 0);
-		previewLayout.Controls.Add(borderPanel3, 0, 1);
-		previewLayout.Controls.Add(_info, 0, 2);
-		previewLayout.Controls.Add(_resourceActionGrid, 0, 3);
-		Panel panel2 = new Panel
-		{
-			Dock = DockStyle.Fill,
-			Padding = new Padding(14, 14, 7, 14),
-			BackColor = UiTheme.Window
-		};
-		panel2.Controls.Add(_resourceSplit);
-		Panel panel3 = new Panel
-		{
-			Dock = DockStyle.Fill,
-			Padding = new Padding(7, 14, 14, 14),
-			BackColor = UiTheme.Window
-		};
-		DarkScrollPanel previewScroll = new DarkScrollPanel
-		{
-			Name = "ResourcePreviewScroll",
-			UseExplicitContentHeight = true,
-			Dock = DockStyle.Fill,
-			BackColor = UiTheme.Window
-		};
-		previewScroll.ContentPanel.Controls.Add(previewLayout);
-		previewScroll.SizeChanged += delegate
-		{
-			ResizePreviewContent();
-		};
-		previewScroll.DpiChangedAfterParent += delegate
-		{
-			ResizePreviewContent();
-		};
-		previewLayout.Layout += delegate
-		{
-			ResizePreviewContent();
-		};
-		panel3.Controls.Add(previewScroll);
-		ResizePreviewContent();
-		_workspaceSplit = new SplitContainer
-		{
-			Dock = DockStyle.Fill,
-			SplitterDistance = 900,
-			SplitterWidth = 6,
-			BackColor = UiTheme.Border
-		};
-		_workspaceSplit.Panel1.Controls.Add(panel2);
-		_workspaceSplit.Panel2.Controls.Add(panel3);
-		BorderPanel workspaceCard = new BorderPanel
-		{
-			Dock = DockStyle.Fill,
-			Margin = new Padding(12, 5, 12, 12),
-			Padding = Padding.Empty,
-			BackColor = UiTheme.Surface,
-			CornerRadius = 10
-		};
-		workspaceCard.Controls.Add(_workspaceSplit);
-		TableLayoutPanel tableLayoutPanel4 = new TableLayoutPanel
-		{
-			Dock = DockStyle.Fill,
-			ColumnCount = 1,
-			RowCount = 4,
-			BackColor = UiTheme.Window
-		};
-		_visualShortcutRow = new RowStyle(SizeType.Absolute, 0f);
-		tableLayoutPanel4.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-		_resourceContextRow = new RowStyle(SizeType.Absolute, 0f);
-		tableLayoutPanel4.RowStyles.Add(_visualShortcutRow);
-		tableLayoutPanel4.RowStyles.Add(new RowStyle(SizeType.Absolute, 52f));
-		tableLayoutPanel4.RowStyles.Add(_resourceContextRow);
-		tableLayoutPanel4.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-		tableLayoutPanel4.Controls.Add(_visualShortcutBar, 0, 0);
-		tableLayoutPanel4.Controls.Add(searchCard, 0, 1);
-		tableLayoutPanel4.Controls.Add(_resourceContextBar, 0, 2);
-		tableLayoutPanel4.Controls.Add(workspaceCard, 0, 3);
-		_resourcePage.Controls.Add(tableLayoutPanel4);
-		BuildAnimationPage();
-		BuildResourceContextBar(exportMods, importMods);
-		BuildSettingsPage();
-		_pageHost.Controls.AddRange(new Control[3] { _settingsPage, _animationPage, _resourcePage });
-		TableLayoutPanel tableLayoutPanel5 = new TableLayoutPanel
-		{
-			Dock = DockStyle.Fill,
-			ColumnCount = 1,
-			RowCount = 5,
-			Padding = new Padding(8, 10, 8, 10),
-			BackColor = UiTheme.Surface,
-			AutoScroll = true
-		};
-		tableLayoutPanel5.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-		for (int num3 = 0; num3 < 4; num3++)
-		{
-		tableLayoutPanel5.RowStyles.Add(new RowStyle(SizeType.Absolute, 48f));
-		}
-		tableLayoutPanel5.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-		AddNavigation(tableLayoutPanel5, WorkspacePage.Cards, "nav.cards");
-		AddNavigation(tableLayoutPanel5, WorkspacePage.Visuals, "nav.visuals");
-		AddNavigation(tableLayoutPanel5, WorkspacePage.Animation, "nav.animation");
-		AddNavigation(tableLayoutPanel5, WorkspacePage.Settings, "nav.settings");
-		PictureBox control3 = new PictureBox
-		{
-			Dock = DockStyle.Fill,
-			Image = _brandImage,
-			SizeMode = PictureBoxSizeMode.Zoom,
-			Margin = new Padding(0, 4, 12, 4),
-			BackColor = Color.Transparent
-		};
-		Label control4 = new Label
-		{
-			Text = "MD STUDIO",
-			Dock = DockStyle.Fill,
-			Font = new Font("Segoe UI Semibold", 11f),
-			AutoEllipsis = true,
-			ForeColor = UiTheme.Text,
-			TextAlign = ContentAlignment.BottomLeft
-		};
-		Label control5 = new Label
-		{
-			Text = "MASTER DUEL\nMOD WORKSPACE",
-			AutoEllipsis = true,
-			Dock = DockStyle.Fill,
-			Font = new Font("Segoe UI", 7.5f),
-			ForeColor = UiTheme.Primary,
-			TextAlign = ContentAlignment.TopLeft
-		};
-		TableLayoutPanel tableLayoutPanel6 = new TableLayoutPanel
-		{
-			Dock = DockStyle.Fill,
-			RowCount = 2,
-			ColumnCount = 1,
-			Margin = Padding.Empty
-		};
-		tableLayoutPanel6.RowStyles.Add(new RowStyle(SizeType.Percent, 56f));
-		tableLayoutPanel6.RowStyles.Add(new RowStyle(SizeType.Percent, 44f));
-		tableLayoutPanel6.Controls.Add(control4, 0, 0);
-		tableLayoutPanel6.Controls.Add(control5, 0, 1);
-		TableLayoutPanel tableLayoutPanel7 = new TableLayoutPanel
-		{
-			Dock = DockStyle.Fill,
-			ColumnCount = 2,
-			RowCount = 1,
-			Padding = new Padding(14, 13, 12, 10),
-			BackColor = UiTheme.Surface
-		};
-		tableLayoutPanel7.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 62f));
-		tableLayoutPanel7.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-		tableLayoutPanel7.Controls.Add(control3, 0, 0);
-		tableLayoutPanel7.Controls.Add(tableLayoutPanel6, 1, 0);
-		Label control6 = new Label
-		{
-			Name = "AppVersionLabel",
-			Dock = DockStyle.Fill,
-			Padding = new Padding(18, 10, 14, 10),
-			ForeColor = UiTheme.Muted,
-			BackColor = UiTheme.Surface,
-			Font = new Font("Segoe UI", 8f),
-			TextAlign = ContentAlignment.MiddleLeft,
-			Text = $"v{Application.ProductVersion.Split('+')[0]}  ·  ASTELLAR CATALOG\n{_cardCatalog.Count:N0} MULTILINGUAL CARDS"
-		};
-		TableLayoutPanel tableLayoutPanel8 = new TableLayoutPanel
-		{
-			Dock = DockStyle.Fill,
-			ColumnCount = 1,
-			RowCount = 3,
-			BackColor = UiTheme.Surface
-		};
-		tableLayoutPanel8.RowStyles.Add(new RowStyle(SizeType.Absolute, 94f));
-		tableLayoutPanel8.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-		tableLayoutPanel8.RowStyles.Add(new RowStyle(SizeType.Absolute, 64f));
-		tableLayoutPanel8.Controls.Add(tableLayoutPanel7, 0, 0);
-		tableLayoutPanel8.Controls.Add(tableLayoutPanel5, 0, 1);
-		tableLayoutPanel8.Controls.Add(control6, 0, 2);
-		TableLayoutPanel tableLayoutPanel9 = new TableLayoutPanel
-		{
-			Dock = DockStyle.Fill,
-			ColumnCount = 2,
-			RowCount = 2,
-			Padding = new Padding(22, 8, 20, 6),
-			BackColor = UiTheme.Window
-		};
-		tableLayoutPanel9.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-		tableLayoutPanel9.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 230f));
-		tableLayoutPanel9.RowStyles.Add(new RowStyle(SizeType.Absolute, 34f));
-		tableLayoutPanel9.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-		tableLayoutPanel9.Controls.Add(_pageTitle, 0, 0);
-		tableLayoutPanel9.Controls.Add(_pageDescription, 0, 1);
-		tableLayoutPanel9.Controls.Add(_catalogBadge, 1, 0);
-		tableLayoutPanel9.SetRowSpan(_catalogBadge, 2);
-		TableLayoutPanel tableLayoutPanel10 = new TableLayoutPanel
-		{
-			Dock = DockStyle.Fill,
-			ColumnCount = 1,
-			RowCount = 3,
-			BackColor = UiTheme.Window
-		};
-		tableLayoutPanel10.RowStyles.Add(new RowStyle(SizeType.Absolute, 58f));
-		tableLayoutPanel10.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-		tableLayoutPanel10.RowStyles.Add(new RowStyle(SizeType.Absolute, 68f));
-		tableLayoutPanel10.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-		tableLayoutPanel10.Controls.Add(topBarCard, 0, 0);
-		tableLayoutPanel10.Controls.Add(tableLayoutPanel9, 0, 1);
-		tableLayoutPanel10.Controls.Add(_pageHost, 0, 2);
-		TableLayoutPanel tableLayoutPanel11 = new TableLayoutPanel
-		{
-			Dock = DockStyle.Fill,
-			ColumnCount = 2,
-			RowCount = 1,
-			BackColor = UiTheme.Window,
-			Padding = new Padding(0, 1, 0, 0)
-		};
-		tableLayoutPanel11.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 228f));
-		tableLayoutPanel11.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-		tableLayoutPanel11.Controls.Add(tableLayoutPanel8, 0, 0);
-		tableLayoutPanel11.Controls.Add(tableLayoutPanel10, 1, 0);
-		_status.Spring = true;
-		_status.TextAlign = ContentAlignment.MiddleLeft;
-		_status.ForeColor = UiTheme.Muted;
-		_status.Font = new Font("Microsoft YaHei UI", 8.5f);
-		StatusStrip statusStrip = new StatusStrip
-		{
-			Dock = DockStyle.Fill,
-			BackColor = UiTheme.Surface,
-			ForeColor = UiTheme.Muted,
-			SizingGrip = false,
-			Padding = new Padding(12, 0, 12, 0)
-		};
-		statusStrip.Items.Add(_status);
-		TableLayoutPanel tableLayoutPanel12 = new TableLayoutPanel
-		{
-			Dock = DockStyle.Fill,
-			BackColor = UiTheme.Window,
-			RowCount = 2,
-			ColumnCount = 1,
-			Margin = Padding.Empty,
-			Padding = Padding.Empty
-		};
-		tableLayoutPanel12.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-		tableLayoutPanel12.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-		tableLayoutPanel12.RowStyles.Add(new RowStyle(SizeType.Absolute, 28f));
-		tableLayoutPanel12.Controls.Add(tableLayoutPanel11, 0, 0);
-		tableLayoutPanel12.Controls.Add(statusStrip, 0, 1);
-		_rootLayout = tableLayoutPanel12;
-		base.Controls.Add(tableLayoutPanel12);
-		base.Controls.Add(_searchSuggestionPopup);
-		_searchSuggestionPopup.BringToFront();
-		base.SizeChanged += delegate
-		{
-			if (_searchSuggestionPopup.Visible)
-			{
-				PositionSearchSuggestions();
-			}
-			QueueLayoutSurfaceReset();
-		};
-		ShowPage(WorkspacePage.Cards);
-		void ResizePreviewContent()
-		{
-			int num4 = (int)Math.Ceiling(previewLayout.RowStyles[0].Height + previewLayout.RowStyles[2].Height + previewLayout.RowStyles[3].Height);
-			previewScroll.ContentHeight = Math.Max(previewScroll.ClientSize.Height, num4 + (int)Math.Ceiling(320f * previewLayout.RowStyles[0].Height / 46f) + previewLayout.Margin.Vertical);
-		}
+		BuildWorkspaceLayout(control, control2, exportMods, importMods,
+			new[] { button, button2, button4, button3, _scanMissingButton, button5, button6, button7 });
 	}
+
 
 	private void ConfigureSearchSuggestions()
 	{
@@ -1235,7 +835,14 @@ public sealed partial class MainForm : Form
 		};
 		int count = _navigationButtons.Count;
 		_navigationButtons.Add(navigationButton);
-		navigation.Controls.Add(navigationButton, 0, count);
+		if (navigation.RowCount == 1)
+		{
+			// Column zero is the product mark; the four destinations occupy the
+			// remaining equal columns in the new compact MD-style navigation bar.
+			navigationButton.Margin = new Padding(4, 6, 4, 6);
+			navigation.Controls.Add(navigationButton, count + 1, 0);
+		}
+		else navigation.Controls.Add(navigationButton, 0, count);
 	}
 
 	private void BuildVisualShortcutBar()
@@ -1549,15 +1156,21 @@ public sealed partial class MainForm : Form
 	{
 		bool flag = PausesBackgroundRefresh(_currentPage);
 		bool flag2 = PausesBackgroundRefresh(page);
-		if (flag2 && !flag)
-		{
-			_backgroundRefreshCancellation?.Cancel();
-		}
+		// Card/name discovery belongs to the account, not to the visible page.
+		// Cancelling it whenever Animation opened meant active users could keep
+		// downloading new cards without ever reaching the dictionary-merge step.
 		_currentPage = page;
 		bool flag3 = page == WorkspacePage.Cards;
 		if (_cardSearchField != null)
 		{
 			_cardSearchField.Visible = flag3;
+		}
+		if (_resourceSearchBar != null)
+		{
+			_resourceSearchBar.ColumnStyles[0].SizeType = flag3 ? SizeType.Percent : SizeType.Absolute;
+			_resourceSearchBar.ColumnStyles[0].Width = flag3 ? 100 : 0;
+			_resourceSearchBar.ColumnStyles[1].SizeType = flag3 ? SizeType.Absolute : SizeType.Percent;
+			_resourceSearchBar.ColumnStyles[1].Width = flag3 ? UiTheme.Scale(this, 210) : 100;
 		}
 		if (!flag3)
 		{
@@ -1615,17 +1228,13 @@ public sealed partial class MainForm : Form
 			_ => _resourcePage,
 		}).BringToFront();
 		_pageHost.PerformLayout();
-		_pageTitle.Refresh();
-		_pageDescription.Refresh();
-		_catalogBadge.Refresh();
-		_pageHost.Invalidate(invalidateChildren: true);
-		UiTheme.QueueStableRepaint(this);
+		_pageHost.Invalidate();
 		QueueLayoutSurfaceReset();
 		if (flag4)
 		{
 			QueueEmbeddedAnimationWorkspace();
 		}
-		if (!flag2 && flag && _gameRoot != null && _index != null && _allowBackgroundRefresh)
+		if (!flag2 && flag && _gameRoot != null && _index != null && _allowBackgroundRefresh && _backgroundRefreshTask?.IsCompleted != false)
 		{
 			StartGameBuildRefresh();
 		}
@@ -1752,8 +1361,7 @@ public sealed partial class MainForm : Form
 		_resettingLayoutSurface = true;
 		try
 		{
-			StabilizeEmbeddedLayout(rootLayout);
-			rootLayout.Invalidate(invalidateChildren: true);
+			rootLayout.PerformLayout();
 			_searchSuggestionPopup.BringToFront();
 		}
 		finally
@@ -1945,6 +1553,12 @@ public sealed partial class MainForm : Form
 		}
 		AppSettingsStore.Save(_settings);
 		SetGameRoot();
+		if (_gameUiBanner != null)
+		{
+			_gameUiBanner.BackgroundImageFromGame = null;
+			_gameUiBanner.LogoImageFromGame = null;
+		}
+		_ = LoadGameUiThemeAsync(installation.GameRoot);
 		ResetEmbeddedWorkspaces();
 	}
 
@@ -2101,8 +1715,8 @@ public sealed partial class MainForm : Form
 	{
 		base.UseWaitCursor = true;
 		_status.Text = "正在完整扫描当前游戏资源…";
-		await ScanAsync(forceRebuild: true);
-		_status.Text = "索引已完整重建；后台会继续刷新新卡名称与动画映射。";
+		if (await ScanAsync(forceRebuild: true))
+			_status.Text = "索引已完整重建；后台会继续刷新新卡名称与动画映射。";
 	}
 	catch (Exception ex)
 	{
@@ -2133,7 +1747,7 @@ public sealed partial class MainForm : Form
 	}
 
 	private int _scanGeneration;
-	private async Task ScanAsync(bool forceRebuild = false)
+	private async Task<bool> ScanAsync(bool forceRebuild = false)
 	{
 		int generation = ++_scanGeneration;
 		string? _gameRoot = this._gameRoot;
@@ -2142,15 +1756,21 @@ public sealed partial class MainForm : Form
 		if (_assetRoot == null || !Directory.Exists(_assetRoot))
 		{
 			MessageBox.Show(this, "未找到 LocalData\\<用户哈希>\\0000。请选择 Master Duel 游戏根目录。", Text);
-			return;
+			return false;
 		}
+		_backgroundRefreshCancellation?.Cancel();
+		_previewCancellation?.Cancel();
+		Interlocked.Increment(ref _previewGeneration);
 		base.UseWaitCursor = true;
+		if (_workspaceToolbar != null) _workspaceToolbar.Enabled = false;
 		// Keep the last stable snapshot visible until the new scan succeeds. The
 		// old eager clear produced a blank flash whenever a Build/account refresh
 		// started and made the workspace feel much heavier than it is.
 		_status.Text = "正在读取游戏资源…";
 		try
 		{
+			if (_backgroundRefreshTask != null) await _backgroundRefreshTask;
+			if (!Current()) return false;
 			string cache = CachePath();
 			GameIndex cached = null;
 			bool loadedFromPrebuilt = false;
@@ -2167,7 +1787,7 @@ public sealed partial class MainForm : Form
 					cached = null; // Keep the original cache available for recovery.
 				}
 			}
-			if (!Current()) return;
+			if (!Current()) return false;
 			if (cached == null && !forceRebuild)
 			{
 				try
@@ -2208,20 +1828,22 @@ public sealed partial class MainForm : Form
 				});
 				cached = JsonSerializer.Deserialize<GameIndex>(await File.ReadAllTextAsync(cache)) ?? new GameIndex();
 			}
-			if (!Current()) return;
+			if (!Current()) return false;
+			int unavailable = await Task.Run(() => IndexService.RemoveUnavailableCardEntries(_gameRoot!, cached));
+			if (!Current()) return false;
 			int num = cached.Textures.RemoveAll((TexRef x) => x.SourceKind == "卡框资源");
 			IReadOnlyList<TexRef> readOnlyList = BuiltInCardFrameCatalog.Load();
 			cached.Textures.AddRange(readOnlyList);
 			int num2 = IndexService.RemoveSpineAtlasParts(cached);
 			int num3 = IndexService.RemoveNonCardLocalTextures(cached);
-			if (num > 0 || readOnlyList.Count > 0 || num2 + num3 > 0)
+			if (unavailable > 0 || num > 0 || readOnlyList.Count > 0 || num2 + num3 > 0)
 			{
 				await Task.Run(delegate
 				{
 					IndexService.Save(_gameRoot, cached);
 				});
 			}
-			if (!Current()) return;
+			if (!Current()) return false;
 			_index = cached;
 			_textures.Clear();
 			_textures.AddRange(cached.Textures);
@@ -2234,7 +1856,7 @@ public sealed partial class MainForm : Form
 				try
 				{
 					await YgoCdbCardCatalog.ClassifyAlternateArtsAsync(cached);
-					if (!Current()) return;
+					if (!Current()) return false;
 					_textures.Clear();
 					_textures.AddRange(cached.Textures);
 					await Task.Run(delegate
@@ -2249,22 +1871,28 @@ public sealed partial class MainForm : Form
 				}
 			}
 			await ApplyOverFrameTagsAsync();
-			if (!Current()) return;
+			if (!Current()) return false;
 			ApplyMonsterAnimationTags();
 			await RefreshModFlagsAsync();
-			if (!Current()) return;
+			if (!Current()) return false;
 			RefreshCategories();
 			RenderList();
 			if (forceRebuild) _forceCatalogRefresh = true;
 			StartGameBuildRefresh();
+			return true;
 		}
 		catch (Exception ex3)
 		{
 			if (Current()) MessageBox.Show(this, ex3.Message, "扫描失败", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+			return false;
 		}
 		finally
 		{
-			if (Current()) base.UseWaitCursor = false;
+			if (Current())
+			{
+				base.UseWaitCursor = false;
+				if (_workspaceToolbar != null) _workspaceToolbar.Enabled = true;
+			}
 		}
 	}
 
@@ -2368,6 +1996,8 @@ public sealed partial class MainForm : Form
 				Dictionary<int, int> cardOrder = _cardCatalog.Search(q, 250).Select((CardCatalogEntry entry, int index) => (CardId: entry.CardId, index: index)).ToDictionary(((int CardId, int index) item) => item.CardId, ((int CardId, int index) item) => item.index);
 				enumerable = enumerable.OrderBy((TexRef texture) => (!int.TryParse(texture.CardKey, out var result) || !cardOrder.TryGetValue(result, out var value)) ? int.MaxValue : value).ThenBy(CardTextureRank).ThenByDescending((TexRef texture) => (long)texture.Width * (long)texture.Height);
 			}
+			if (globalSearch && !_modsOnly && _currentPage == WorkspacePage.Cards)
+				enumerable = CardResourceSearch.IncludeCatalogMatches(enumerable, _cardCatalog, q, Localizer.Language);
 			_visibleTextures.AddRange(enumerable);
 			_list.VirtualListSize = _visibleTextures.Count;
 			for (int i = 0; i < _visibleTextures.Count; i++)
@@ -2382,6 +2012,10 @@ public sealed partial class MainForm : Form
 			_list.EndUpdate();
 			_renderingResourceList = false;
 		}
+		SyncResourceGallery();
+		// VirtualListSize can add/remove the native vertical scrollbar without
+		// changing the control Bounds, so Resize alone does not recalculate this.
+		ResizeResourceColumns();
 		UpdateResourceContextBar();
 		UpdateSelectedModAction();
 		QueueResourceSelectionUpdate();
@@ -2393,7 +2027,7 @@ public sealed partial class MainForm : Form
 		{
 			DisplayResourceName(texture),
 			$"{ResourceLabel(texture.SourceKind)} / {ResourceLabel(texture.Category)}{(texture.HasMonsterAnimation ? ("  · " + ResourceLabel("动画")) : "")}{(texture.IsModded ? "  · MOD" : "")}",
-			$"{texture.Width}×{texture.Height}"
+			texture.IsCatalogOnly ? Localizer.T("search.artPending.short") : $"{texture.Width}×{texture.Height}"
 		};
 		if (_modsOnly) cells.Add(texture.ModModifiedAtUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—");
 		cells.Add(texture.RelativeBundlePath);
@@ -2415,18 +2049,14 @@ public sealed partial class MainForm : Form
 		{
 			return;
 		}
-		int num = Math.Max(UiTheme.Scale(_list, 360), _list.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - UiTheme.Scale(_list, 3));
-		int num2 = Math.Clamp((int)Math.Round((double)num * 0.35), UiTheme.Scale(_list, 130), UiTheme.Scale(_list, 225));
-		int num3 = Math.Clamp((int)Math.Round((double)num * 0.3), UiTheme.Scale(_list, 120), UiTheme.Scale(_list, 205));
-		int num4 = Math.Clamp((int)Math.Round((double)num * 0.14), UiTheme.Scale(_list, 68), UiTheme.Scale(_list, 100));
-		int num5 = Math.Max(UiTheme.Scale(_list, 72), num - num2 - num3 - num4);
-		int num6 = num2 + num3 + num4 + num5 - num;
-		if (num6 > 0)
-		{
-			num2 = Math.Max(UiTheme.Scale(_list, 110), num2 - (num6 + 1) / 2);
-			num3 = Math.Max(UiTheme.Scale(_list, 105), num3 - num6 / 2);
-			num5 = Math.Max(UiTheme.Scale(_list, 56), num - num2 - num3 - num4);
-		}
+		int num = Math.Max(1, _list.ClientSize.Width - UiTheme.Scale(_list, 3));
+		// The Bundle path is still available below the preview. On a narrow
+		// window it must not take width away from the card name or force a
+		// horizontal scrollbar across the entire primary list.
+		int num5 = num >= UiTheme.Scale(_list, 720) ? Math.Min(UiTheme.Scale(_list, 180), num / 4) : 0;
+		int num4 = Math.Min(UiTheme.Scale(_list, 90), num / 5);
+		int num3 = (num - num5 - num4) * 38 / 100;
+		int num2 = num - num3 - num4 - num5;
 		int[] array = new int[4] { num2, num3, num4, num5 };
 		for (int i = 0; i < array.Length; i++)
 		{
@@ -2478,7 +2108,7 @@ public sealed partial class MainForm : Form
 
 	private async Task ScanMissingCardAsync(CardCatalogEntry? preferred = null)
 	{
-		string cardKey = _search.Text.Trim();
+		string cardKey = Selected() is { IsCatalogOnly: true } pending ? pending.CardKey : _search.Text.Trim();
 		if (!Regex.IsMatch(cardKey, "^\\d+$"))
 		{
 			CardCatalogEntry cardCatalogEntry = preferred ?? _cardCatalog.Search(cardKey, 1).FirstOrDefault();
@@ -2523,21 +2153,19 @@ public sealed partial class MainForm : Form
 								_status.Text = $"正在定位 {cardKey}：{done:N0}/{total:N0} 个候选 Bundle…";
 							});
 						}
-					}));
+					}, allowDeepFallback: false));
 					HashSet<string> known = _textures.Select((TexRef x) => $"{x.BundlePath}\0{x.AssetFileName}\0{x.PathId}").ToHashSet<string>(StringComparer.OrdinalIgnoreCase);
 					List<TexRef> additions = result.Textures.Where((TexRef x) => known.Add($"{x.BundlePath}\0{x.AssetFileName}\0{x.PathId}")).ToList();
 					if (additions.Count > 0)
 					{
-						await YgoCdbCardCatalog.ClassifyTexturesAsync(additions);
+						try { await YgoCdbCardCatalog.ClassifyTexturesAsync(additions); }
+						catch { } // Optional third-party labels cannot block installed art.
 						HashSet<string> animationIds = MonsterAnimationIndexService.LoadBundledCardIds();
 						foreach (TexRef addition in additions)
 						{
 							TexRef texRef2 = addition;
 							bool flag = HasAnimationIdOrEquivalent(addition.CardKey, animationIds);
-							if (!flag)
-							{
-								flag = await Task.Run(() => MonsterAnimationIndexService.HasInstalledAnimation(_gameRoot, addition.CardKey));
-							}
+							// Bulk animation discovery is independent of card-name search.
 							texRef2.HasMonsterAnimation = flag;
 						}
 						_index.Textures.AddRange(additions);
@@ -2613,9 +2241,18 @@ public sealed partial class MainForm : Form
 		return _currentPage switch
 		{
 			WorkspacePage.Visuals => IsVisualAsset(texture),
-			WorkspacePage.Cards => !IsVisualAsset(texture),
+			WorkspacePage.Cards => IsCardWorkspaceAsset(texture),
 			_ => true,
 		};
+	}
+
+	private static bool IsCardWorkspaceAsset(TexRef texture)
+	{
+		// StreamingAssets also contains fonts, SDF atlases and other game UI
+		// textures.  They share the "游戏内图片" source kind with card art, so
+		// the card page must use the verified card identity/layout predicate
+		// instead of treating every built-in texture as a card.
+		return BuiltInCardFrameCatalog.IsPackagedFrame(texture) || CardTextureRules.IsCardArt(texture);
 	}
 
 	private string DisplayResourceName(TexRef texture)
@@ -2848,11 +2485,10 @@ public sealed partial class MainForm : Form
 
 	private TexRef? Selected()
 	{
-		if (_list.SelectedIndices.Count != 1)
-		{
-			return null;
-		}
-		int num = _list.SelectedIndices[0];
+		int num;
+		if (_list.SelectedIndices.Count == 1) num = _list.SelectedIndices[0];
+		else if (!_modsOnly && _resourceGallery?.SelectedIndex is int galleryIndex && galleryIndex >= 0) num = galleryIndex;
+		else return null;
 		if (num < 0 || num >= _visibleTextures.Count)
 		{
 			return null;
@@ -2868,6 +2504,7 @@ public sealed partial class MainForm : Form
 		_previewCancellation = new CancellationTokenSource();
 		CancellationToken cancellationToken = _previewCancellation.Token;
 		TexRef x = Selected();
+		UpdateResourceActionAvailability(x);
 		bool hadPreview = _preview.Image != null;
 		_previewHint.Text = ((x == null) ? "SELECT A RESOURCE\n\n选择一张卡图查看预览" : "LOADING\n\n正在读取当前 Bundle…");
 		// Keep the previous bitmap during asynchronous decoding. This avoids a
@@ -2886,7 +2523,25 @@ public sealed partial class MainForm : Form
 		}
 		try
 		{
-			byte[] data = await DecodeWithReferenceRepairAsync(x, cancellationToken);
+			byte[]? catalogPng = null;
+			if (x.IsCatalogOnly)
+			{
+				_previewHint.Text = Localizer.T("search.artPending.loading");
+				_previewHint.Visible = true;
+				_previewHint.BringToFront();
+				var resolved = await ResolveCatalogArtworkAsync(x, generation, cancellationToken);
+				if (generation != _previewGeneration || cancellationToken.IsCancellationRequested) return;
+				if (resolved == null)
+				{
+					_preview.Image?.Dispose(); _preview.Image = null;
+					_previewHint.Text = Localizer.T("search.artPending.message");
+					_info.Text = DisplayResourceName(x) + "\n" + Localizer.T("search.artPending.short");
+					return;
+				}
+				x = resolved.Value.Texture; catalogPng = resolved.Value.Png;
+				UpdateResourceActionAvailability(x);
+			}
+			byte[] data = catalogPng ?? await DecodeWithReferenceRepairAsync(x, cancellationToken);
 			cancellationToken.ThrowIfCancellationRequested();
 			GameTextureDisplayMapping displayMapping = DisplayMappingFor(x);
 			byte[] texturePng = ((!displayMapping.RequiresMapping) ? data : (await Task.Run(() => displayMapping.DecodeForDisplay(data), cancellationToken)));
@@ -2955,7 +2610,7 @@ public sealed partial class MainForm : Form
 		int oldWidth = texture.Width, oldHeight = texture.Height;
 		try
 		{
-			byte[] data = await Task.Run(() => _engine.DecodePng(texture), cancellationToken);
+			byte[] data = await Task.Run(() => _engine.DecodePng(texture, cancellationToken: cancellationToken), cancellationToken);
 			cancellationToken.ThrowIfCancellationRequested();
 			bool repaired = oldWidth != texture.Width || oldHeight != texture.Height || oldPathId != texture.PathId || !string.Equals(oldAssetFileName, texture.AssetFileName, StringComparison.Ordinal) || !string.Equals(oldBundlePath, texture.BundlePath, StringComparison.OrdinalIgnoreCase);
 			if (repaired && _gameRoot != null && _index != null)
@@ -3402,7 +3057,6 @@ public sealed partial class MainForm : Form
 		else
 		{
 			bool forceCatalogRefresh = _forceCatalogRefresh;
-			_forceCatalogRefresh = false;
 			_lastCheckedResourceSignature = "";
 			_backgroundRefreshCancellation = new CancellationTokenSource();
 			_backgroundRefreshTask = RefreshGameBuildDataAsync(_gameRoot, _index, _backgroundRefreshCancellation.Token, backgroundRefreshTask, forceCatalogRefresh);
@@ -3427,7 +3081,8 @@ public sealed partial class MainForm : Form
 			// cache and animation scan. Publish new cards before slower stages.
 			PostBackgroundStatus("正在检测已下载的新卡图与变更资源…");
 			Action<int, int, int> missingCardProgress = CreateThrottledBackgroundProgress(250, (int done, int total, int added) => $"正在合并新卡图：{done:N0}/{total:N0} · 已读取 {added:N0}…");
-			MissingCardScanResult missingCards = await Task.Run(() => IndexService.ScanMissingLocalCard(gameRoot, index, "0", missingCardProgress, cancellationToken, forceBuildRescan), cancellationToken);
+			MissingCardScanResult missingCards = await Task.Run(() => IndexService.ScanMissingLocalCard(gameRoot, index, "0", missingCardProgress, cancellationToken,
+				validateUnstampedKnownBundles: false), cancellationToken);
 			cancellationToken.ThrowIfCancellationRequested();
 			if (!IsSameWorkspace(gameRoot, localRoot, index)) return;
 			int newCards = NewCardDiscovery.Merge(index, _textures, missingCards);
@@ -3448,8 +3103,12 @@ public sealed partial class MainForm : Form
 			if (updateCatalog)
 			{
 				PostBackgroundStatus("检测到游戏资源、Build 或账号变化，正在后台读取 card_name / card_indx / card_prop…");
-				Action<int, int, int> catalogProgress = CreateThrottledBackgroundProgress(250, (int done, int total, int found) => $"正在更新四语卡片目录：{done:N0}/{total:N0} Bundle · 已定位 {found}/9 项数据…");
-				try { await Task.Run(() => GameCardCatalogUpdater.UpdateIfNeeded(gameRoot, _backgroundDataDirectory, catalogProgress, cancellationToken), cancellationToken); }
+				Action<int, int, int> catalogProgress = CreateThrottledBackgroundProgress(250, (int done, int total, int found) => $"正在更新卡片目录：{done:N0}/{total:N0} Bundle · 已定位 {found} 项字典数据…");
+				try
+				{
+					await Task.Run(() => GameCardCatalogUpdater.UpdateIfNeeded(gameRoot, _backgroundDataDirectory, catalogProgress, cancellationToken, forceCatalogRefresh), cancellationToken);
+					if (IsSameWorkspace(gameRoot, localRoot, index)) _forceCatalogRefresh = false;
+				}
 				catch (OperationCanceledException) { throw; }
 				catch (Exception ex)
 				{
@@ -3467,6 +3126,28 @@ public sealed partial class MainForm : Form
 			}
 			await ApplyOverFrameTagsAsync();
 			cancellationToken.ThrowIfCancellationRequested();
+			if (_currentPage == WorkspacePage.Animation)
+			{
+				// The animation page has its own resolver. Keep the newly published
+				// cards/names, and defer the heavier bulk animation-tag pass until
+				// returning to resources instead of cancelling dictionary discovery.
+				return;
+			}
+			if (forceBuildRescan)
+			{
+				PostBackgroundStatus("新卡与卡名已合并，正在独立校验旧卡图映射…");
+				MissingCardScanResult validated = await Task.Run(() => IndexService.ScanMissingLocalCard(gameRoot, index, "0", missingCardProgress, cancellationToken, forceRescan: true), cancellationToken);
+				cancellationToken.ThrowIfCancellationRequested();
+				if (!IsSameWorkspace(gameRoot, localRoot, index)) return;
+				newCards += NewCardDiscovery.Merge(index, _textures, validated);
+				missingCards.PendingBundles.AddRange(validated.PendingBundles);
+				if (validated.PendingBundles.Count == 0) index.LastScannedBuildId = currentBuildId;
+				await Task.Run(() =>
+				{
+					if (_backgroundDataDirectory == AppSettingsStore.AppDataRoot) IndexService.Save(gameRoot, index);
+					else ModRecoveryStore.AtomicWrite(Path.Combine(_backgroundDataDirectory, "index.json"), JsonSerializer.SerializeToUtf8Bytes(index));
+				}, cancellationToken);
+			}
 			PostBackgroundStatus("正在校验当前 Build 的官方怪兽动画索引；首次更新可能需要数分钟…");
 			Action<int, int, int> animationProgress = CreateThrottledBackgroundProgress(100, (int done, int total, int found) => $"正在更新动画索引：{done:N0}/{total:N0} Bundle · {found:N0} 项资源…");
 			PortableMonsterAnimationIndex index2 = await Task.Run(() => MonsterAnimationIndexService.EnsureCurrentIndex(gameRoot, animationProgress, cancellationToken), cancellationToken);
@@ -3905,7 +3586,9 @@ public sealed partial class MainForm : Form
 			_list.SelectedIndices.Clear();
 			_list.SelectedIndices.Add(num);
 			_list.EnsureVisible(num);
-			_list.Focus();
+			SyncResourceGallery();
+			QueueResourceSelectionUpdate();
+			if (_modsOnly) _list.Focus();
 		}
 	}
 

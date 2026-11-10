@@ -1,4 +1,4 @@
-MD Card Mod Tool 2.0.33
+MD Card Mod Tool 2.0.34
 
 2.0.30：修复导入 GIF／视频时 FFmpeg 报 Unrecognized option 'vsync'。改用新版 -fps_mode passthrough；遇到不支持该参数的旧版本时，仅重试一次兼容路径，不再发送 -vsync。抽帧帧率、画质、起始秒和帧数限制继续生效；损坏文件保留真实错误，不无限重试。导入结束或失败后退出“正在探测”状态，原动画预览保留。左下角版本号跟随实际程序版本。其他已知限制见 2.0.29／2.0.30 说明。
 

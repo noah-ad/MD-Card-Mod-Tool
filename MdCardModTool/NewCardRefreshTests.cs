@@ -17,24 +17,27 @@ namespace MdCardModTool;
 // real installation supplies read-only fixtures; every write targets a mirror.
 internal static class NewCardRefreshTests
 {
-	internal static void Run(string gameRoot, string output)
+	internal static void Run(string gameRoot, string output, string? dictionaryCache = null)
 	{
 		if (ModRecoveryStore.IsUnder(output, gameRoot)) throw new ArgumentException("Test output must be outside game.");
 		Directory.CreateDirectory(output);
-		string mirror = Path.Combine(output, "game_" + Guid.NewGuid().ToString("N"));
+		string mirror = Path.Combine(output, "steamapps_" + Guid.NewGuid().ToString("N"), "common", "MD");
 		string local = Path.Combine(mirror, "LocalData", "test001", "0000");
 		string cache = Path.Combine(output, "cache_" + Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(local);
+		string buildManifest = Path.GetFullPath(Path.Combine(mirror, "..", "..", "appmanifest_1449850.acf"));
+		File.WriteAllText(buildManifest, "\"AppState\" { \"buildid\" \"101\" }");
 		IndexService.SetPreferredLocalRoot(mirror, local);
 		string realLocal = IndexService.FindLocalRoot(gameRoot)!;
 		var engine = new ModEngine();
 		var originals = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 		var dictionaries = new Dictionary<string, string>(StringComparer.Ordinal);
-		foreach (string hash in new[] { "fa2ed7f8", "2f2cc400", "0b636c14" })
+		var dictionaryFiles = dictionaryCache != null ? GameCardCatalogUpdater.DiscoveredDictionaryBundles(gameRoot, dictionaryCache)
+			: new[] { "fa2ed7f8", "2f2cc400", "0b636c14" }.Select(hash => Path.Combine(realLocal, hash[..2], hash)).ToArray();
+		foreach (string source in dictionaryFiles)
 		{
-			string source = Path.Combine(realLocal, hash[..2], hash);
 			originals[source] = Hash(source);
-			string copied = Path.Combine(local, hash[..2], hash);
+			string copied = Path.Combine(local, Path.GetRelativePath(realLocal, source));
 			Copy(source, copied);
 			dictionaries[Path.GetFileName(engine.ReadAssetBundleContainerPaths(copied).Single())] = copied;
 		}
@@ -87,6 +90,11 @@ internal static class NewCardRefreshTests
 		Task completed = Get<Task>(form, "_backgroundRefreshTask");
 		Poll();
 		Check(ReferenceEquals(completed, Get<Task>(form, "_backgroundRefreshTask")), "successful unchanged resource fingerprint does not restart scans");
+		index.Textures.First(CardTextureRules.IsCardArt).PathId = long.MinValue;
+		File.WriteAllText(buildManifest, "\"AppState\" { \"buildid\" \"102\" }");
+		Poll();
+		Check(index.LastScannedBuildId == "102" && index.Textures.Where(CardTextureRules.IsCardArt).All(t => t.PathId != long.MinValue),
+			"production Build change validates stale known PathIDs after new-card/name publication");
 
 		AddCard("60001");
 		Search("60001");
@@ -154,6 +162,27 @@ internal static class NewCardRefreshTests
 		Poll();
 		Check(Get<string>(form, "_lastCheckedResourceSignature").Length > 0 && index.Textures.Count(CardTextureRules.IsCardArt) == 5,
 			"restored dictionary completes refresh without duplicated cards");
+		string discoveryFile = Directory.EnumerateFiles(cache, "dictionary-discovery-*.json").Single();
+		var poisoned = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(discoveryFile))!;
+		foreach (var item in poisoned["Bundles"]!.AsObject()) item.Value!["Containers"] = new System.Text.Json.Nodes.JsonArray();
+		File.WriteAllText(discoveryFile, poisoned.ToJsonString());
+		var forced = GameCardCatalogUpdater.UpdateIfNeeded(mirror, cache, forceRefresh: true);
+		Check(forced.Any(x => x.CardId == 60000 && x.SimplifiedChineseName == "计时器新卡检索测试"),
+			"force refresh bypasses an acknowledged state and poisoned negative discovery cache");
+		using (var pendingPageWork = new CancellationTokenSource())
+		{
+			Task originalTask = Get<Task>(form, "_backgroundRefreshTask");
+			CancellationTokenSource originalCancellation = Get<CancellationTokenSource>(form, "_backgroundRefreshCancellation");
+			var held = new TaskCompletionSource<bool>();
+			Set(form, "_backgroundRefreshTask", held.Task);
+			Set(form, "_backgroundRefreshCancellation", pendingPageWork);
+			typeof(MainForm).GetMethod("ShowPage", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, new object[] { WorkspacePage.Animation });
+			Check(!pendingPageWork.IsCancellationRequested, "opening Animation does not cancel in-flight card/name discovery");
+			typeof(MainForm).GetMethod("ShowPage", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, new object[] { WorkspacePage.Cards });
+			held.SetResult(true);
+			Set(form, "_backgroundRefreshTask", originalTask);
+			Set(form, "_backgroundRefreshCancellation", originalCancellation);
+		}
 		Check(originals.All(x => Hash(x.Key) == x.Value), "all real game fixture hashes unchanged");
 		form.Close();
 		Console.WriteLine("PASS production new-card refresh / 22730 / current catalog / cancelled retry / failed retry / same-build names / actual search; gameWrites=False");
@@ -190,7 +219,10 @@ internal static class NewCardRefreshTests
 		string local = IndexService.FindLocalRoot(gameRoot)!;
 		var paths = IndexService.CardIllustrationBundleCandidates(local, cardId).ToArray();
 		var hashes = paths.ToDictionary(x => x, Hash);
-		var names = GameCardCatalogUpdater.UpdateIfNeeded(gameRoot, Path.Combine(output, "cache"));
+		var names = GameCardCatalogUpdater.UpdateIfNeeded(gameRoot, Path.Combine(output, "cache"), (done, total, found) =>
+		{
+			if (done % 1000 == 0 || done == total) Console.WriteLine($"catalog scan={done}/{total}; dictionaries={found}; seconds={watch.Elapsed.TotalSeconds:0.0}");
+		});
 		var catalog = new CardCatalogService(CardCatalogService.MergeGameCatalogs(CardCatalogService.Read(CardCatalogService.BundledPath), names));
 		CardCatalogService.Write(Path.Combine(output, CardCatalogService.BundledFileName), catalog.Entries);
 		var scan = IndexService.ScanMissingLocalCard(gameRoot, new GameIndex(), cardId);

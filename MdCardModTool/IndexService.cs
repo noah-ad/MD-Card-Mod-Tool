@@ -101,7 +101,7 @@ public static class IndexService
 		FileInfo[] array = (from x in Directory.EnumerateFiles(localRoot, "*", SearchOption.AllDirectories)
 			select new FileInfo(x)).ToArray();
 		HashSet<string> hashSet = new HashSet<string>(from x in array
-			where x.Length >= 200000 && x.Length < 300000 && IsUnityBundle(x.FullName)
+			where IsUnityBundle(x.FullName)
 			select x.FullName, StringComparer.OrdinalIgnoreCase);
 		foreach (string item in EnumerateDownloadedCardIllustrationBundles(localRoot, (IReadOnlyCollection<FileInfo>)(object)array))
 		{
@@ -130,7 +130,7 @@ public static class IndexService
 		int done = 0;
 		Parallel.ForEach(files, new ParallelOptions
 		{
-			MaxDegreeOfParallelism = Math.Max(4, Environment.ProcessorCount - 1)
+			MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 4, 2, 4)
 		}, delegate((string Path, string Root, string Kind) file)
 		{
 			try
@@ -160,6 +160,16 @@ public static class IndexService
 				orderby x.SourceKind, x.Category, x.Name
 				select x).ToList()
 		};
+	}
+
+	internal static int RemoveUnavailableCardEntries(string gameRoot, GameIndex index)
+	{
+		// A portable index is only a hint, not proof that a Bundle is installed.
+		// Enumerate once rather than making thousands of random File.Exists calls.
+		var installed = new[] { FindLocalRoot(gameRoot), StreamingRoot(gameRoot) }.Where(root => root != null && Directory.Exists(root))
+			.SelectMany(root => Directory.EnumerateFiles(root!, "*", SearchOption.AllDirectories)).Select(Path.GetFullPath)
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
+		return index.Textures.RemoveAll(t => CardTextureRules.IsCardSource(t.SourceKind) && !installed.Contains(Path.GetFullPath(t.BundlePath)));
 	}
 
 	public static void BuildAndSave(string gameRoot, Action<int, int, int>? progress = null)
@@ -220,7 +230,7 @@ public static class IndexService
 		return BuiltInCardFrameCatalog.Load();
 	}
 
-	public static MissingCardScanResult ScanMissingLocalCard(string gameRoot, GameIndex index, string cardKey, Action<int, int, int>? progress = null, CancellationToken cancellationToken = default(CancellationToken), bool forceRescan = false)
+	public static MissingCardScanResult ScanMissingLocalCard(string gameRoot, GameIndex index, string cardKey, Action<int, int, int>? progress = null, CancellationToken cancellationToken = default(CancellationToken), bool forceRescan = false, bool includeNonCanonical = false, bool validateUnstampedKnownBundles = true, bool allowDeepFallback = true)
 	{
 		if (string.IsNullOrWhiteSpace(cardKey) || !cardKey.All(char.IsAsciiDigit))
 		{
@@ -234,22 +244,37 @@ public static class IndexService
 		// A dictionary cache hit must not hide a card downloaded afterwards, or a
 		// bundle whose old scan stamp survived after its texture was lost.
 		bool NeedsScan(string path) => forceRescan || !knownBundles.Contains(Path.GetFullPath(path))
-			|| !index.CardBundleScanStamps.TryGetValue(Path.GetFullPath(path), out string stamp) || stamp != BundleScanStamp(path);
-		bool NeedsStreamingScan(string path) => forceRescan || CardBundleIdentity.Find(path).Length > 0 ? NeedsScan(path)
-			: !index.CardBundleScanStamps.TryGetValue(Path.GetFullPath(path), out string stamp) || stamp != BundleScanStamp(path);
-		List<(string Path, string Root)> files = ((cardKey == "0") ? (from path in EnumerateDownloadedCardIllustrationBundles(localRoot, includeIncomplete: true)
-			where NeedsScan(path)
+			|| (index.CardBundleScanStamps.TryGetValue(Path.GetFullPath(path), out string stamp) ? stamp != BundleScanStamp(path) : validateUnstampedKnownBundles);
+		bool NeedsStreamingScan(string path) => forceRescan || CardBundleIdentity.Find(path).Length > 0 || knownBundles.Contains(Path.GetFullPath(path))
+			? NeedsScan(path) : !index.CardBundleScanStamps.TryGetValue(Path.GetFullPath(path), out string stamp) || stamp != BundleScanStamp(path);
+		IEnumerable<string> InventoryCandidates(string root) => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+			.Where(path => includeNonCanonical || CardBundleIdentity.Find(path).Length > 0 || knownBundles.Contains(Path.GetFullPath(path)));
+		List<(string Path, string Root)> files = ((cardKey == "0") ? (from path in InventoryCandidates(localRoot)
+			where NeedsStreamingScan(path)
 			select (Path: path, Root: localRoot)).ToList() : (from path in CardIllustrationBundleCandidates(localRoot, cardKey)
-			where !knownBundles.Contains(Path.GetFullPath(path))
+			where NeedsScan(path)
 			select (Path: path, Root: localRoot)).ToList());
 		if (Directory.Exists(streamingRoot))
 		{
 			IEnumerable<string> candidates = cardKey == "0"
-				? Directory.EnumerateFiles(streamingRoot, "*", SearchOption.AllDirectories).Where(path => IsUnityBundle(path) || CardBundleIdentity.Find(path).Length > 0)
+				? InventoryCandidates(streamingRoot)
 				: CardIllustrationBundleCandidates(streamingRoot, cardKey);
 			files.AddRange(from path in candidates
-				where cardKey == "0" ? NeedsStreamingScan(path) : forceRescan || !knownBundles.Contains(Path.GetFullPath(path))
+				where cardKey == "0" ? NeedsStreamingScan(path) : NeedsScan(path)
 				select (Path: path, Root: streamingRoot));
+		}
+		// A new game build may move an illustration Bundle to a different CRC
+		// path. If the canonical tcg/ocg path is absent, search installed card
+		// Bundles by their contents instead of declaring the card missing.
+		if (allowDeepFallback && cardKey != "0" && files.Count == 0 && !index.Textures.Any(t => t.CardKey == cardKey && CardTextureRules.IsCardArt(t) && File.Exists(t.BundlePath)))
+		{
+			IEnumerable<string> fallback = Directory.EnumerateFiles(localRoot, "*", SearchOption.AllDirectories)
+				.Where(path => IsUnityBundle(path))
+				.Concat(Directory.Exists(streamingRoot)
+					? Directory.EnumerateFiles(streamingRoot, "*", SearchOption.AllDirectories).Where(IsUnityBundle)
+					: Array.Empty<string>())
+				.Distinct(StringComparer.OrdinalIgnoreCase);
+			files.AddRange(fallback.Select(path => (Path: path, Root: path.StartsWith(localRoot, StringComparison.OrdinalIgnoreCase) ? localRoot : streamingRoot)));
 		}
 		int found = 0;
 		int done = 0;
@@ -257,6 +282,9 @@ public static class IndexService
 		ConcurrentDictionary<string, string> stamps = new(StringComparer.OrdinalIgnoreCase);
 		ConcurrentBag<string> pending = new();
 		ModEngine engine = new ModEngine();
+		// New downloads first: do not make today's cards wait behind tens of
+		// thousands of unchanged/older Bundles on the first account scan.
+		files = files.OrderByDescending(x => File.GetLastWriteTimeUtc(x.Path)).ToList();
 		Parallel.ForEach(files, new ParallelOptions
 		{
 			MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 4, 2, 4),
@@ -268,6 +296,12 @@ public static class IndexService
 			{
 				string sourceKind = file.Root.Equals(streamingRoot, StringComparison.OrdinalIgnoreCase) ? "游戏内图片" : "本地卡图";
 				string before = BundleScanStamp(file.Path);
+				if (!IsUnityBundle(file.Path))
+				{
+					if (expectedCard) pending.Add(file.Path);
+					else if (before == BundleScanStamp(file.Path)) stamps[Path.GetFullPath(file.Path)] = before;
+					return;
+				}
 				var scanned = engine.ScanBundle(file.Path, file.Root, sourceKind, includeDependencies: false).Textures.Where(IsDirectCardIllustration).ToArray();
 				if (before != BundleScanStamp(file.Path) || (expectedCard && scanned.Length == 0))
 				{
@@ -288,7 +322,7 @@ public static class IndexService
 			catch (OperationCanceledException) { throw; }
 			catch
 			{
-				if (expectedCard) pending.Add(file.Path);
+				pending.Add(file.Path);
 			}
 			finally
 			{
@@ -321,6 +355,33 @@ public static class IndexService
 	{
 		var file = new FileInfo(path);
 		return file.Exists ? file.Length + ":" + file.LastWriteTimeUtc.Ticks : "";
+	}
+
+	// Only use content stamps for a small, known dictionary set. Opening every
+	// downloaded Bundle for head/tail samples made a resource poll take minutes
+	// on HDDs before discovery had even started.
+	internal static string BundleContentStamp(string path)
+	{
+		var file = new FileInfo(path);
+		if (!file.Exists) return "";
+		try
+		{
+			using FileStream stream = file.OpenRead();
+			using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+			byte[] head = new byte[Math.Min(128, (int)Math.Min(file.Length, 128))];
+			int read = stream.Read(head, 0, head.Length);
+			if (read > 0) hash.AppendData(head.AsSpan(0, read));
+			if (file.Length > 128)
+			{
+				stream.Seek(-128, SeekOrigin.End);
+				byte[] tail = new byte[128];
+				read = stream.Read(tail, 0, tail.Length);
+				if (read > 0) hash.AppendData(tail.AsSpan(0, read));
+			}
+			return $"{file.Length}:{file.LastWriteTimeUtc.Ticks}:{Convert.ToHexString(hash.GetHashAndReset())}";
+		}
+		catch (IOException) { return $"{file.Length}:{file.LastWriteTimeUtc.Ticks}:locked"; }
+		catch (UnauthorizedAccessException) { return $"{file.Length}:{file.LastWriteTimeUtc.Ticks}:denied"; }
 	}
 
 	public static void NormalizeLocalCardCategory(TexRef texture)

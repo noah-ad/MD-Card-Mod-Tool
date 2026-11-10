@@ -6,6 +6,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
@@ -45,6 +46,48 @@ public sealed class ModEngine
 	public List<TexRef> ListTextures(string bundlePath, string root, string sourceKind = "")
 	{
 		return ScanBundle(bundlePath, root, sourceKind).Textures;
+	}
+
+	// NamedObject's first serialized field is m_Name. Listing it must not
+	// materialize millions of image-data array elements merely to discover a
+	// resource; dimensions/pixels are read only when that texture is requested.
+	public List<TexRef> ListTextureHeaders(string bundlePath, string root, string sourceKind = "", CancellationToken cancellationToken = default)
+	{
+		var result = new List<TexRef>();
+		AssetsManager manager = NewManager();
+		try
+		{
+			BundleFileInstance bundle = manager.LoadBundleFile(bundlePath);
+			foreach (string entry in bundle.file.GetAllFileNames())
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				AssetsFileInstance assets;
+				try { assets = manager.LoadAssetsFileFromBundle(bundle, entry); }
+				catch { continue; }
+				if (assets?.file == null) continue; // .resS entries are not serialized assets.
+				EnsureDatabase(manager, assets);
+				foreach (AssetFileInfo info in assets.file.GetAssetsOfType(AssetClassID.Texture2D))
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					try
+					{
+						AssetsFileReader reader = assets.file.Reader;
+						reader.Position = info.GetAbsoluteByteStart(assets.file);
+						string name = ReadAlignedString(reader, reader.Position + info.ByteSize);
+						result.Add(new TexRef
+						{
+							BundlePath = bundlePath, RelativeBundlePath = Path.GetRelativePath(root, bundlePath), AssetFileName = entry,
+							PathId = info.PathId, Name = name, CardKey = CardTextureRules.IsCardSource(sourceKind) && CardBundleIdentity.Find(bundlePath) is { Length: > 0 } id ? id : CardKey(name),
+							SourceKind = sourceKind, Category = "卡图（待预览）"
+						});
+					}
+					catch (OperationCanceledException) { throw; }
+					catch { }
+				}
+			}
+			return result;
+		}
+		finally { manager.UnloadAll(); }
 	}
 
 	public BundleScan ScanBundle(string bundlePath, string root, string sourceKind = "", bool includeDependencies = true)
@@ -612,8 +655,9 @@ public sealed class ModEngine
 		File.Move(text2, asset.BundlePath, overwrite: true);
 	}
 
-	public byte[] DecodePng(TexRef texture, int maxSize = 0)
+	public byte[] DecodePng(TexRef texture, int maxSize = 0, CancellationToken cancellationToken = default)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (BuiltInCardFrameCatalog.IsTransparentGradientFrame(texture))
 		{
 			byte[] array = BuiltInCardFrameCatalog.DecodeTransparentGradientFrame(texture);
@@ -650,7 +694,7 @@ public sealed class ModEngine
 		{
 			ex2 = ex;
 		}
-		TexRef texRef = ResolveTextureReference(texture);
+		TexRef texRef = ResolveTextureReference(texture, cancellationToken: cancellationToken);
 		if (texRef == null)
 		{
 			throw new InvalidDataException("找不到可对应 " + texture.Name + " 的 Texture2D；索引或手工 Mod 的资源结构可能已经改变。", ex2);
@@ -759,7 +803,7 @@ public sealed class ModEngine
 		};
 	}
 
-	public TexRef? ResolveTextureReference(TexRef texture)
+	public TexRef? ResolveTextureReference(TexRef texture, bool searchAllBundles = false, CancellationToken cancellationToken = default)
 	{
 		string text = FindReferenceRoot(texture);
 		string text2 = FindStreamingRoot(text);
@@ -768,10 +812,12 @@ public sealed class ModEngine
 		HashSet<string> hashSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		foreach (string item in list)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			try
 			{
 				string root = (IsInsideRoot(item, text) ? text : ((text2 != null && IsInsideRoot(item, text2)) ? text2 : (Path.GetDirectoryName(item) ?? text)));
-				foreach (TexRef texture2 in ScanBundle(item, root, texture.SourceKind, includeDependencies: false).Textures)
+				string kind = text2 != null && IsInsideRoot(item, text2) && CardTextureRules.IsCardSource(texture.SourceKind) ? "游戏内图片" : texture.SourceKind;
+				foreach (TexRef texture2 in ScanBundle(item, root, kind, includeDependencies: false).Textures)
 				{
 					if (hashSet.Add($"{Path.GetFullPath(texture2.BundlePath)}\0{texture2.AssetFileName}\0{texture2.PathId}"))
 					{
@@ -783,6 +829,10 @@ public sealed class ModEngine
 			{
 			}
 		}
+		bool card = CardTextureRules.IsCardSource(texture.SourceKind) && texture.CardKey.Length > 0;
+		// Never repair a card to an unrelated same-size texture (or a summon
+		// atlas). Destination card identity, not dimensions, controls writes.
+		if (card) list2.RemoveAll(x => x.CardKey != texture.CardKey || !CardTextureRules.IsCardArt(x));
 		TexRef texRef = SelectUnambiguous(list2.Where((TexRef x) => string.Equals(x.Name, texture.Name, StringComparison.OrdinalIgnoreCase)), texture);
 		if (texRef != null)
 		{
@@ -810,7 +860,7 @@ public sealed class ModEngine
 		// CRC candidates above are fast, but they do not cover every regional or
 		// legacy illustration path. Use the filename-domain identity as a second
 		// index before falling back to a broad scan.
-		if (texture.CardKey.Length > 0 && texture.CardKey.All(char.IsAsciiDigit))
+		if (searchAllBundles && texture.CardKey.Length > 0 && texture.CardKey.All(char.IsAsciiDigit))
 		{
 			foreach (string root in new[] { text, text2 }.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase))
 			{
@@ -818,6 +868,7 @@ public sealed class ModEngine
 				{
 					foreach (string file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
 					{
+						cancellationToken.ThrowIfCancellationRequested();
 						if (string.Equals(CardBundleIdentity.Find(file), texture.CardKey, StringComparison.Ordinal))
 						{
 							string bundleRoot = IsInsideRoot(file, root) ? root : (Path.GetDirectoryName(file) ?? root);
@@ -833,7 +884,36 @@ public sealed class ModEngine
 			}
 			texRef = SelectUnambiguous(list2.Where(x => x.CardKey == texture.CardKey || string.Equals(x.Name, texture.Name, StringComparison.OrdinalIgnoreCase)), texture);
 			if (texRef != null) return texRef;
+			// The logical CRC filename is not guaranteed to survive a game update
+			// (regional/legacy card paths and redirected LocalData are common). At
+			// this point inspect every Unity Bundle once and use the parsed Texture2D
+			// card identity. This is deliberately a last-resort repair path, so
+			// normal previews still use only the small candidate set above.
+			foreach (string root in new[] { text, text2 }.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase))
+			{
+				try
+				{
+					foreach (string file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Where(IndexService.IsUnityBundle))
+					{
+						cancellationToken.ThrowIfCancellationRequested();
+						if (hashSet.Contains(Path.GetFullPath(file) + "\0" + texture.AssetFileName + "\0" + texture.PathId)) continue;
+						string bundleRoot = IsInsideRoot(file, root) ? root : (Path.GetDirectoryName(file) ?? root);
+						List<TexRef> scanned;
+						try { scanned = ScanBundle(file, bundleRoot, texture.SourceKind, includeDependencies: false).Textures; }
+						catch { continue; }
+						foreach (TexRef candidate in scanned.Where(x => x.CardKey == texture.CardKey && CardTextureRules.IsCardArt(x)))
+						{
+							if (hashSet.Add($"{Path.GetFullPath(candidate.BundlePath)}\0{candidate.AssetFileName}\0{candidate.PathId}")) list2.Add(candidate);
+						}
+						texRef = SelectUnambiguous(list2.Where(x => x.CardKey == texture.CardKey || string.Equals(x.Name, texture.Name, StringComparison.OrdinalIgnoreCase)), texture);
+						if (texRef != null) return texRef;
+					}
+				}
+				catch (IOException) { }
+				catch (UnauthorizedAccessException) { }
+			}
 		}
+		if (card) return null;
 		if (texture.Width > 0 && texture.Height > 0)
 		{
 			texRef = SelectUnambiguous(list2.Where((TexRef x) => x.Width == texture.Width && x.Height == texture.Height), texture);
@@ -1048,6 +1128,7 @@ public sealed class ModEngine
 			texture.RelativeBundlePath = resolved.RelativeBundlePath;
 		}
 		texture.PathId = resolved.PathId;
+		texture.SourceKind = resolved.SourceKind;
 		texture.AssetFileName = resolved.AssetFileName;
 		if (resolved.Width > 0 && resolved.Height > 0)
 		{

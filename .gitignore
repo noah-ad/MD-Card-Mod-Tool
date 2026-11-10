@@ -11,6 +11,9 @@ tmp/
 # Shareable build artifacts are published as GitHub Release assets.
 发布/
 
+# Separately distributed FFmpeg; required locally for a complete publish.
+MdCardModTool/Assets/tools/ffmpeg.exe
+
 # IDE and OS files
 .vs/
 .idea/

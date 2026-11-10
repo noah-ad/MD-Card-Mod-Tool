@@ -15,7 +15,7 @@
 	<DebugType>None</DebugType>
 	<DebugSymbols>false</DebugSymbols>
     <Nullable>enable</Nullable>
-    <Version>2.0.33</Version>
+    <Version>2.0.34</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationIcon>Resources\app-icon.ico</ApplicationIcon>
 	<Win32Icon>Resources\app-icon.ico</Win32Icon>
@@ -69,8 +69,8 @@
 	<None Include="..\docs\testing\TEST-REPORT-v2.0.31.md" Link="data\TEST-REPORT-v2.0.31.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 	<None Include="..\docs\releases\RELEASE-NOTES-v2.0.32.md" Link="data\RELEASE-NOTES-v2.0.32.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 	<None Include="..\docs\testing\TEST-REPORT-v2.0.32.md" Link="data\TEST-REPORT-v2.0.32.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-	<None Include="..\docs\releases\RELEASE-NOTES-v2.0.33.md" Link="data\RELEASE-NOTES-v2.0.33.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-	<None Include="..\docs\testing\TEST-REPORT-v2.0.33.md" Link="data\TEST-REPORT-v2.0.33.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\docs\releases\RELEASE-NOTES-v2.0.34.md" Link="data\RELEASE-NOTES-v2.0.34.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	<None Include="..\docs\testing\TEST-REPORT-v2.0.34.md" Link="data\TEST-REPORT-v2.0.34.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 	<None Include="..\docs\licenses\THIRD_PARTY_NOTICES.md" Link="data\licenses\THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 	<None Include="..\docs\licenses\FLOOWAN-NOTICE.txt" Link="data\licenses\FLOOWAN-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\docs\licenses\ASTELLAR-NOTICE.txt" Link="data\licenses\ASTELLAR-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
@@ -124,7 +124,7 @@
 			Text="发布包缺少 data\app-icon.ico。" />
 		<Error Condition="!Exists('$(PublishDir)data\tools\texconv.exe')"
 			Text="发布包缺少 data\tools\texconv.exe。" />
-		<Warning Condition="!Exists('Assets\tools\ffmpeg.exe')"
-			Text="源码仓库未包含 FFmpeg；正式 Release 打包前必须把 ffmpeg.exe 放入 Assets\tools。" />
+		<Error Condition="!Exists('$(PublishDir)data\tools\ffmpeg.exe')"
+			Text="发行包缺少 data\tools\ffmpeg.exe。请先将已核验且许可完整的 FFmpeg 放入 Assets\tools\ffmpeg.exe，再重新发布；普通 build 不需要它。" />
 	</Target>
 </Project>

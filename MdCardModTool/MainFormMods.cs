@@ -163,6 +163,7 @@ public sealed partial class MainForm
 			_list.Columns.RemoveAt(3);
 		if (_modsOnly) UpdateModTimeHeading();
 		ResizeResourceColumns();
+		SyncResourceGallery();
 		UpdateSelectedModAction();
 	}
 

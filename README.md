@@ -1,14 +1,14 @@
-# MD Card Mod Tool 2.0.33
+# MD Card Mod Tool
 
 面向《游戏王 Master Duel》的 Windows x64 资源查看与 Mod 制作工具，支持四语卡名搜索、卡图与超框编辑、视觉资源替换、官方怪兽动画替换及 Mod 管理。
 
-2.0.33 重新整理资源页为顶部工具卡、搜索卡和单一工作区卡，修复圆角容器四角穿透和版本号不一致；完整重建索引现在会扫描当前账号资源，并强制刷新卡名字典。修复旧 PathID 预览回退链提前返回的问题。详见 [2.0.33 说明](docs/releases/RELEASE-NOTES-v2.0.33.md) 和[验证记录](docs/testing/TEST-REPORT-v2.0.33.md)。历史资料统一放在[文档目录](docs/README.md)。
+当前已发布版本为 **2.0.34**。本版重点是游戏字典新卡搜索、卡名与图片索引分离、虚拟化卡片图库，以及读取本机 Master Duel 素材的横向工作区。实现范围与限制见 [2.0.34 说明](docs/releases/RELEASE-NOTES-v2.0.34.md) 与[验证记录](docs/testing/TEST-REPORT-v2.0.34.md)。历史资料统一放在[文档目录](docs/README.md)。
 
 ## 下载
 
-下载 [最新发行版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/latest)（当前为 [2.0.33](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.33)，[完整 ZIP](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/download/v2.0.33/MD-Card-Mod-Tool-v2.0.33-win-x64.zip)），或使用 [2.0.32 回退版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.32)。建议解压到独立目录，根目录只有 `MD卡图查看替换器.exe` 与 `data` 文件夹，直接运行 EXE 即可。不要删除游戏目录中的 `_MD卡图备份`。若文件带有 Windows 下载标记，可先运行 `data\首次启动-解除下载封锁.bat`。包的 SHA-256 见 [校验文件](docs/checksums/SHA256SUMS-v2.0.33.txt)；已上传的 ZIP 保留原文件名和字节，不破坏已有下载链接。随包说明保留测试时的快照，最新发布状态以本页和 GitHub Release 为准。
+下载 [最新发行版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/latest)（当前为 [2.0.34](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.34)，[完整 ZIP](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/download/v2.0.34/MD-Card-Mod-Tool-v2.0.34-win-x64.zip)），或使用 [2.0.32 回退版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.32)。建议解压到独立目录，根目录只有 `MD卡图查看替换器.exe` 与 `data` 文件夹，直接运行 EXE 即可。不要删除游戏目录中的 `_MD卡图备份`。若文件带有 Windows 下载标记，可先运行 `data\首次启动-解除下载封锁.bat`。包的 SHA-256 见发行版附件。
 
-以后版本更新默认同步源码、README 和 GitHub 普通发行版，并标记为 Latest，不再堆叠预发行测试版。发行列表只保留最新版与一个回退版；旧发行版清理前在维护电脑归档安装包和说明，Git 标签与源码历史保留。本地程序、用户 Mod、恢复库及游戏备份不属于发行版清理范围。
+以后版本更新默认同步源码、README 和 GitHub 普通发行版，并标记为 Latest，不再堆叠预发行测试版。发行列表只保留最新版与一个回退版；旧发行版清理前会在维护电脑可恢复归档安装包和说明，Git 标签与源码历史保留。本地旧程序目录和 ZIP 也会按精确版本清单归档，不触碰源码、用户 Mod、恢复库或游戏备份。
 
 ## Mod 导出与导入（2.0.6／2.0.24／2.0.27）
 
@@ -45,9 +45,9 @@
 - 枚举所有 `LocalData/<账号>/0000`，记住每个游戏安装上次使用的账号，并允许在顶栏切换。
 - 四语界面：简体中文、繁体中文、日语、英语可即时切换；设置、主题与减少动画偏好独立保存。
 - 四语卡名和卡号检索仅出现在“卡片资源”。输入时显示带卡号、当前语言卡名和类型的候选，可用方向键与 Enter 直接定位；内建紧凑 Brotli 卡片目录包含卡号、四语卡名、卡片类型与卡框信息，检测到 Steam build ID 变化后会合并游戏内新卡数据。
-- 运行时每 60 秒后台检查 Steam Build 与已下载资源变化，动画编辑／写入时暂停；卡名字典缺失时仍收录已下载卡图，暂用卡号显示，不生成虚构名称或新增无原生演出的动画。
+- 每 60 秒后台检查 Steam Build 与已下载资源变化；候选版切入动画页不会中断已开始的卡图／卡名字典发现，批量动画标记延后执行。卡名字典缺失时仍收录已下载卡图，暂用卡号显示，不生成虚构名称或新增无原生演出的动画。
 - 现代化 Master Duel 深色工作区使用侧栏一级导航、圆角控件和按 DPI 缩放的矢量导航图标；视觉资源页顶部直接提供场地、壁纸、卡套、卡盒、硬币与头像装饰筛选。
-- 2.0.3 将圆角按钮改为控件私有离屏缓冲并整帧提交，移除页面切换和嵌入动画页中的同步重绘／嵌套消息循环；连续 hover、播放暂停、切页及窗口／DPI 缩放后不会再把旧文字或边框画到相邻区域。
+- 圆角按钮使用控件私有离屏缓冲，减少全窗口同步重绘；候选工作区按内容测量控件高度，在窄窗口重新排列顶栏。重复切页和 DPI 布局模拟有回归覆盖，但不承诺所有电脑、显示器或第三方主题下绝不出现绘制问题。
 - 预览、导出和替换共用资源解析器。Bundle、serialized file、PathID 或 Texture2D 位置过期时，会按容器、名称、尺寸、逻辑路径及 Bundle 内资产重新定位；写入前会在临时副本重新验证。
 - 卡套保持 `704×1024（正常显示）↔ 512×1024（游戏存储）`。2.0.23 普通灵摆插图按实际可见插图区编辑／预览／导出（默认约 `512×383`），写入 `512×1024` 完整纹理时保留游戏画布的位置与比例；不再把可见区强行拉满整张纹理。其他同为 `512×1024` 的壁纸等资源不会误套映射。
 - 旧版留下的 `512×1024` 灵摆超框源图会在重新打开统一编辑器时自动迁移为 `512×683` 正常编辑比例，即使该卡的当前 Texture2D 已经是 `704×1024` 超框资源。
@@ -87,6 +87,8 @@ dotnet publish '.\MdCardModTool\MdCardModTool.csproj' `
 ```
 
 发布包根目录只允许包含 EXE 与 `data`。`data` 内必须包含 `classdata.tpk`、预绑定卡图／动画索引、Astellar 超框模板、Floowan 卡框、`tools/texconv.exe`、`tools/ffmpeg.exe`、说明与第三方许可文件。
+
+FFmpeg 是单独分发的程序，不提交其大体积二进制到源码仓库。正式 `publish` 前，将已核验且许可完整的 `ffmpeg.exe` 放到 `MdCardModTool/Assets/tools`；缺少它时现在会报错停止打包，普通 `build` 不受影响，避免开发机依赖 PATH 而让其他电脑的视频功能失效。
 
 ## 安全与数据边界
 
