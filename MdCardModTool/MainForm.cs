@@ -395,6 +395,7 @@ public sealed partial class MainForm : Form
 
 	private readonly bool _allowBackgroundRefresh;
 	private readonly string _backgroundDataDirectory;
+	private bool _forceCatalogRefresh;
 
 	public MainForm()
 		: this(null)
@@ -719,6 +720,15 @@ public sealed partial class MainForm : Form
 		};
 		tableLayoutPanel2.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 		tableLayoutPanel2.Controls.Add(tableLayoutPanel, 0, 0);
+		BorderPanel topBarCard = new BorderPanel
+		{
+			Dock = DockStyle.Fill,
+			Margin = new Padding(12, 7, 12, 5),
+			Padding = new Padding(1),
+			BackColor = UiTheme.Surface,
+			CornerRadius = 10
+		};
+		topBarCard.Controls.Add(tableLayoutPanel2);
 		TableLayoutPanel tableLayoutPanel3 = new TableLayoutPanel
 		{
 			Dock = DockStyle.Fill,
@@ -732,6 +742,15 @@ public sealed partial class MainForm : Form
 		_cardSearchField = UiTheme.Field(_search);
 		tableLayoutPanel3.Controls.Add(_cardSearchField, 0, 0);
 		tableLayoutPanel3.Controls.Add(UiTheme.Field(_category), 1, 0);
+		BorderPanel searchCard = new BorderPanel
+		{
+			Dock = DockStyle.Fill,
+			Margin = new Padding(12, 7, 12, 5),
+			Padding = new Padding(1),
+			BackColor = UiTheme.SurfaceAlt,
+			CornerRadius = 10
+		};
+		searchCard.Controls.Add(tableLayoutPanel3);
 		BuildVisualShortcutBar();
 		BorderPanel borderPanel = new BorderPanel
 		{
@@ -856,6 +875,15 @@ public sealed partial class MainForm : Form
 		};
 		_workspaceSplit.Panel1.Controls.Add(panel2);
 		_workspaceSplit.Panel2.Controls.Add(panel3);
+		BorderPanel workspaceCard = new BorderPanel
+		{
+			Dock = DockStyle.Fill,
+			Margin = new Padding(12, 5, 12, 12),
+			Padding = Padding.Empty,
+			BackColor = UiTheme.Surface,
+			CornerRadius = 10
+		};
+		workspaceCard.Controls.Add(_workspaceSplit);
 		TableLayoutPanel tableLayoutPanel4 = new TableLayoutPanel
 		{
 			Dock = DockStyle.Fill,
@@ -871,9 +899,9 @@ public sealed partial class MainForm : Form
 		tableLayoutPanel4.RowStyles.Add(_resourceContextRow);
 		tableLayoutPanel4.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 		tableLayoutPanel4.Controls.Add(_visualShortcutBar, 0, 0);
-		tableLayoutPanel4.Controls.Add(tableLayoutPanel3, 0, 1);
+		tableLayoutPanel4.Controls.Add(searchCard, 0, 1);
 		tableLayoutPanel4.Controls.Add(_resourceContextBar, 0, 2);
-		tableLayoutPanel4.Controls.Add(_workspaceSplit, 0, 3);
+		tableLayoutPanel4.Controls.Add(workspaceCard, 0, 3);
 		_resourcePage.Controls.Add(tableLayoutPanel4);
 		BuildAnimationPage();
 		BuildResourceContextBar(exportMods, importMods);
@@ -998,7 +1026,7 @@ public sealed partial class MainForm : Form
 		tableLayoutPanel10.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
 		tableLayoutPanel10.RowStyles.Add(new RowStyle(SizeType.Absolute, 68f));
 		tableLayoutPanel10.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-		tableLayoutPanel10.Controls.Add(tableLayoutPanel2, 0, 0);
+		tableLayoutPanel10.Controls.Add(topBarCard, 0, 0);
 		tableLayoutPanel10.Controls.Add(tableLayoutPanel9, 0, 1);
 		tableLayoutPanel10.Controls.Add(_pageHost, 0, 2);
 		TableLayoutPanel tableLayoutPanel11 = new TableLayoutPanel
@@ -2062,50 +2090,28 @@ public sealed partial class MainForm : Form
 
 	private async Task RebuildIndexAsync()
 	{
-		if (ResourceSource.IsMobile(_gameRoot))
+		if (_gameRoot == null)
 		{
-			await ScanAsync(forceRebuild: true);
+			MessageBox.Show(this, "请先选择 Master Duel 游戏目录。", Text);
+			return;
 		}
-		else
-		{
-			if (_gameRoot == null || MessageBox.Show(this, "将用随程序提供的完整预绑定修复本地索引，并保留本机额外发现的新卡。\n\n这个操作不会重新扫描整个 LocalData，也不会再因游戏按需缓存而漏掉部分卡图。继续？", "确认修复索引", MessageBoxButtons.OKCancel, MessageBoxIcon.Asterisk) != DialogResult.OK)
-			{
-				return;
-			}
-			try
-			{
-				base.UseWaitCursor = true;
-				_status.Text = "正在用随包预绑定修复本地索引…";
-				(bool Found, string BuildId, int RetainedExtras) repair = await Task.Run(delegate
-				{
-					GameIndex repaired;
-					string buildId;
-					int retainedExtras;
-					bool num = PortableIndexService.TryRepairFromBundled(_gameRoot, _index, out repaired, out buildId, out retainedExtras);
-					if (num)
-					{
-						IndexService.Save(_gameRoot, repaired);
-					}
-					return (Found: num, BuildId: buildId, RetainedExtras: retainedExtras);
-				});
-				if (!repair.Found)
-				{
-					_status.Text = "分享包缺少预绑定索引，改为扫描当前游戏资源…";
-					await ScanAsync(forceRebuild: true);
-					return;
-				}
-				await ScanAsync();
-				_status.Text = $"索引修复完成：已恢复随包完整映射，并保留 {repair.RetainedExtras:N0} 个本机额外资源。";
-			}
-			catch (Exception ex)
-			{
-				MessageBox.Show(this, ex.Message, "索引修复失败", MessageBoxButtons.OK, MessageBoxIcon.Hand);
-			}
-			finally
-			{
-				base.UseWaitCursor = false;
-			}
-		}
+		if (MessageBox.Show(this, "将完整扫描当前账号的 LocalData 与 StreamingAssets，并重新建立卡图索引。\n\n这会修复游戏更新后旧 PathID、错误 Bundle 路径和未自动加入的新卡；不会删除 Mod 备份，也不会改写游戏资源。首次可能需要几分钟。继续？", "确认完整重建索引", MessageBoxButtons.OKCancel, MessageBoxIcon.Asterisk) != DialogResult.OK)
+			return;
+	try
+	{
+		base.UseWaitCursor = true;
+		_status.Text = "正在完整扫描当前游戏资源…";
+		await ScanAsync(forceRebuild: true);
+		_status.Text = "索引已完整重建；后台会继续刷新新卡名称与动画映射。";
+	}
+	catch (Exception ex)
+	{
+		MessageBox.Show(this, ex.Message, "索引重建失败", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+	}
+	finally
+	{
+		base.UseWaitCursor = false;
+	}
 	}
 
 	private void SetGameRoot()
@@ -2249,6 +2255,7 @@ public sealed partial class MainForm : Form
 			if (!Current()) return;
 			RefreshCategories();
 			RenderList();
+			if (forceRebuild) _forceCatalogRefresh = true;
 			StartGameBuildRefresh();
 		}
 		catch (Exception ex3)
@@ -3394,13 +3401,15 @@ public sealed partial class MainForm : Form
 		}
 		else
 		{
+			bool forceCatalogRefresh = _forceCatalogRefresh;
+			_forceCatalogRefresh = false;
 			_lastCheckedResourceSignature = "";
 			_backgroundRefreshCancellation = new CancellationTokenSource();
-			_backgroundRefreshTask = RefreshGameBuildDataAsync(_gameRoot, _index, _backgroundRefreshCancellation.Token, backgroundRefreshTask);
+			_backgroundRefreshTask = RefreshGameBuildDataAsync(_gameRoot, _index, _backgroundRefreshCancellation.Token, backgroundRefreshTask, forceCatalogRefresh);
 		}
 	}
 
-	private async Task RefreshGameBuildDataAsync(string gameRoot, GameIndex index, CancellationToken cancellationToken, Task? previousRefresh = null)
+	private async Task RefreshGameBuildDataAsync(string gameRoot, GameIndex index, CancellationToken cancellationToken, Task? previousRefresh = null, bool forceCatalogRefresh = false)
 	{
 		try
 		{
@@ -3435,7 +3444,7 @@ public sealed partial class MainForm : Form
 			RefreshCategories();
 			RefreshSearchResults();
 			string catalogWarning = "";
-			bool updateCatalog = await Task.Run(() => GameCardCatalogUpdater.NeedsUpdate(gameRoot, _backgroundDataDirectory), cancellationToken);
+			bool updateCatalog = forceCatalogRefresh || await Task.Run(() => GameCardCatalogUpdater.NeedsUpdate(gameRoot, _backgroundDataDirectory), cancellationToken);
 			if (updateCatalog)
 			{
 				PostBackgroundStatus("检测到游戏资源、Build 或账号变化，正在后台读取 card_name / card_indx / card_prop…");

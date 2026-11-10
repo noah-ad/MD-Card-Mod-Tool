@@ -39,6 +39,18 @@ public sealed class RoundedField : Panel
 		{
 			Invalidate();
 		};
+		base.Resize += delegate { UpdateRoundedRegion(); };
+		base.HandleCreated += delegate { UpdateRoundedRegion(); };
+		base.DpiChangedAfterParent += delegate { UpdateRoundedRegion(); };
+	}
+
+	private void UpdateRoundedRegion()
+	{
+		if (base.Width <= 1 || base.Height <= 1) return;
+		using GraphicsPath path = UiTheme.RoundedPath(new Rectangle(0, 0, base.Width, base.Height), UiTheme.Scale(this, CornerRadius));
+		Region? old = base.Region;
+		base.Region = new Region(path);
+		old?.Dispose();
 	}
 
 	protected override void OnPaintBackground(PaintEventArgs e)

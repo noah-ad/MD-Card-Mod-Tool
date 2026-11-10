@@ -177,6 +177,7 @@ public static class IndexService
 			Textures = textures.ToList(),
 			AlternateArtIndexVersion = (gameIndex?.AlternateArtIndexVersion ?? 0),
 			BuiltInCardIndexVersion = (gameIndex?.BuiltInCardIndexVersion ?? 0),
+			LastScannedBuildId = gameIndex?.LastScannedBuildId ?? "",
 			CheckedLocalBundlePaths = (gameIndex?.CheckedLocalBundlePaths ?? new List<string>()),
 			CardBundleScanStamps = gameIndex?.CardBundleScanStamps ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
 		});

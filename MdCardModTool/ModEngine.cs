@@ -783,10 +783,6 @@ public sealed class ModEngine
 			{
 			}
 		}
-		if (list2.Count == 0)
-		{
-			return null;
-		}
 		TexRef texRef = SelectUnambiguous(list2.Where((TexRef x) => string.Equals(x.Name, texture.Name, StringComparison.OrdinalIgnoreCase)), texture);
 		if (texRef != null)
 		{

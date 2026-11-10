@@ -120,6 +120,8 @@ public class RoundedButton : Button
 			Invalidate();
 			QueueParentRepaint(base.Bounds);
 		};
+		base.Resize += delegate { UpdateRoundedRegion(); };
+		base.DpiChangedAfterParent += delegate { UpdateRoundedRegion(); };
 	}
 
 	protected override void OnPaintBackground(PaintEventArgs e)
@@ -222,10 +224,19 @@ public class RoundedButton : Button
 	protected override void OnHandleCreated(EventArgs e)
 	{
 		base.OnHandleCreated(e);
-		base.Region = null;
+		UpdateRoundedRegion();
 		Rectangle bounds = base.Bounds;
 		bounds.Inflate(UiTheme.Scale(this, 3), UiTheme.Scale(this, 3));
 		QueueParentRepaint(bounds);
+	}
+
+	private void UpdateRoundedRegion()
+	{
+		if (base.Width <= 1 || base.Height <= 1) return;
+		using GraphicsPath path = UiTheme.RoundedPath(new Rectangle(0, 0, base.Width, base.Height), UiTheme.Scale(this, CornerRadius));
+		Region? old = base.Region;
+		base.Region = new Region(path);
+		old?.Dispose();
 	}
 
 	protected override void OnSizeChanged(EventArgs e)
