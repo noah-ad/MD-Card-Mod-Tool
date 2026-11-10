@@ -2,11 +2,11 @@
 
 面向《游戏王 Master Duel》的 Windows x64 资源查看与 Mod 制作工具，支持四语卡名搜索、卡图与超框编辑、视觉资源替换、官方怪兽动画替换及 Mod 管理。
 
-当前已发布版本为 **2.0.34**。本版重点是游戏字典新卡搜索、卡名与图片索引分离、虚拟化卡片图库，以及读取本机 Master Duel 素材的横向工作区。实现范围与限制见 [2.0.34 说明](docs/releases/RELEASE-NOTES-v2.0.34.md) 与[验证记录](docs/testing/TEST-REPORT-v2.0.34.md)。历史资料统一放在[文档目录](docs/README.md)。
+当前已发布版本为 **2.0.35**。本版在 2.0.34 的新卡搜索、卡名与图片索引分离、虚拟化卡片图库和 MD 风格工作区基础上，修复选中卡图后图库缩略图仍停留在“读取中”的问题。实现范围与限制见 [2.0.35 说明](docs/releases/RELEASE-NOTES-v2.0.35.md) 与[验证记录](docs/testing/TEST-REPORT-v2.0.35.md)。历史资料统一放在[文档目录](docs/README.md)。
 
 ## 下载
 
-下载 [最新发行版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/latest)（当前为 [2.0.34](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.34)，[完整 ZIP](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/download/v2.0.34/MD-Card-Mod-Tool-v2.0.34-win-x64.zip)），或使用 [2.0.32 回退版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.32)。建议解压到独立目录，根目录只有 `MD卡图查看替换器.exe` 与 `data` 文件夹，直接运行 EXE 即可。不要删除游戏目录中的 `_MD卡图备份`。若文件带有 Windows 下载标记，可先运行 `data\首次启动-解除下载封锁.bat`。包的 SHA-256 见发行版附件。
+下载 [最新发行版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/latest)（当前为 [2.0.35](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.35)，[完整 ZIP](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/download/v2.0.35/MD-Card-Mod-Tool-v2.0.35-win-x64.zip)），或使用 [2.0.34 回退版](https://github.com/noah-ad/MD-Card-Mod-Tool/releases/tag/v2.0.34)。建议解压到独立目录，根目录只有 `MD卡图查看替换器.exe` 与 `data` 文件夹，直接运行 EXE 即可。不要删除游戏目录中的 `_MD卡图备份`。若文件带有 Windows 下载标记，可先运行 `data\首次启动-解除下载封锁.bat`。包的 SHA-256 见发行版附件。
 
 以后版本更新默认同步源码、README 和 GitHub 普通发行版，并标记为 Latest，不再堆叠预发行测试版。发行列表只保留最新版与一个回退版；旧发行版清理前会在维护电脑可恢复归档安装包和说明，Git 标签与源码历史保留。本地旧程序目录和 ZIP 也会按精确版本清单归档，不触碰源码、用户 Mod、恢复库或游戏备份。
 

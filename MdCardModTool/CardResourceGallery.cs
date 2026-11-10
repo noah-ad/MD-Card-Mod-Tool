@@ -77,6 +77,21 @@ internal sealed class CardResourceGallery : ScrollableControl
 		if (raiseEvent) SelectionChanged?.Invoke(this, EventArgs.Empty);
 	}
 
+	/// <summary>
+	/// Reuse the already verified inspector bitmap for the selected tile.  This
+	/// closes the gap between the async right-hand preview and the gallery when
+	/// a card was resolved from a catalog-only row or when a thumbnail request
+	/// was cancelled by a rapid search change.
+	/// </summary>
+	public void SetImage(TexRef texture, Bitmap image)
+	{
+		string key = CacheKey(texture);
+		if (_images.TryGetValue(key, out Bitmap? old)) old.Dispose();
+		_images[key] = image;
+		_loading.Remove(key);
+		Invalidate();
+	}
+
 	private static string CacheKey(TexRef texture) => $"{texture.BundlePath}\0{texture.AssetFileName}\0{texture.PathId}\0{texture.CardKey}";
 
 	private void UpdateScrollSize()

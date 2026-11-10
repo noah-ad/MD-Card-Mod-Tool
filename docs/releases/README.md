@@ -4,6 +4,7 @@
 
 ## 按版本查看
 
+- [2.0.35](RELEASE-NOTES-v2.0.35.md)
 - [2.0.34](RELEASE-NOTES-v2.0.34.md)
 - [2.0.33](RELEASE-NOTES-v2.0.33.md)
 - [2.0.32](RELEASE-NOTES-v2.0.32.md)

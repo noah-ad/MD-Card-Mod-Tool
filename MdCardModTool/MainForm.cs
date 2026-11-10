@@ -2554,6 +2554,7 @@ public sealed partial class MainForm : Form
 			}
 			_preview.Image?.Dispose();
 			_preview.Image = bitmap;
+			_resourceGallery?.SetImage(x, new Bitmap(bitmap));
 			_previewHint.Visible = false;
 			string text = (displayMapping.RequiresMapping ? ("\n" + displayMapping.EditorSummary + " · 写入时自动反向映射") : "");
 			if (_gameRoot != null && CardTextureRules.IsFullCardArt(x) && ushort.TryParse(x.CardKey, out var result))
